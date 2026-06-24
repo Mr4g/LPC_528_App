@@ -345,3 +345,98 @@ Operator nie używa diagnostycznych endpointów `POST /api/lpc/connect` i `POST 
 3. Dokończyć backup CSV ponad obecny router szkieletowy.
 4. Zastąpić placeholder listy punktów pełnym wykresem ciśnienia.
 5. Podłączyć sprzętowy scanner HID bez inputu UI, jeśli będzie wymagany.
+
+## Produkcyjny start programu LPC (script vs mock)
+
+Domyślnie aplikacja jest bezpieczna dla developmentu i używa:
+
+```env
+PROGRAM_START_MODE=mock
+```
+
+W tym trybie skan wybiera program i zapisuje `currentTest`, ale **nie wysyła programu do fizycznego LPC**. UI pokazuje komunikat `TRYB MOCK — program nie jest wysyłany do LPC`.
+
+Aby realnie uruchamiać program na LPC tak jak w Node-RED (`python ... eip_start_program.py <program>`), ustaw w `.env` tryb `script`:
+
+Windows:
+
+```env
+PROGRAM_START_MODE=script
+PROGRAM_START_COMMAND=python
+PROGRAM_START_SCRIPT_PATH=C:\Projekty\LPC528_App\scripts\eip_start_program.py
+```
+
+Linux:
+
+```env
+PROGRAM_START_MODE=script
+PROGRAM_START_COMMAND=python3
+PROGRAM_START_SCRIPT_PATH=/root/eip_start_program.py
+```
+
+Dla programu `P01` backend uruchomi proces w formie: `PROGRAM_START_COMMAND PROGRAM_START_SCRIPT_PATH 1`. Wynik startu zawiera `mode`, `command`, `scriptPath`, `args`, `stdout`, `stderr`, `exitCode`, `errorMessage` i `message`, a ta sama odpowiedź wraca z `/api/scan` i eventu Socket.IO `scan:accepted`.
+
+### Diagnostyka ProgramStarter
+
+Sprawdź aktualną konfigurację:
+
+```bash
+curl http://localhost:3000/api/programs/config
+```
+
+Test bez skanowania:
+
+```bash
+curl -X POST http://localhost:3000/api/programs/start \
+  -H "Content-Type: application/json" \
+  -d '{"program":1,"barcode":"5901234123457"}'
+```
+
+Jeśli `success=false`, sprawdź pola `stdout`, `stderr`, `exitCode` i `errorMessage`. Najczęstsze przyczyny to pusty `PROGRAM_START_SCRIPT_PATH`, brak pliku skryptu, brak komendy `python`/`python3` w `PATH` albo błąd skryptu.
+
+## Watchdog połączenia LPC / odłączony kabel
+
+Socket TCP może przez chwilę wyglądać na połączony po fizycznym odpięciu kabla. Dlatego klient LPC ma watchdog i heartbeat konfigurowane przez `.env`:
+
+```env
+LPC_HEARTBEAT_ENABLED=true
+LPC_HEARTBEAT_INTERVAL_MS=5000
+LPC_HEARTBEAT_TIMEOUT_MS=12000
+LPC_STALE_CONNECTION_TIMEOUT_MS=15000
+LPC_HEARTBEAT_PAYLOAD=
+LPC_RECONNECT_DELAY_MS=15000
+```
+
+Domyślnie `LPC_HEARTBEAT_PAYLOAD` jest pusty, więc aplikacja **nie wysyła żadnych dodatkowych znaków do LPC podczas testu**. Watchdog sprawdza stan socketu, TCP keepalive, `destroyed` i `writable`. Jeśli chcesz wymusić zapis diagnostyczny, możesz ustawić payload, np. `\r\n`, ale zrób to dopiero po potwierdzeniu, że nie zakłóca testów LPC.
+
+Endpointy diagnostyczne:
+
+```bash
+curl -X POST http://localhost:3000/api/lpc/heartbeat-test
+curl -X POST http://localhost:3000/api/lpc/force-refresh-status
+curl http://localhost:3000/api/lpc/status
+```
+
+Status zawiera m.in. `lastDataReceivedAt`, `lastSuccessfulWriteAt`, `lastHeartbeatAt`, `staleConnectionDetectedAt`, `socketDestroyed`, `socketWritable`, `nextReconnectAt` i `reconnectAttemptCount`.
+
+### Test utraty połączenia
+
+1. Podłącz LPC i uruchom `npm run dev`.
+2. Poczekaj aż UI pokaże `Połączony` albo sprawdź `curl http://localhost:3000/api/lpc/status`.
+3. Odłącz kabel sieciowy od LPC.
+4. Aplikacja powinna przejść w `error`, `disconnected` albo `reconnecting`; przy zaplanowanej próbie zobaczysz `nextReconnectAt`.
+5. Jeśli system operacyjny jeszcze nie wykrył zerwania, użyj diagnostyki w UI lub:
+   ```bash
+   curl -X POST http://localhost:3000/api/lpc/heartbeat-test
+   curl -X POST http://localhost:3000/api/lpc/force-refresh-status
+   ```
+6. Po ponownym podłączeniu kabla backend próbuje połączyć się ponownie co `LPC_RECONNECT_DELAY_MS` (domyślnie 15 sekund).
+
+### Pełny test realnego startu LPC
+
+1. Sprawdź konfigurację: `GET /api/programs/config`.
+2. Ustaw `PROGRAM_START_MODE=script`, `PROGRAM_START_COMMAND` i `PROGRAM_START_SCRIPT_PATH`.
+3. Zrestartuj backend.
+4. Przetestuj `POST /api/programs/start` dla programu `1`.
+5. Dopiero po sukcesie wykonaj skan lub `POST /api/scan` z barcode `5901234123457`.
+6. Oczekiwane: UI pokazuje `P01`, `Program P01 wysłany do LPC`, stream LPC aktualizuje live dane i wykres, a po końcowym wyniku tabela pokazuje ACCEPT/REJECT oraz pomiary.

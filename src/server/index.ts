@@ -10,6 +10,7 @@ import { LpcTcpClient } from '../lpc/LpcTcpClient';
 import { LpcTestCurveBuffer } from '../lpc/LpcTestCurveBuffer';
 import { ResultHistoryStore } from '../lpc/ResultHistoryStore';
 import { createProgramStarter } from '../programs/ProgramStarter';
+import { createProgramsRouter } from '../programs/programsRouter';
 import { CurrentTestStore } from '../scanner/currentTestStore';
 import { createScannerRouter } from '../scanner/scannerRouter';
 
@@ -30,6 +31,11 @@ const lpcTcpClient = new LpcTcpClient({
   reconnectEnabled: config.LPC_RECONNECT_ENABLED,
   reconnectDelayMs: config.LPC_RECONNECT_DELAY_MS,
   connectTimeoutMs: config.LPC_CONNECT_TIMEOUT_MS,
+  heartbeatEnabled: config.LPC_HEARTBEAT_ENABLED,
+  heartbeatIntervalMs: config.LPC_HEARTBEAT_INTERVAL_MS,
+  heartbeatTimeoutMs: config.LPC_HEARTBEAT_TIMEOUT_MS,
+  staleConnectionTimeoutMs: config.LPC_STALE_CONNECTION_TIMEOUT_MS,
+  heartbeatPayload: config.LPC_HEARTBEAT_PAYLOAD,
 });
 const lpcCurveBuffer = new LpcTestCurveBuffer({
   maxPoints: config.LPC_STREAM_BUFFER_LIMIT,
@@ -81,6 +87,7 @@ app.use((_req, res, next) => {
 });
 app.use(express.json());
 app.use('/api/backup', createBackupRouter());
+app.use('/api/programs', createProgramsRouter({ config, programStarter }));
 app.use('/api/lpc', createLpcRouter({
   config,
   tcpClient: lpcTcpClient,

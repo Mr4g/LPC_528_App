@@ -35,6 +35,16 @@ export function createLpcRouter(options: {
       lastError: state.lastError,
       reconnectAttemptCount: state.reconnectAttemptCount,
       nextReconnectAt: state.nextReconnectAt,
+      lastDataReceivedAt: state.lastDataReceivedAt,
+      lastSuccessfulWriteAt: state.lastSuccessfulWriteAt,
+      lastHeartbeatAt: state.lastHeartbeatAt,
+      heartbeatEnabled: state.heartbeatEnabled,
+      heartbeatIntervalMs: state.heartbeatIntervalMs,
+      heartbeatTimeoutMs: state.heartbeatTimeoutMs,
+      staleConnectionTimeoutMs: state.staleConnectionTimeoutMs,
+      staleConnectionDetectedAt: state.staleConnectionDetectedAt,
+      socketDestroyed: state.socketDestroyed,
+      socketWritable: state.socketWritable,
       lastRawLinesCount: options.lineProcessor.getLastRawLinesCount(),
       curvePointCount: options.curveBuffer.getPoints().length,
     });
@@ -71,6 +81,16 @@ export function createLpcRouter(options: {
   router.post('/check-port', async (_req, res) => {
     const result = await checkLpcPort(options.config.LPC_HOST, options.config.LPC_PORT, options.config.LPC_CONNECT_TIMEOUT_MS);
     res.json(result);
+  });
+
+  router.post('/force-refresh-status', (_req, res) => {
+    const state = options.tcpClient.forceRefreshStatus();
+    res.json({ ok: true, state });
+  });
+
+  router.post('/heartbeat-test', async (_req, res) => {
+    const result = await options.tcpClient.performHeartbeatCheck();
+    res.status(result.ok ? 200 : 409).json(result);
   });
 
   router.post('/mock-line', (req, res) => {

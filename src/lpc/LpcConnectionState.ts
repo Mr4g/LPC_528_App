@@ -14,6 +14,11 @@ export interface LpcConnectionStateOptions {
   reconnectEnabled: boolean;
   reconnectDelayMs: number;
   connectTimeoutMs: number;
+  heartbeatEnabled: boolean;
+  heartbeatIntervalMs: number;
+  heartbeatTimeoutMs: number;
+  staleConnectionTimeoutMs: number;
+  heartbeatPayload: string;
 }
 
 export interface LpcConnectionStateSnapshot extends LpcConnectionStateOptions {
@@ -24,8 +29,13 @@ export interface LpcConnectionStateSnapshot extends LpcConnectionStateOptions {
   lastDisconnectedAt: string | null;
   lastError: string | null;
   socketDestroyed: boolean;
+  socketWritable: boolean;
   reconnectAttemptCount: number;
   nextReconnectAt: string | null;
+  lastDataReceivedAt: string | null;
+  lastSuccessfulWriteAt: string | null;
+  lastHeartbeatAt: string | null;
+  staleConnectionDetectedAt: string | null;
 }
 
 export class LpcConnectionState {
@@ -36,8 +46,13 @@ export class LpcConnectionState {
   private lastDisconnectedAt: string | null = null;
   private lastError: string | null = null;
   private socketDestroyed = true;
+  private socketWritable = false;
   private reconnectAttemptCount = 0;
   private nextReconnectAt: string | null = null;
+  private lastDataReceivedAt: string | null = null;
+  private lastSuccessfulWriteAt: string | null = null;
+  private lastHeartbeatAt: string | null = null;
+  private staleConnectionDetectedAt: string | null = null;
 
   constructor(private readonly options: LpcConnectionStateOptions) {}
 
@@ -45,6 +60,7 @@ export class LpcConnectionState {
     this.status = 'connecting';
     this.connected = false;
     this.socketDestroyed = false;
+    this.socketWritable = false;
     this.lastConnectionAttemptAt = new Date().toISOString();
     this.nextReconnectAt = null;
   }
@@ -53,9 +69,11 @@ export class LpcConnectionState {
     this.status = 'connected';
     this.connected = true;
     this.socketDestroyed = false;
+    this.socketWritable = true;
     this.lastConnectedAt = new Date().toISOString();
     this.lastError = null;
     this.nextReconnectAt = null;
+    this.staleConnectionDetectedAt = null;
   }
 
   setDisconnecting(): void {
@@ -63,10 +81,11 @@ export class LpcConnectionState {
     this.connected = false;
   }
 
-  setDisconnected(socketDestroyed = true): void {
+  setDisconnected(socketDestroyed = true, socketWritable = false): void {
     this.status = 'disconnected';
     this.connected = false;
     this.socketDestroyed = socketDestroyed;
+    this.socketWritable = socketWritable;
     this.lastDisconnectedAt = new Date().toISOString();
     this.nextReconnectAt = null;
   }
@@ -75,16 +94,43 @@ export class LpcConnectionState {
     this.status = 'reconnecting';
     this.connected = false;
     this.socketDestroyed = true;
+    this.socketWritable = false;
     this.reconnectAttemptCount += 1;
     this.lastConnectionAttemptAt = new Date().toISOString();
     this.nextReconnectAt = nextReconnectAt;
   }
 
-  setError(error: Error | string, socketDestroyed = true): void {
+  setError(error: Error | string, socketDestroyed = true, socketWritable = false): void {
     this.status = 'error';
     this.connected = false;
     this.socketDestroyed = socketDestroyed;
+    this.socketWritable = socketWritable;
     this.lastError = typeof error === 'string' ? error : error.message;
+  }
+
+  setStaleConnectionDetected(error = 'Stale LPC connection detected'): void {
+    this.staleConnectionDetectedAt = new Date().toISOString();
+    this.setError(error, true, false);
+  }
+
+  recordDataReceived(): void {
+    this.lastDataReceivedAt = new Date().toISOString();
+  }
+
+  recordSuccessfulWrite(): void {
+    this.lastSuccessfulWriteAt = new Date().toISOString();
+  }
+
+  recordHeartbeat(): void {
+    this.lastHeartbeatAt = new Date().toISOString();
+  }
+
+  updateSocketFlags(socketDestroyed: boolean, socketWritable: boolean): void {
+    this.socketDestroyed = socketDestroyed;
+    this.socketWritable = socketWritable;
+    if (this.status === 'connected') {
+      this.connected = !socketDestroyed && socketWritable;
+    }
   }
 
   resetReconnectAttempts(): void {
@@ -109,8 +155,13 @@ export class LpcConnectionState {
       lastDisconnectedAt: this.lastDisconnectedAt,
       lastError: this.lastError,
       socketDestroyed: this.socketDestroyed,
+      socketWritable: this.socketWritable,
       reconnectAttemptCount: this.reconnectAttemptCount,
       nextReconnectAt: this.nextReconnectAt,
+      lastDataReceivedAt: this.lastDataReceivedAt,
+      lastSuccessfulWriteAt: this.lastSuccessfulWriteAt,
+      lastHeartbeatAt: this.lastHeartbeatAt,
+      staleConnectionDetectedAt: this.staleConnectionDetectedAt,
     };
   }
 }

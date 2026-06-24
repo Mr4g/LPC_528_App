@@ -91,9 +91,12 @@ export interface ProgramStartResult {
   success: boolean;
   mode: 'mock' | 'script';
   command?: string;
+  scriptPath?: string;
+  args?: string[];
   stdout?: string;
   stderr?: string;
   exitCode?: number | null;
+  errorMessage?: string;
   message: string;
 }
 

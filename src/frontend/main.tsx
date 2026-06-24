@@ -1,6 +1,7 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import type { BarcodeScan, CurrentTest, LpcResult, LpcStreamPoint, ProgramStartRequest, ProgramStartResult } from '../shared/types';
+import { getProgramStartOperatorMessage } from './programStartMessages';
 import './styles.css';
 
 interface ScanAcceptedPayload {
@@ -41,6 +42,12 @@ interface LpcStatusPayload {
   nextReconnectAt: string | null;
   lastRawLinesCount?: number;
   curvePointCount?: number;
+  lastDataReceivedAt?: string | null;
+  lastSuccessfulWriteAt?: string | null;
+  lastHeartbeatAt?: string | null;
+  staleConnectionDetectedAt?: string | null;
+  socketDestroyed?: boolean;
+  socketWritable?: boolean;
 }
 
 interface LpcPortCheckPayload {
@@ -142,6 +149,10 @@ function App() {
   const [portCheck, setPortCheck] = useState<LpcPortCheckPayload | null>(null);
   const [mockLine, setMockLine] = useState('');
   const [mockLineResponse, setMockLineResponse] = useState<string | null>(null);
+  const [heartbeatResponse, setHeartbeatResponse] = useState<string | null>(null);
+  const [forceRefreshResponse, setForceRefreshResponse] = useState<string | null>(null);
+  const [diagnosticProgram, setDiagnosticProgram] = useState('1');
+  const [programStartTestResponse, setProgramStartTestResponse] = useState<string | null>(null);
   const barcodeInputRef = useRef<HTMLInputElement | null>(null);
 
   async function refreshLpcStatus() {
@@ -284,6 +295,27 @@ function App() {
     }
   }
 
+  async function heartbeatTest() {
+    const response = await fetch('/api/lpc/heartbeat-test', { method: 'POST' });
+    setHeartbeatResponse(JSON.stringify(await response.json()));
+    await refreshLpcStatus();
+  }
+
+  async function forceRefreshStatus() {
+    const response = await fetch('/api/lpc/force-refresh-status', { method: 'POST' });
+    setForceRefreshResponse(JSON.stringify(await response.json()));
+    await refreshLpcStatus();
+  }
+
+  async function testProgramStart() {
+    const response = await fetch('/api/programs/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ program: Number(diagnosticProgram), barcode: 'diagnostic_program_start' }),
+    });
+    setProgramStartTestResponse(JSON.stringify(await response.json()));
+  }
+
   async function sendMockLine() {
     const response = await fetch('/api/lpc/mock-line', {
       method: 'POST',
@@ -313,7 +345,7 @@ function App() {
     if (!lpcStatus) return 'Niepołączony';
     if (lpcStatus.status === 'idle') return 'Niepołączony';
     if (lpcStatus.status === 'connecting') return 'Łączenie...';
-    if (lpcStatus.status === 'connected' && lpcStatus.connected) return 'Połączony';
+    if (lpcStatus.status === 'connected' && lpcStatus.connected && !lpcStatus.lastError && lpcStatus.socketDestroyed !== true && lpcStatus.socketWritable !== false) return 'Połączony';
     if (lpcStatus.status === 'reconnecting') return 'Ponawianie połączenia...';
     if (lpcStatus.status === 'error') return 'Błąd połączenia';
     if (lpcStatus.status === 'disconnecting') return 'Rozłączanie...';
@@ -333,6 +365,8 @@ function App() {
             <small>{lpcStatus ? `${lpcStatus.host}:${lpcStatus.port}` : 'status...'}</small>
             {lpcStatus?.lastError && <p className="lpc-error">{lpcStatus.lastError}</p>}
             {lpcStatus?.nextReconnectAt && <p className="lpc-meta">Ponowna próba: {lpcStatus.nextReconnectAt}</p>}
+            {lpcStatus?.lastDataReceivedAt && <p className="lpc-meta">Dane: {lpcStatus.lastDataReceivedAt}</p>}
+            {lpcStatus?.lastHeartbeatAt && <p className="lpc-meta">Heartbeat: {lpcStatus.lastHeartbeatAt}</p>}
             {lpcStatus && <p className="lpc-meta">Reconnect: {lpcStatus.reconnectAttemptCount}</p>}
           </div>
         </section>
@@ -360,7 +394,17 @@ function App() {
               <div><dt>Matched key</dt><dd>{lastAccepted.currentTest.matchedKey}</dd></div>
               <div><dt>Program</dt><dd>{lastAccepted.currentTest.programText}</dd></div>
               <div><dt>Selected at</dt><dd>{lastAccepted.currentTest.selectedAt}</dd></div>
-              <div><dt>Start programu</dt><dd>{lastAccepted.programStart.message}</dd></div>
+              <div><dt>Status LPC start</dt><dd>{getProgramStartOperatorMessage(lastAccepted.programStart, lastAccepted.currentTest.programText)}</dd></div>
+              <div><dt>Mode</dt><dd>{lastAccepted.programStart.mode}</dd></div>
+              <div><dt>Command</dt><dd>{lastAccepted.programStart.command ?? '-'}</dd></div>
+              <div><dt>Script path</dt><dd>{lastAccepted.programStart.scriptPath ?? '-'}</dd></div>
+              <div><dt>Args</dt><dd>{lastAccepted.programStart.args?.join(' ') ?? '-'}</dd></div>
+              <div><dt>Exit code</dt><dd>{lastAccepted.programStart.exitCode ?? '-'}</dd></div>
+              <div><dt>Success</dt><dd>{lastAccepted.programStart.success ? 'OK' : 'FAIL'}</dd></div>
+              <div><dt>Message</dt><dd>{lastAccepted.programStart.message}</dd></div>
+              {lastAccepted.programStart.errorMessage && <div><dt>Error</dt><dd>{lastAccepted.programStart.errorMessage}</dd></div>}
+              {lastAccepted.programStart.stdout && <div><dt>stdout</dt><dd><pre>{lastAccepted.programStart.stdout}</pre></dd></div>}
+              {lastAccepted.programStart.stderr && <div><dt>stderr</dt><dd><pre>{lastAccepted.programStart.stderr}</pre></dd></div>}
             </dl>
           </section>
         )}
@@ -380,6 +424,8 @@ function App() {
             <button type="button" onClick={() => void lpcAction('connect')}>Połącz</button>
             <button type="button" onClick={() => void lpcAction('disconnect')}>Rozłącz</button>
             <button type="button" onClick={() => void checkLpcPort()}>Sprawdź port LPC</button>
+            <button type="button" onClick={() => void heartbeatTest()}>Heartbeat test</button>
+            <button type="button" onClick={() => void forceRefreshStatus()}>Force refresh status</button>
           </div>
           {lpcActionMessage && <p>{lpcActionMessage}</p>}
           {portCheck && (
@@ -387,6 +433,14 @@ function App() {
               {portCheck.reachable ? 'Port dostępny' : 'Port niedostępny'} ({portCheck.latencyMs} ms) {portCheck.error ?? ''}
             </p>
           )}
+          {heartbeatResponse && <p>{heartbeatResponse}</p>}
+          {forceRefreshResponse && <p>{forceRefreshResponse}</p>}
+          <div className="program-start-test">
+            <h3>Test startu programu</h3>
+            <input value={diagnosticProgram} onChange={(event) => setDiagnosticProgram(event.target.value)} inputMode="numeric" />
+            <button type="button" onClick={() => void testProgramStart()}>Start P{String(Number(diagnosticProgram) || 0).padStart(2, '0')}</button>
+            {programStartTestResponse && <pre>{programStartTestResponse}</pre>}
+          </div>
           <textarea
             value={mockLine}
             onChange={(event) => setMockLine(event.target.value)}

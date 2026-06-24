@@ -268,13 +268,71 @@ npm run dev:frontend:force
 
 Konfiguracja Vite domyślnie używa cache w katalogu systemowym temp (`lpc-528-app-vite-cache`), więc nie powinna już korzystać z `node_modules/.vite`.
 
+## Realne testy na LPC
+
+Do testów bezpośrednio na LPC ustaw `.env`:
+
+```env
+LPC_HOST=192.168.200.50
+LPC_PORT=23
+LPC_AUTO_CONNECT=true
+LPC_RECONNECT_ENABLED=true
+LPC_RECONNECT_DELAY_MS=15000
+LPC_AUTO_SELECT_INTERFACE=true
+LPC_CONNECT_TIMEOUT_MS=5000
+```
+
+Uruchom aplikację:
+
+```bash
+npm run dev
+```
+
+Sprawdź w UI prawy górny status LPC:
+
+- `connected` / zielony = można testować,
+- `connecting` lub `reconnecting` / żółty = aplikacja próbuje połączyć się z LPC,
+- `error` lub `disconnected` / czerwony = sprawdź sieć albo tester LPC.
+
+Dla realnego startu programu ustaw `ProgramStarter` w trybie script, bez hardcodowania ścieżek w kodzie:
+
+```env
+PROGRAM_START_MODE=script
+```
+
+Windows:
+
+```env
+PROGRAM_START_COMMAND=python
+PROGRAM_START_SCRIPT_PATH=C:\Projekty\LPC528_App\scripts\eip_start_program.py
+```
+
+Linux:
+
+```env
+PROGRAM_START_COMMAND=python3
+PROGRAM_START_SCRIPT_PATH=/root/eip_start_program.py
+```
+
+Test operatora:
+
+1. Zeskanuj barcode `5901234123457`.
+2. UI powinien pokazać `P01` i status startu programu.
+3. `ProgramStarter` odpala program w trybie `mock` albo `script` zależnie od `.env`.
+4. LPC wysyła stream, a wykres ciśnienia aktualizuje się na żywo.
+5. Po końcowym wyniku tabela `Ostatni wynik` pokazuje `OK`/`NOK`/`ERROR` i pomiary.
+
+Bez realnego LPC możesz ustawić `VITE_SHOW_DIAGNOSTICS=true` i użyć `Wyślij mock line`, żeby przetestować UI wyniku przez `POST /api/lpc/mock-line`.
+
+Operator nie używa diagnostycznych endpointów `POST /api/lpc/connect` i `POST /api/lpc/disconnect`; połączenie jest automatyczne przez `LPC_AUTO_CONNECT=true`, a reconnect działa co `LPC_RECONNECT_DELAY_MS`.
+
 ## Node-RED parity backlog
 
 - LPC TCP/Telnet: klient TCP, auto reconnect, auto wybór interface, endpointy diagnostyczne i Socket.IO live data są zaimplementowane.
 - Parser result: zaimplementowany dla linii z wzorem `Cxx Nxx Pxx`, z filtrowaniem menu, raportów i śmieci Telnetowych.
 - Parser stream: zaimplementowany dla ramek ciśnienia; publikacja live przez Socket.IO pozostaje do podłączenia do TCP.
-- Bufor testu: przeliczać `bar` na `mbar`, limitować liczbę punktów i opcjonalnie próbkować co `LPC_MIN_ELAPSED_STEP_SEC`.
-- Scanner: UI input barcode, `POST /api/scan`, mapowanie z `.env`, `currentTest` i eventy Socket.IO są zaimplementowane; później integracja sprzętowa.
+- Bufor testu: przelicza `bar` na `mbar`, limituje punkty i zasila prosty wykres SVG w UI.
+- Scanner: UI input barcode, `POST /api/scan`, mapowanie z `.env`, `currentTest` i eventy Socket.IO są zaimplementowane; do rozważenia skaner HID bez inputu UI.
 - ProgramStarter: dostępny tryb `mock` i `script`; domyślnie `mock` dla bezpiecznego developmentu.
 - Splunk: payload HEC z konfiguracją z `.env`, bez hardcodowanych tokenów.
 - Zebra: ZPL dla etykiety około 30 mm x 8 mm, 203 dpi, host/port z `.env`.

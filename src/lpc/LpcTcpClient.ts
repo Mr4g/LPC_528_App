@@ -172,7 +172,8 @@ export class LpcTcpClient extends EventEmitter {
     if (this.reconnectTimer || this.socket || this.connecting) return;
 
     this.closingForReconnect = true;
-    this.state.setReconnecting();
+    const nextReconnectAt = new Date(Date.now() + this.options.reconnectDelayMs).toISOString();
+    this.state.setReconnecting(nextReconnectAt);
     const state = this.state.getSnapshot();
     this.emit('reconnecting', state);
     this.emit('status', state);

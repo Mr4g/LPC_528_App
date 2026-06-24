@@ -254,3 +254,61 @@ h1 {
   font-size: 24px;
   font-weight: 900;
 }
+
+.lpc-status-panel {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 10;
+  width: min(420px, calc(100vw - 36px));
+  border: 4px solid #64748b;
+}
+
+.lpc-status-connected {
+  border-color: #22c55e;
+}
+
+.lpc-status-connecting,
+.lpc-status-reconnecting {
+  border-color: #f59e0b;
+}
+
+.lpc-status-error,
+.lpc-status-disconnected {
+  border-color: #ef4444;
+}
+
+.pressure-chart {
+  width: 100%;
+  min-height: 260px;
+  border-radius: 20px;
+  background: rgba(15, 23, 42, 0.82);
+}
+
+.pressure-chart line {
+  stroke: #94a3b8;
+  stroke-width: 2;
+}
+
+.pressure-chart polyline {
+  fill: none;
+  stroke: #22c55e;
+  stroke-width: 4;
+}
+
+.pressure-chart text {
+  fill: #cbd5e1;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.history-details table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 22px;
+}
+
+.history-details td {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+  padding: 10px;
+}

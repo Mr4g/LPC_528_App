@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import type { AppConfig } from '../config';
 import { checkLpcPort } from './checkLpcPort';
+import type { LastResultStore } from './LastResultStore';
 import type { LpcLineProcessor } from './LpcLineProcessor';
+import type { ResultHistoryStore } from './ResultHistoryStore';
 import type { LpcTcpClient } from './LpcTcpClient';
 import type { LpcTestCurveBuffer } from './LpcTestCurveBuffer';
 
@@ -10,6 +12,8 @@ export function createLpcRouter(options: {
   tcpClient: LpcTcpClient;
   lineProcessor: LpcLineProcessor;
   curveBuffer: LpcTestCurveBuffer;
+  lastResultStore: LastResultStore;
+  resultHistoryStore: ResultHistoryStore;
 }): Router {
   const router = Router();
 
@@ -30,6 +34,7 @@ export function createLpcRouter(options: {
       lastDisconnectedAt: state.lastDisconnectedAt,
       lastError: state.lastError,
       reconnectAttemptCount: state.reconnectAttemptCount,
+      nextReconnectAt: state.nextReconnectAt,
       lastRawLinesCount: options.lineProcessor.getLastRawLinesCount(),
       curvePointCount: options.curveBuffer.getPoints().length,
     });
@@ -81,6 +86,14 @@ export function createLpcRouter(options: {
 
     options.lineProcessor.processLine(line);
     return res.json({ ok: true, processed: true });
+  });
+
+  router.get('/last-result', (_req, res) => {
+    res.json({ ok: true, result: options.lastResultStore.get() });
+  });
+
+  router.get('/results', (_req, res) => {
+    res.json({ ok: true, results: options.resultHistoryStore.getAll() });
   });
 
   router.get('/raw-lines', (_req, res) => {

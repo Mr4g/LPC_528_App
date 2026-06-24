@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CurrentTest } from '../shared/types';
 import { CurrentTestStore } from '../scanner/currentTestStore';
+import { LastResultStore } from './LastResultStore';
 import { LpcLineProcessor } from './LpcLineProcessor';
+import { ResultHistoryStore } from './ResultHistoryStore';
 import { LpcTestCurveBuffer } from './LpcTestCurveBuffer';
 
 const streamLine = '9369034 S C01,P01,PRF,ET 5.20 sec,T 19.80 sec,P -0.00011 bar';
@@ -24,18 +26,22 @@ function createProcessor() {
   const tcpClient = { send: vi.fn() };
   const currentTestStore = new CurrentTestStore();
   const curveBuffer = new LpcTestCurveBuffer();
+  const lastResultStore = new LastResultStore();
+  const resultHistoryStore = new ResultHistoryStore(20);
   const processor = new LpcLineProcessor({
     io: io as never,
     tcpClient: tcpClient as never,
     currentTestStore,
     curveBuffer,
+    lastResultStore,
+    resultHistoryStore,
     autoSelectInterface: true,
     interfaceSelection: '1',
     currentTestMaxAgeMs: 600000,
     debugLines: false,
   });
 
-  return { processor, emitted, tcpClient, currentTestStore, curveBuffer };
+  return { processor, emitted, tcpClient, currentTestStore, curveBuffer, lastResultStore, resultHistoryStore };
 }
 
 describe('LpcLineProcessor', () => {
@@ -48,14 +54,16 @@ describe('LpcLineProcessor', () => {
     expect(emitted.some((item) => item.event === 'lpc:stream')).toBe(true);
   });
 
-  it('recognizes result and emits completion events', () => {
-    const { processor, emitted } = createProcessor();
+  it('recognizes result, stores it and emits completion events', () => {
+    const { processor, emitted, lastResultStore, resultHistoryStore } = createProcessor();
 
     processor.processLine(resultLine);
 
     expect(emitted.some((item) => item.event === 'lpc:result')).toBe(true);
     expect(emitted.some((item) => item.event === 'test:completed')).toBe(true);
     expect(emitted.some((item) => item.event === 'lpc:curve-completed')).toBe(true);
+    expect(lastResultStore.get()?.result).toBe('REJECT');
+    expect(resultHistoryStore.getAll()).toHaveLength(1);
   });
 
   it('ignores menu after sending interface selection', () => {

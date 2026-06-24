@@ -13,3 +13,5 @@ export type { ParsedResultDetails } from './parseResultDetails';
 export type { EnrichedLpcResult } from './LpcLineProcessor';
 export type { LpcConnectionStateSnapshot, LpcConnectionStatus } from './LpcConnectionState';
 export type { LpcCurvePoint, LpcCurveSummary } from './LpcTestCurveBuffer';
+export { LastResultStore } from './LastResultStore';
+export { ResultHistoryStore } from './ResultHistoryStore';

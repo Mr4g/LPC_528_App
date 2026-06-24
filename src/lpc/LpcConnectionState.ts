@@ -25,6 +25,7 @@ export interface LpcConnectionStateSnapshot extends LpcConnectionStateOptions {
   lastError: string | null;
   socketDestroyed: boolean;
   reconnectAttemptCount: number;
+  nextReconnectAt: string | null;
 }
 
 export class LpcConnectionState {
@@ -36,6 +37,7 @@ export class LpcConnectionState {
   private lastError: string | null = null;
   private socketDestroyed = true;
   private reconnectAttemptCount = 0;
+  private nextReconnectAt: string | null = null;
 
   constructor(private readonly options: LpcConnectionStateOptions) {}
 
@@ -44,6 +46,7 @@ export class LpcConnectionState {
     this.connected = false;
     this.socketDestroyed = false;
     this.lastConnectionAttemptAt = new Date().toISOString();
+    this.nextReconnectAt = null;
   }
 
   setConnected(): void {
@@ -52,6 +55,7 @@ export class LpcConnectionState {
     this.socketDestroyed = false;
     this.lastConnectedAt = new Date().toISOString();
     this.lastError = null;
+    this.nextReconnectAt = null;
   }
 
   setDisconnecting(): void {
@@ -64,14 +68,16 @@ export class LpcConnectionState {
     this.connected = false;
     this.socketDestroyed = socketDestroyed;
     this.lastDisconnectedAt = new Date().toISOString();
+    this.nextReconnectAt = null;
   }
 
-  setReconnecting(): void {
+  setReconnecting(nextReconnectAt: string): void {
     this.status = 'reconnecting';
     this.connected = false;
     this.socketDestroyed = true;
     this.reconnectAttemptCount += 1;
     this.lastConnectionAttemptAt = new Date().toISOString();
+    this.nextReconnectAt = nextReconnectAt;
   }
 
   setError(error: Error | string, socketDestroyed = true): void {
@@ -104,6 +110,7 @@ export class LpcConnectionState {
       lastError: this.lastError,
       socketDestroyed: this.socketDestroyed,
       reconnectAttemptCount: this.reconnectAttemptCount,
+      nextReconnectAt: this.nextReconnectAt,
     };
   }
 }

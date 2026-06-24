@@ -26,8 +26,8 @@ describe('LpcConnectionState', () => {
     state.setError('connect ETIMEDOUT example.local:23');
     expect(state.getSnapshot()).toMatchObject({ status: 'error', connected: false, lastError: 'connect ETIMEDOUT example.local:23' });
 
-    state.setReconnecting();
-    expect(state.getSnapshot()).toMatchObject({ status: 'reconnecting', connected: false, reconnectAttemptCount: 1 });
+    state.setReconnecting('2026-06-24T10:00:15.000Z');
+    expect(state.getSnapshot()).toMatchObject({ status: 'reconnecting', connected: false, reconnectAttemptCount: 1, nextReconnectAt: '2026-06-24T10:00:15.000Z' });
 
     state.setDisconnected();
     expect(state.getSnapshot()).toMatchObject({ status: 'disconnected', connected: false, socketDestroyed: true });

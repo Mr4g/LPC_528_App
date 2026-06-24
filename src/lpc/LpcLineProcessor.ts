@@ -1,6 +1,8 @@
 import type { Server } from 'socket.io';
 import type { CurrentTest, LpcResult } from '../shared/types';
 import type { CurrentTestStore } from '../scanner/currentTestStore';
+import type { LastResultStore } from './LastResultStore';
+import type { ResultHistoryStore } from './ResultHistoryStore';
 import { isInterfaceSelectionPrompt } from './lpcFrameFilters';
 import { parseLpcResult } from './parseLpcResult';
 import { parseLpcStream } from './parseLpcStream';
@@ -20,6 +22,8 @@ export interface LpcLineProcessorOptions {
   tcpClient: LpcTcpClient;
   currentTestStore: CurrentTestStore;
   curveBuffer: LpcTestCurveBuffer;
+  lastResultStore?: LastResultStore;
+  resultHistoryStore?: ResultHistoryStore;
   autoSelectInterface: boolean;
   interfaceSelection: string;
   currentTestMaxAgeMs: number;
@@ -67,6 +71,8 @@ export class LpcLineProcessor {
     const result = parseLpcResult(rawLine);
     if (result) {
       const enrichedResult = this.attachCurrentTest(result);
+      this.options.lastResultStore?.set(enrichedResult);
+      this.options.resultHistoryStore?.add(enrichedResult);
       this.options.io.emit('lpc:result', enrichedResult);
       this.options.io.emit('test:completed', enrichedResult);
       this.options.io.emit('lpc:curve-completed', {

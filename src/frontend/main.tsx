@@ -1,4 +1,4 @@
-import React, { FormEvent, useEffect, useState } from 'react';
+import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import type { BarcodeScan, CurrentTest, LpcResult, LpcStreamPoint, ProgramStartRequest, ProgramStartResult } from '../shared/types';
 import './styles.css';
@@ -38,6 +38,7 @@ interface LpcStatusPayload {
   lastDisconnectedAt: string | null;
   lastError: string | null;
   reconnectAttemptCount: number;
+  nextReconnectAt: string | null;
   lastRawLinesCount?: number;
   curvePointCount?: number;
 }
@@ -98,14 +99,15 @@ declare global {
 type OperatorStatus = 'ready' | 'scanning' | 'program-selected' | 'no-mapping' | 'start-error';
 
 const statusLabels: Record<OperatorStatus, string> = {
-  ready: 'Gotowy do skanu',
+  ready: 'Zeskanuj barcode',
   scanning: 'Skanuję...',
-  'program-selected': 'Program wybrany',
+  'program-selected': 'Start testu OK',
   'no-mapping': 'Brak mapowania dla barcode',
-  'start-error': 'Błąd startu programu',
+  'start-error': 'Błąd startu testu',
 };
 
 const measurementKeys = ['RL', 'Pt', 'EDC', 'PL', 'LLR', 'HLR', 'FPR'] as const;
+const showDiagnostics = ((import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SHOW_DIAGNOSTICS ?? 'false') === 'true';
 
 function loadSocketIoClient(): Promise<SocketLike | null> {
   if (window.io) return Promise.resolve(window.io());
@@ -134,11 +136,13 @@ function App() {
   const [lpcStatus, setLpcStatus] = useState<LpcStatusPayload | null>(null);
   const [lastStream, setLastStream] = useState<LpcStreamPayload | null>(null);
   const [lastResult, setLastResult] = useState<EnrichedLpcResult | null>(null);
+  const [resultHistory, setResultHistory] = useState<EnrichedLpcResult[]>([]);
   const [curvePoints, setCurvePoints] = useState<LpcCurvePoint[]>([]);
   const [lpcActionMessage, setLpcActionMessage] = useState<string | null>(null);
   const [portCheck, setPortCheck] = useState<LpcPortCheckPayload | null>(null);
   const [mockLine, setMockLine] = useState('');
   const [mockLineResponse, setMockLineResponse] = useState<string | null>(null);
+  const barcodeInputRef = useRef<HTMLInputElement | null>(null);
 
   async function refreshLpcStatus() {
     const nextStatus = await fetchLpcStatus();
@@ -203,6 +207,7 @@ function App() {
 
       socket.on('lpc:result', (payload) => {
         setLastResult(payload);
+        setResultHistory((results) => [payload, ...results].slice(0, 10));
       });
 
       socket.on('lpc:curve-completed', (payload) => {
@@ -211,6 +216,7 @@ function App() {
 
       socket.on('test:completed', (payload) => {
         setLastResult(payload);
+        setResultHistory((results) => [payload, ...results.filter((item) => item.receivedAt !== payload.receivedAt)].slice(0, 10));
       });
     });
 
@@ -258,6 +264,7 @@ function App() {
     setLastRejected(null);
     setBarcode('');
     setStatus(payload.programStart.success ? 'program-selected' : 'start-error');
+    window.setTimeout(() => barcodeInputRef.current?.focus(), 0);
   }
 
   async function lpcAction(action: 'connect' | 'disconnect') {
@@ -286,6 +293,22 @@ function App() {
     setMockLineResponse(JSON.stringify(await response.json()));
   }
 
+  const chartPoints = useMemo(() => {
+    const validPoints = curvePoints.filter((point) => point.pressureMbar !== null);
+    if (validPoints.length < 2) return '';
+    const minX = Math.min(...validPoints.map((point) => point.elapsedTimeSec));
+    const maxX = Math.max(...validPoints.map((point) => point.elapsedTimeSec));
+    const minY = Math.min(...validPoints.map((point) => point.pressureMbar ?? 0));
+    const maxY = Math.max(...validPoints.map((point) => point.pressureMbar ?? 0));
+    const xRange = maxX - minX || 1;
+    const yRange = maxY - minY || 1;
+    return validPoints.map((point) => {
+      const x = 30 + ((point.elapsedTimeSec - minX) / xRange) * 520;
+      const y = 190 - (((point.pressureMbar ?? 0) - minY) / yRange) * 160;
+      return `${x},${y}`;
+    }).join(' ');
+  }, [curvePoints]);
+
   const lpcConnectionLabel = (() => {
     if (!lpcStatus) return 'Niepołączony';
     if (lpcStatus.status === 'idle') return 'Niepołączony';
@@ -303,35 +326,22 @@ function App() {
         <p className="eyebrow">LPC-528 Operator Panel</p>
         <h1>{status === 'program-selected' && lastAccepted ? `${lastAccepted.currentTest.programText} wybrany` : statusLabels[status]}</h1>
 
-        <section className="lpc-status-panel" aria-label="Status LPC">
+        <section className={`lpc-status-panel lpc-status-${lpcStatus?.status ?? 'idle'}`} aria-label="Status LPC">
           <div>
             <span className="label">LPC</span>
             <strong>{lpcConnectionLabel}</strong>
             <small>{lpcStatus ? `${lpcStatus.host}:${lpcStatus.port}` : 'status...'}</small>
             {lpcStatus?.lastError && <p className="lpc-error">{lpcStatus.lastError}</p>}
-            {lpcStatus && (
-              <p className="lpc-meta">
-                Próba: {lpcStatus.lastConnectionAttemptAt ?? '-'} | Połączono: {lpcStatus.lastConnectedAt ?? '-'} | Rozłączono: {lpcStatus.lastDisconnectedAt ?? '-'} | Reconnect: {lpcStatus.reconnectAttemptCount}
-              </p>
-            )}
+            {lpcStatus?.nextReconnectAt && <p className="lpc-meta">Ponowna próba: {lpcStatus.nextReconnectAt}</p>}
+            {lpcStatus && <p className="lpc-meta">Reconnect: {lpcStatus.reconnectAttemptCount}</p>}
           </div>
-          <div className="lpc-actions">
-            <button type="button" onClick={() => void lpcAction('connect')}>Połącz</button>
-            <button type="button" onClick={() => void lpcAction('disconnect')}>Rozłącz</button>
-            <button type="button" onClick={() => void checkLpcPort()}>Sprawdź port LPC</button>
-          </div>
-          {lpcActionMessage && <p>{lpcActionMessage}</p>}
-          {portCheck && (
-            <p className={portCheck.reachable ? 'port-ok' : 'port-error'}>
-              {portCheck.reachable ? 'Port dostępny' : 'Port niedostępny'} ({portCheck.latencyMs} ms) {portCheck.error ?? ''}
-            </p>
-          )}
         </section>
 
         <form className="scan-form" onSubmit={submitScan}>
           <label htmlFor="barcode-input">Barcode</label>
           <input
             id="barcode-input"
+            ref={barcodeInputRef}
             autoFocus
             value={barcode}
             onChange={(event) => setBarcode(event.target.value)}
@@ -363,8 +373,20 @@ function App() {
         )}
 
 
+        {showDiagnostics && (
         <section className="details diagnostics-details" aria-label="Diagnostyka LPC">
           <h2>Diagnostyka</h2>
+          <div className="lpc-actions">
+            <button type="button" onClick={() => void lpcAction('connect')}>Połącz</button>
+            <button type="button" onClick={() => void lpcAction('disconnect')}>Rozłącz</button>
+            <button type="button" onClick={() => void checkLpcPort()}>Sprawdź port LPC</button>
+          </div>
+          {lpcActionMessage && <p>{lpcActionMessage}</p>}
+          {portCheck && (
+            <p className={portCheck.reachable ? 'port-ok' : 'port-error'}>
+              {portCheck.reachable ? 'Port dostępny' : 'Port niedostępny'} ({portCheck.latencyMs} ms) {portCheck.error ?? ''}
+            </p>
+          )}
           <textarea
             value={mockLine}
             onChange={(event) => setMockLine(event.target.value)}
@@ -373,14 +395,17 @@ function App() {
           <button type="button" onClick={() => void sendMockLine()}>Wyślij mock line</button>
           {mockLineResponse && <p>{mockLineResponse}</p>}
         </section>
+        )}
 
         {lastStream && (
           <section className="details live-details" aria-label="Live streaming LPC">
-            <h2>Live pressure</h2>
+            <h2>Live test</h2>
             <dl>
+              <div><dt>Program</dt><dd>{lastAccepted?.currentTest.programText ?? lastStream.program}</dd></div>
+              <div><dt>Barcode</dt><dd>{lastAccepted?.currentTest.barcode ?? '-'}</dd></div>
               <div><dt>Elapsed</dt><dd>{lastStream.elapsedTimeSec?.toFixed(2)} s</dd></div>
               <div><dt>Remaining</dt><dd>{lastStream.remainingTimeSec?.toFixed(2)} s</dd></div>
-              <div><dt>Pressure</dt><dd>{lastStream.pressureValue} {lastStream.pressureUnit}</dd></div>
+              <div><dt>Pressure bar</dt><dd>{lastStream.pressureValue} {lastStream.pressureUnit}</dd></div>
               <div><dt>Pressure mbar</dt><dd>{lastStream.pressureMbar?.toFixed(3)} mbar</dd></div>
               <div><dt>Segment</dt><dd>{lastStream.segment}</dd></div>
             </dl>
@@ -389,7 +414,7 @@ function App() {
 
         {lastResult && (
           <section className={`details result-details result-${lastResult.result.toLowerCase()}`} aria-label="Ostatni wynik LPC">
-            <h2>{lastResult.result}</h2>
+            <h2>{lastResult.result === 'ACCEPT' ? 'OK' : lastResult.result === 'REJECT' ? 'NOK' : lastResult.result}</h2>
             <dl>
               <div><dt>Barcode</dt><dd>{lastResult.barcode}</dd></div>
               <div><dt>Program</dt><dd>{lastResult.programText}</dd></div>
@@ -408,15 +433,41 @@ function App() {
           </section>
         )}
 
-        <section className="details curve-details" aria-label="Miejsce na wykres ciśnienia">
-          <h2>Krzywa ciśnienia</h2>
-          <p>Placeholder wykresu — ostatnie punkty:</p>
+        <section className="details curve-details" aria-label="Wykres ciśnienia">
+          <h2>Wykres ciśnienia</h2>
+          <svg className="pressure-chart" viewBox="0 0 600 230" role="img" aria-label="Ciśnienie w czasie">
+            <line x1="30" y1="195" x2="570" y2="195" />
+            <line x1="30" y1="20" x2="30" y2="195" />
+            {chartPoints && <polyline points={chartPoints} />}
+            <text x="250" y="225">Czas [s]</text>
+            <text x="40" y="18">Ciśnienie [mbar]</text>
+          </svg>
           <div className="curve-list">
-            {curvePoints.slice(-8).map((point) => (
+            {curvePoints.slice(-6).map((point) => (
               <span key={`${point.elapsedTimeSec}-${point.segment}`}>{point.elapsedTimeSec.toFixed(2)}s / {point.pressureMbar?.toFixed(2)} mbar</span>
             ))}
           </div>
         </section>
+
+        {resultHistory.length > 0 && (
+          <section className="details history-details" aria-label="Ostatnie wyniki">
+            <h2>Ostatnie wyniki</h2>
+            <table>
+              <tbody>
+                {resultHistory.slice(0, 10).map((result) => (
+                  <tr key={`${result.receivedAt}-${result.uniqueId}`}>
+                    <td>{result.receivedAt}</td>
+                    <td>{result.barcode}</td>
+                    <td>{result.programText}</td>
+                    <td>{result.result}</td>
+                    <td>{result.leakValue} {result.leakUnit}</td>
+                    <td>{result.totalAbs}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        )}
       </section>
     </main>
   );

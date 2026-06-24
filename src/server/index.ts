@@ -3,10 +3,12 @@ import { createServer } from 'node:http';
 import { Server } from 'socket.io';
 import { loadConfig } from '../config';
 import { createBackupRouter } from '../backup/routes';
+import { LastResultStore } from '../lpc/LastResultStore';
 import { createLpcRouter } from '../lpc/lpcRouter';
 import { LpcLineProcessor } from '../lpc/LpcLineProcessor';
 import { LpcTcpClient } from '../lpc/LpcTcpClient';
 import { LpcTestCurveBuffer } from '../lpc/LpcTestCurveBuffer';
+import { ResultHistoryStore } from '../lpc/ResultHistoryStore';
 import { createProgramStarter } from '../programs/ProgramStarter';
 import { CurrentTestStore } from '../scanner/currentTestStore';
 import { createScannerRouter } from '../scanner/scannerRouter';
@@ -33,11 +35,15 @@ const lpcCurveBuffer = new LpcTestCurveBuffer({
   maxPoints: config.LPC_STREAM_BUFFER_LIMIT,
   minElapsedStepSec: config.LPC_MIN_ELAPSED_STEP_SEC,
 });
+const lastResultStore = new LastResultStore();
+const resultHistoryStore = new ResultHistoryStore(20);
 const lpcLineProcessor = new LpcLineProcessor({
   io,
   tcpClient: lpcTcpClient,
   currentTestStore,
   curveBuffer: lpcCurveBuffer,
+  lastResultStore,
+  resultHistoryStore,
   autoSelectInterface: config.LPC_AUTO_SELECT_INTERFACE,
   interfaceSelection: config.LPC_INTERFACE_SELECTION,
   currentTestMaxAgeMs: config.CURRENT_TEST_MAX_AGE_MS,
@@ -80,6 +86,8 @@ app.use('/api/lpc', createLpcRouter({
   tcpClient: lpcTcpClient,
   lineProcessor: lpcLineProcessor,
   curveBuffer: lpcCurveBuffer,
+  lastResultStore,
+  resultHistoryStore,
 }));
 app.use('/api', createScannerRouter({ config, io, programStarter, currentTestStore }));
 

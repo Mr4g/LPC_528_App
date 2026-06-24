@@ -212,3 +212,45 @@ h1 {
   padding: 10px 14px;
   background: rgba(15, 23, 42, 0.8);
 }
+
+.lpc-error {
+  color: #fecaca;
+  font-weight: 900;
+}
+
+.lpc-meta {
+  color: #cbd5e1;
+  font-size: 20px !important;
+}
+
+.port-ok {
+  color: #86efac;
+  font-weight: 900;
+}
+
+.port-error {
+  color: #fecaca;
+  font-weight: 900;
+}
+
+.diagnostics-details textarea {
+  width: 100%;
+  min-height: 120px;
+  border: 0;
+  border-radius: 18px;
+  padding: 16px;
+  color: #0f172a;
+  font-size: 22px;
+}
+
+.diagnostics-details button {
+  min-height: 58px;
+  margin-top: 12px;
+  border: 0;
+  border-radius: 18px;
+  padding: 0 22px;
+  color: #0f172a;
+  background: #ddd6fe;
+  font-size: 24px;
+  font-weight: 900;
+}

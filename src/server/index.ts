@@ -24,8 +24,10 @@ const programStarter = createProgramStarter({
 const lpcTcpClient = new LpcTcpClient({
   host: config.LPC_HOST,
   port: config.LPC_PORT,
+  autoConnect: config.LPC_AUTO_CONNECT,
   reconnectEnabled: config.LPC_RECONNECT_ENABLED,
   reconnectDelayMs: config.LPC_RECONNECT_DELAY_MS,
+  connectTimeoutMs: config.LPC_CONNECT_TIMEOUT_MS,
 });
 const lpcCurveBuffer = new LpcTestCurveBuffer({
   maxPoints: config.LPC_STREAM_BUFFER_LIMIT,
@@ -42,14 +44,20 @@ const lpcLineProcessor = new LpcLineProcessor({
   debugLines: config.LPC_DEBUG_LINES,
 });
 
-lpcTcpClient.on('connected', () => {
-  io.emit('lpc:connected', lpcTcpClient.getState());
+lpcTcpClient.on('status', (state) => {
+  io.emit('lpc:status', state);
 });
-lpcTcpClient.on('disconnected', () => {
-  io.emit('lpc:disconnected', lpcTcpClient.getState());
+lpcTcpClient.on('connected', (state) => {
+  io.emit('lpc:connected', state);
 });
-lpcTcpClient.on('error', (error) => {
-  io.emit('lpc:error', { message: error.message, state: lpcTcpClient.getState() });
+lpcTcpClient.on('disconnected', (state) => {
+  io.emit('lpc:disconnected', state);
+});
+lpcTcpClient.on('reconnecting', (state) => {
+  io.emit('lpc:reconnecting', state);
+});
+lpcTcpClient.on('error', (error, state) => {
+  io.emit('lpc:error', { message: error.message, state });
 });
 lpcTcpClient.on('rawData', (data) => {
   if (data.includes('TCP/IP INTERFACE SELECTION') || data.includes('* 1 Interface Connection1 *')) {

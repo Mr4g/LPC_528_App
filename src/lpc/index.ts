@@ -8,6 +8,7 @@ export { LpcLineProcessor } from './LpcLineProcessor';
 export { LpcTcpClient } from './LpcTcpClient';
 export { LpcTestCurveBuffer } from './LpcTestCurveBuffer';
 export { createLpcRouter } from './lpcRouter';
+export { checkLpcPort } from './checkLpcPort';
 export type { ParsedResultDetails } from './parseResultDetails';
 export type { EnrichedLpcResult } from './LpcLineProcessor';
 export type { LpcConnectionStateSnapshot, LpcConnectionStatus } from './LpcConnectionState';

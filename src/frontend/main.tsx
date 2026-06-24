@@ -21,19 +21,34 @@ interface ScanAcceptedResponse extends ScanAcceptedPayload {
   ok: true;
 }
 
+type LpcConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnecting' | 'disconnected' | 'reconnecting' | 'error';
+
 interface LpcStatusPayload {
-  ok: true;
+  ok?: true;
   connected: boolean;
-  state: string;
+  status: LpcConnectionStatus;
   host: string;
   port: number;
   autoConnect: boolean;
   reconnectEnabled: boolean;
+  reconnectDelayMs: number;
+  connectTimeoutMs: number;
+  lastConnectionAttemptAt: string | null;
   lastConnectedAt: string | null;
   lastDisconnectedAt: string | null;
   lastError: string | null;
-  lastRawLinesCount: number;
-  curvePointCount: number;
+  reconnectAttemptCount: number;
+  lastRawLinesCount?: number;
+  curvePointCount?: number;
+}
+
+interface LpcPortCheckPayload {
+  ok: true;
+  host: string;
+  port: number;
+  reachable: boolean;
+  latencyMs: number;
+  error?: string;
 }
 
 interface LpcStreamPayload extends LpcStreamPoint {
@@ -61,9 +76,11 @@ type SocketHandler<TPayload> = (payload: TPayload) => void;
 interface SocketLike {
   on(event: 'scan:accepted', handler: SocketHandler<ScanAcceptedPayload>): void;
   on(event: 'scan:rejected', handler: SocketHandler<ScanRejectedPayload>): void;
-  on(event: 'lpc:connected', handler: SocketHandler<unknown>): void;
-  on(event: 'lpc:disconnected', handler: SocketHandler<unknown>): void;
-  on(event: 'lpc:error', handler: SocketHandler<{ message: string }>): void;
+  on(event: 'lpc:status', handler: SocketHandler<LpcStatusPayload>): void;
+  on(event: 'lpc:connected', handler: SocketHandler<LpcStatusPayload>): void;
+  on(event: 'lpc:disconnected', handler: SocketHandler<LpcStatusPayload>): void;
+  on(event: 'lpc:reconnecting', handler: SocketHandler<LpcStatusPayload>): void;
+  on(event: 'lpc:error', handler: SocketHandler<{ message: string; state?: LpcStatusPayload }>): void;
   on(event: 'lpc:stream', handler: SocketHandler<LpcStreamPayload>): void;
   on(event: 'lpc:result', handler: SocketHandler<EnrichedLpcResult>): void;
   on(event: 'lpc:curve-completed', handler: SocketHandler<{ points: LpcCurvePoint[] }>): void;
@@ -119,6 +136,9 @@ function App() {
   const [lastResult, setLastResult] = useState<EnrichedLpcResult | null>(null);
   const [curvePoints, setCurvePoints] = useState<LpcCurvePoint[]>([]);
   const [lpcActionMessage, setLpcActionMessage] = useState<string | null>(null);
+  const [portCheck, setPortCheck] = useState<LpcPortCheckPayload | null>(null);
+  const [mockLine, setMockLine] = useState('');
+  const [mockLineResponse, setMockLineResponse] = useState<string | null>(null);
 
   async function refreshLpcStatus() {
     const nextStatus = await fetchLpcStatus();
@@ -148,16 +168,25 @@ function App() {
         setStatus('no-mapping');
       });
 
-      socket.on('lpc:connected', () => {
-        void refreshLpcStatus();
+      socket.on('lpc:status', (payload) => {
+        setLpcStatus(payload);
       });
 
-      socket.on('lpc:disconnected', () => {
-        void refreshLpcStatus();
+      socket.on('lpc:connected', (payload) => {
+        setLpcStatus(payload);
+      });
+
+      socket.on('lpc:disconnected', (payload) => {
+        setLpcStatus(payload);
+      });
+
+      socket.on('lpc:reconnecting', (payload) => {
+        setLpcStatus(payload);
       });
 
       socket.on('lpc:error', (payload) => {
         setLpcActionMessage(payload.message);
+        if (payload.state) setLpcStatus(payload.state);
         void refreshLpcStatus();
       });
 
@@ -189,8 +218,10 @@ function App() {
       isMounted = false;
       activeSocket?.off('scan:accepted');
       activeSocket?.off('scan:rejected');
+      activeSocket?.off('lpc:status');
       activeSocket?.off('lpc:connected');
       activeSocket?.off('lpc:disconnected');
+      activeSocket?.off('lpc:reconnecting');
       activeSocket?.off('lpc:error');
       activeSocket?.off('lpc:stream');
       activeSocket?.off('lpc:result');
@@ -232,11 +263,39 @@ function App() {
   async function lpcAction(action: 'connect' | 'disconnect') {
     setLpcActionMessage(null);
     const response = await fetch(`/api/lpc/${action}`, { method: 'POST' });
-    setLpcActionMessage(response.ok ? `LPC ${action} wysłane` : `LPC ${action} błąd`);
+    const payload = (await response.json()) as { message?: string; state?: LpcStatusPayload };
+    setLpcActionMessage(payload.message ?? (response.ok ? `LPC ${action} wysłane` : `LPC ${action} błąd`));
+    if (payload.state) setLpcStatus(payload.state);
     await refreshLpcStatus();
   }
 
-  const lpcConnectionLabel = lpcStatus?.connected ? 'Połączony' : lpcStatus?.lastError ? 'Błąd' : 'Rozłączony';
+  async function checkLpcPort() {
+    setPortCheck(null);
+    const response = await fetch('/api/lpc/check-port', { method: 'POST' });
+    if (response.ok) {
+      setPortCheck((await response.json()) as LpcPortCheckPayload);
+    }
+  }
+
+  async function sendMockLine() {
+    const response = await fetch('/api/lpc/mock-line', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ line: mockLine }),
+    });
+    setMockLineResponse(JSON.stringify(await response.json()));
+  }
+
+  const lpcConnectionLabel = (() => {
+    if (!lpcStatus) return 'Niepołączony';
+    if (lpcStatus.status === 'idle') return 'Niepołączony';
+    if (lpcStatus.status === 'connecting') return 'Łączenie...';
+    if (lpcStatus.status === 'connected' && lpcStatus.connected) return 'Połączony';
+    if (lpcStatus.status === 'reconnecting') return 'Ponawianie połączenia...';
+    if (lpcStatus.status === 'error') return 'Błąd połączenia';
+    if (lpcStatus.status === 'disconnecting') return 'Rozłączanie...';
+    return 'Rozłączony';
+  })();
 
   return (
     <main className="operator-panel">
@@ -249,12 +308,24 @@ function App() {
             <span className="label">LPC</span>
             <strong>{lpcConnectionLabel}</strong>
             <small>{lpcStatus ? `${lpcStatus.host}:${lpcStatus.port}` : 'status...'}</small>
+            {lpcStatus?.lastError && <p className="lpc-error">{lpcStatus.lastError}</p>}
+            {lpcStatus && (
+              <p className="lpc-meta">
+                Próba: {lpcStatus.lastConnectionAttemptAt ?? '-'} | Połączono: {lpcStatus.lastConnectedAt ?? '-'} | Rozłączono: {lpcStatus.lastDisconnectedAt ?? '-'} | Reconnect: {lpcStatus.reconnectAttemptCount}
+              </p>
+            )}
           </div>
           <div className="lpc-actions">
             <button type="button" onClick={() => void lpcAction('connect')}>Połącz</button>
             <button type="button" onClick={() => void lpcAction('disconnect')}>Rozłącz</button>
+            <button type="button" onClick={() => void checkLpcPort()}>Sprawdź port LPC</button>
           </div>
           {lpcActionMessage && <p>{lpcActionMessage}</p>}
+          {portCheck && (
+            <p className={portCheck.reachable ? 'port-ok' : 'port-error'}>
+              {portCheck.reachable ? 'Port dostępny' : 'Port niedostępny'} ({portCheck.latencyMs} ms) {portCheck.error ?? ''}
+            </p>
+          )}
         </section>
 
         <form className="scan-form" onSubmit={submitScan}>
@@ -290,6 +361,18 @@ function App() {
             <p>{lastRejected.message}: {lastRejected.barcode}</p>
           </section>
         )}
+
+
+        <section className="details diagnostics-details" aria-label="Diagnostyka LPC">
+          <h2>Diagnostyka</h2>
+          <textarea
+            value={mockLine}
+            onChange={(event) => setMockLine(event.target.value)}
+            placeholder="Wklej raw LPC line do testu UI bez realnego LPC"
+          />
+          <button type="button" onClick={() => void sendMockLine()}>Wyślij mock line</button>
+          {mockLineResponse && <p>{mockLineResponse}</p>}
+        </section>
 
         {lastStream && (
           <section className="details live-details" aria-label="Live streaming LPC">

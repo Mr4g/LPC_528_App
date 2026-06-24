@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import type { AppConfig } from '../config';
+import { checkLpcPort } from './checkLpcPort';
 import type { LpcLineProcessor } from './LpcLineProcessor';
 import type { LpcTcpClient } from './LpcTcpClient';
 import type { LpcTestCurveBuffer } from './LpcTestCurveBuffer';
@@ -16,28 +17,32 @@ export function createLpcRouter(options: {
     const state = options.tcpClient.getState();
     res.json({
       ok: true,
-      connected: options.tcpClient.isConnected(),
-      state: state.status,
-      host: options.config.LPC_HOST,
-      port: options.config.LPC_PORT,
-      autoConnect: options.config.LPC_AUTO_CONNECT,
-      reconnectEnabled: options.config.LPC_RECONNECT_ENABLED,
+      connected: state.connected,
+      status: state.status,
+      host: state.host,
+      port: state.port,
+      autoConnect: state.autoConnect,
+      reconnectEnabled: state.reconnectEnabled,
+      reconnectDelayMs: state.reconnectDelayMs,
+      connectTimeoutMs: state.connectTimeoutMs,
+      lastConnectionAttemptAt: state.lastConnectionAttemptAt,
       lastConnectedAt: state.lastConnectedAt,
       lastDisconnectedAt: state.lastDisconnectedAt,
       lastError: state.lastError,
+      reconnectAttemptCount: state.reconnectAttemptCount,
       lastRawLinesCount: options.lineProcessor.getLastRawLinesCount(),
       curvePointCount: options.curveBuffer.getPoints().length,
     });
   });
 
   router.post('/connect', (_req, res) => {
-    options.tcpClient.connect();
-    res.json({ ok: true, state: options.tcpClient.getState() });
+    const result = options.tcpClient.connect();
+    res.status(result.ok ? 200 : 409).json(result);
   });
 
   router.post('/disconnect', (_req, res) => {
-    options.tcpClient.disconnect();
-    res.json({ ok: true, state: options.tcpClient.getState() });
+    const result = options.tcpClient.disconnect();
+    res.json(result);
   });
 
   router.post('/send', (req, res) => {
@@ -56,6 +61,26 @@ export function createLpcRouter(options: {
         message: error instanceof Error ? error.message : 'LPC TCP client is not connected',
       });
     }
+  });
+
+  router.post('/check-port', async (_req, res) => {
+    const result = await checkLpcPort(options.config.LPC_HOST, options.config.LPC_PORT, options.config.LPC_CONNECT_TIMEOUT_MS);
+    res.json(result);
+  });
+
+  router.post('/mock-line', (req, res) => {
+    const enabled = options.config.NODE_ENV !== 'production' || options.config.ENABLE_MOCK_LPC_ENDPOINTS;
+    if (!enabled) {
+      return res.status(403).json({ ok: false, error: 'MOCK_LPC_ENDPOINT_DISABLED' });
+    }
+
+    const line = typeof req.body?.line === 'string' ? req.body.line : null;
+    if (!line) {
+      return res.status(400).json({ ok: false, error: 'INVALID_LINE', message: 'Body line must be a non-empty string' });
+    }
+
+    options.lineProcessor.processLine(line);
+    return res.json({ ok: true, processed: true });
   });
 
   router.get('/raw-lines', (_req, res) => {

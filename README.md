@@ -124,6 +124,8 @@ POST /api/lpc/disconnect
 POST /api/lpc/send        body: { "data": "1\r\n" }
 GET  /api/lpc/raw-lines
 GET  /api/lpc/curve
+POST /api/lpc/check-port
+POST /api/lpc/mock-line
 ```
 
 `/api/lpc/status` zwraca m.in. status połączenia, host/port, auto connect, reconnect, ostatni błąd, liczbę raw lines i liczbę punktów aktualnej krzywej.
@@ -200,6 +202,40 @@ curl http://localhost:3000/api/lpc/status
 Vite proxy dla `/api` i `/socket.io` wskazuje na `http://localhost:3000`. Jeśli zmienisz `APP_PORT` w `.env`, ustaw ten sam port w `vite.config.ts` albo uruchamiaj backend na porcie `3000` podczas developmentu.
 
 ## Troubleshooting
+
+
+### Diagnostyka `connect ETIMEDOUT 192.168.200.50:23`
+
+Jeśli UI pokazuje błąd podobny do `connect ETIMEDOUT 192.168.200.50:23`, backend nie połączył się realnie z TCP/Telnet LPC. Sprawdź:
+
+- czy tester LPC ma IP `192.168.200.50`,
+- czy komputer IPC jest w tej samej podsieci,
+- PowerShell:
+
+```powershell
+Test-NetConnection 192.168.200.50 -Port 23
+```
+
+- ping:
+
+```powershell
+ping 192.168.200.50
+```
+
+- czy port `23` / Telnet w LPC jest aktywny,
+- czy inny klient nie trzyma sesji LPC,
+- czy firewall, VLAN albo polityka sieciowa nie blokuje połączenia.
+
+Możesz też użyć UI: przycisk `Sprawdź port LPC` wywołuje `POST /api/lpc/check-port`, czyli krótką próbę TCP bez ruszania głównego klienta LPC.
+
+Frontend może działać samodzielnie, ale wtedy endpointy `/api` i `/socket.io` będą zwracały `ECONNREFUSED`, jeśli backend nie działa. Backend sprawdzisz przez:
+
+```bash
+curl http://localhost:3000/health
+curl http://localhost:3000/api/lpc/status
+```
+
+Bez realnego LPC możesz przetestować UI wyniku przez panel `Diagnostyka` i endpoint developerski `POST /api/lpc/mock-line` (domyślnie włączony w `.env.example` przez `ENABLE_MOCK_LPC_ENDPOINTS=true`).
 
 ### Windows / Vite: `EPERM: operation not permitted, rmdir node_modules/.vite/deps`
 

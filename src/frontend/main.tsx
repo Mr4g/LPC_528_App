@@ -76,7 +76,8 @@ function App() {
     const payload = (await response.json()) as ScanAcceptedResponse | ScanRejectedPayload;
 
     if (!response.ok || !('programStart' in payload)) {
-      setLastRejected({ barcode: payload.barcode, error: 'NO_MAPPING', message: payload.message });
+      const rejectedPayload = payload as ScanRejectedPayload;
+      setLastRejected({ barcode: rejectedPayload.barcode, error: 'NO_MAPPING', message: rejectedPayload.message });
       setStatus('no-mapping');
       return;
     }

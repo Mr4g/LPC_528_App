@@ -1,0 +1,48 @@
+:root {
+  font-family: Arial, sans-serif;
+  background: #101820;
+  color: #f4f7fb;
+}
+
+body {
+  margin: 0;
+}
+
+.operator-panel {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+}
+
+.card {
+  width: min(720px, 100%);
+  padding: 2rem;
+  border-radius: 24px;
+  background: #1f2a36;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 35%);
+}
+
+label,
+input,
+button {
+  display: block;
+  width: 100%;
+  font-size: 1.25rem;
+}
+
+input,
+button {
+  box-sizing: border-box;
+  margin-top: 0.75rem;
+  padding: 1rem;
+  border-radius: 12px;
+  border: 0;
+}
+
+button {
+  margin-top: 1rem;
+  background: #00a6ff;
+  color: white;
+  font-weight: 700;
+}

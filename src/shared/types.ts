@@ -77,6 +77,26 @@ export interface BarcodeScan {
   source: 'ui' | 'scanner';
 }
 
+export interface CurrentTest {
+  type: 'current_test';
+  barcode: string;
+  matchedKey: string;
+  program: number;
+  programText: string;
+  selectedAt: string;
+}
+
+export interface ProgramStartResult {
+  attempted: boolean;
+  success: boolean;
+  mode: 'mock' | 'script';
+  command?: string;
+  stdout?: string;
+  stderr?: string;
+  exitCode?: number | null;
+  message: string;
+}
+
 export interface ProgramStartRequest {
   type: 'program_start_request';
   barcode: string;

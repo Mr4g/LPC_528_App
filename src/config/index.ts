@@ -1,6 +1,16 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
+const barcodeProgramMapSchema = z.preprocess((value: unknown) => {
+  if (typeof value !== 'string') return value;
+
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}, z.record(z.coerce.number().int().min(1).max(31))).default({});
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   APP_PORT: z.coerce.number().int().positive().default(3000),
@@ -9,8 +19,10 @@ const envSchema = z.object({
   LPC_INTERFACE_SELECTION: z.string().min(1).default('1'),
   LPC_STREAM_BUFFER_LIMIT: z.coerce.number().int().positive().default(1000),
   LPC_MIN_ELAPSED_STEP_SEC: z.coerce.number().nonnegative().default(0.1),
-  PROGRAM_STARTER_COMMAND: z.string().min(1),
-  PROGRAM_STARTER_SCRIPT: z.string().min(1),
+  PROGRAM_START_MODE: z.enum(['mock', 'script']).default('mock'),
+  PROGRAM_START_COMMAND: z.string().min(1).default('python3'),
+  PROGRAM_START_SCRIPT_PATH: z.string().min(1),
+  BARCODE_PROGRAM_MAP: barcodeProgramMapSchema,
   SPLUNK_HEC_URL: z.string().url().optional().or(z.literal('')),
   SPLUNK_HEC_TOKEN: z.string().optional().or(z.literal('')),
   SPLUNK_INDEX: z.string().min(1).default('lpc528'),

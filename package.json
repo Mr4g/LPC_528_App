@@ -18,7 +18,8 @@
     "react": "latest",
     "react-dom": "latest",
     "socket.io": "latest",
-    "zod": "latest"
+    "zod": "latest",
+    "socket.io-client": "latest"
   },
   "devDependencies": {
     "@types/express": "latest",

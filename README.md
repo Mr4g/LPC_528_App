@@ -12,9 +12,9 @@ Aplikacja będzie działać na Windows IPC i ma zapewnić:
 - modułową logikę zamiast przepływów Node-RED,
 - konfigurację przez `.env`, bez sekretów i hardcodowanych ścieżek w kodzie.
 
-## Aktualny zakres pierwszego kroku
+## Aktualny zakres
 
-Ten etap tworzy strukturę projektu, typy danych, walidowany config loader, szkielet backendu i frontendu oraz moduły z TODO dla integracji LPC, barcode, startu programu, Splunka, Zebry i backupu CSV.
+Projekt zawiera szkielet backendu i frontendu, parsery LPC Result/Stream oraz działający przepływ skanowania barcode: `POST /api/scan`, mapowanie barcode -> program z `.env`, zapis `currentTest` w pamięci procesu, mock/script `ProgramStarter` oraz eventy Socket.IO `scan:accepted` i `scan:rejected`.
 
 ## Struktura katalogów
 
@@ -57,7 +57,7 @@ Skopiuj plik przykładowy:
 cp .env.example .env
 ```
 
-Następnie uzupełnij wartości w `.env` dla swojego środowiska, szczególnie adres LPC, Zebra, ścieżki skryptów oraz ustawienia Splunka. Nie commituj prawdziwych tokenów ani sekretów.
+Następnie uzupełnij wartości w `.env` dla swojego środowiska, szczególnie adres LPC, Zebra, ścieżki skryptów, mapę `BARCODE_PROGRAM_MAP` oraz ustawienia Splunka. Nie commituj prawdziwych tokenów ani sekretów. Domyślnie `PROGRAM_START_MODE=mock`, żeby development nie uruchamiał przypadkowo programu na LPC.
 
 ### 3. Uruchom backend i frontend w trybie developerskim
 
@@ -94,6 +94,23 @@ curl http://localhost:3000/api/health
 
 Jeżeli zmienisz `APP_PORT` w `.env`, użyj odpowiedniego portu zamiast `3000`.
 
+## Ręczny test scan flow
+
+Po uruchomieniu aplikacji lokalnie możesz sprawdzić przepływ skanowania:
+
+1. Uruchom backend: `npm run dev:backend`.
+2. Uruchom frontend: `npm run dev:frontend`.
+3. W panelu operatorskim wpisz `7472475` i naciśnij Enter.
+4. Oczekiwany efekt: aplikacja pokaże `P01`, zapisze `currentTest`, a backend wyemituje `scan:accepted`.
+5. Wpisz nieznany barcode.
+6. Oczekiwany efekt: aplikacja pokaże błąd `NO_MAPPING`, a backend wyemituje `scan:rejected`.
+
+Backendowo można sprawdzić aktualny test komendą:
+
+```bash
+curl http://localhost:3000/api/current-test
+```
+
 ## Komendy developerskie
 
 ```bash
@@ -109,19 +126,19 @@ npm run build
 ## Node-RED parity backlog
 
 - LPC TCP/Telnet: po połączeniu wykryć `* 1 Interface Connection1 *` i wysłać skonfigurowany wybór interfejsu.
-- Parser result: obsłużyć linie z wzorem `Cxx Nxx Pxx`, zignorować menu, raporty i śmieci Telnetowe.
-- Parser stream: obsłużyć ramki ciśnienia i publikować punkty przez Socket.IO.
+- Parser result: zaimplementowany dla linii z wzorem `Cxx Nxx Pxx`, z filtrowaniem menu, raportów i śmieci Telnetowych.
+- Parser stream: zaimplementowany dla ramek ciśnienia; publikacja live przez Socket.IO pozostaje do podłączenia do TCP.
 - Bufor testu: przeliczać `bar` na `mbar`, limitować liczbę punktów i opcjonalnie próbkować co `LPC_MIN_ELAPSED_STEP_SEC`.
-- Scanner: w pierwszej wersji UI input barcode, później integracja sprzętowa.
-- ProgramStarter: obecnie warstwa abstrakcji pod skrypt, docelowo wymienna implementacja dla Windows IPC.
+- Scanner: UI input barcode, `POST /api/scan`, mapowanie z `.env`, `currentTest` i eventy Socket.IO są zaimplementowane; później integracja sprzętowa.
+- ProgramStarter: dostępny tryb `mock` i `script`; domyślnie `mock` dla bezpiecznego developmentu.
 - Splunk: payload HEC z konfiguracją z `.env`, bez hardcodowanych tokenów.
 - Zebra: ZPL dla etykiety około 30 mm x 8 mm, 203 dpi, host/port z `.env`.
 - Backup CSV: `POST /api/backup/run` i `GET /api/backup/latest.csv` na konfigurowalnej komendzie i ścieżce.
 
 ## Następne kroki
 
-1. Zaimplementować parser LPC result z testami na prawdziwych ramkach.
-2. Zaimplementować parser stream i bufor punktów testu.
-3. Podłączyć klienta TCP/Telnet LPC i emisję Socket.IO.
-4. Dodać endpoint scan/start programu oraz implementację `ScriptProgramStarter`.
-5. Podłączyć Splunk HEC, Zebra TCP i backup CSV.
+1. Podłączyć klienta TCP/Telnet LPC i emisję ramek live przez Socket.IO.
+2. Zaimplementować bufor punktów testu dla danych stream z konwersją `bar` -> `mbar`.
+3. Podłączyć sprzętowy scanner barcode, gdy będzie dostępny na IPC.
+4. Podłączyć Splunk HEC, Zebra TCP i backup CSV.
+5. Rozbudować ekran operatorski o wykres ciśnienia i status testu LPC.

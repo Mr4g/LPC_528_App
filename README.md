@@ -118,10 +118,44 @@ npm install
 npm run dev
 npm run dev:backend
 npm run dev:frontend
+npm run dev:frontend:force
 npm run typecheck
 npm test
 npm run build
 ```
+
+## Troubleshooting
+
+### Windows / Vite: `EPERM: operation not permitted, rmdir node_modules/.vite/deps`
+
+Jeżeli Vite na Windowsie nie może usunąć cache w `node_modules/.vite/deps`, użyj cache poza projektem.
+
+1. Zatrzymaj aplikację.
+2. Ubij procesy Node w PowerShell:
+
+```powershell
+Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force
+```
+
+3. Usuń stary cache Vite z projektu:
+
+```powershell
+Remove-Item -Recurse -Force .\node_modules\.vite -ErrorAction SilentlyContinue
+```
+
+4. Ustaw `VITE_CACHE_DIR` poza projektem, np. w `.env`:
+
+```env
+VITE_CACHE_DIR=C:\temp\lpc-528-app-vite-cache
+```
+
+5. Uruchom frontend z wymuszoną przebudową cache:
+
+```bash
+npm run dev:frontend:force
+```
+
+Konfiguracja Vite domyślnie używa cache w katalogu systemowym temp (`lpc-528-app-vite-cache`), więc nie powinna już korzystać z `node_modules/.vite`.
 
 ## Node-RED parity backlog
 

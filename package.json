@@ -7,6 +7,7 @@
     "dev": "concurrently \"npm:dev:backend\" \"npm:dev:frontend\"",
     "dev:backend": "tsx watch src/server/index.ts",
     "dev:frontend": "vite --host 0.0.0.0",
+    "dev:frontend:force": "vite --host 0.0.0.0 --force",
     "build": "tsc -p tsconfig.json && vite build",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"

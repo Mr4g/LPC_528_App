@@ -78,17 +78,20 @@ Backend:
 npm run dev:backend
 ```
 
-Frontend:
+Frontend (Windows zalecane z wymuszoną przebudową cache):
 
 ```bash
-npm run dev:frontend
+npm run dev:frontend:force
 ```
+
+Standardowy frontend bez `--force` nadal jest dostępny jako `npm run dev:frontend`.
 
 ### 5. Sprawdź backend
 
 Po starcie backendu healthcheck powinien odpowiadać pod adresem:
 
 ```bash
+curl http://localhost:3000/health
 curl http://localhost:3000/api/health
 ```
 
@@ -127,7 +130,7 @@ GET  /api/lpc/curve
 
 ### Ręczny test LPC TCP
 
-1. Uruchom backend i frontend: `npm run dev` albo osobno `npm run dev:backend` oraz `npm run dev:frontend`.
+1. Uruchom backend i frontend: `npm run dev` albo osobno `npm run dev:backend` oraz `npm run dev:frontend:force`.
 2. Sprawdź status: `curl http://localhost:3000/api/lpc/status`.
 3. Kliknij `Połącz` w UI albo ustaw `LPC_AUTO_CONNECT=true` w `.env`.
 4. Sprawdź, czy po menu interface backend wysyła `1\r\n` i emituje `lpc:interface-selected`.
@@ -140,7 +143,7 @@ GET  /api/lpc/curve
 Po uruchomieniu aplikacji lokalnie możesz sprawdzić przepływ skanowania:
 
 1. Uruchom backend: `npm run dev:backend`.
-2. Uruchom frontend: `npm run dev:frontend`.
+2. Uruchom frontend: `npm run dev:frontend:force`.
 3. W panelu operatorskim wpisz `7472475` i naciśnij Enter.
 4. Oczekiwany efekt: aplikacja pokaże `P01`, zapisze `currentTest`, a backend wyemituje `scan:accepted`.
 5. Wpisz nieznany barcode.
@@ -164,6 +167,37 @@ npm run typecheck
 npm test
 npm run build
 ```
+
+## Development on Windows
+
+Zalecana komenda developerska na Windows:
+
+```bash
+npm run dev
+```
+
+Ta komenda uruchamia backend oraz frontend z `--force`, czyli używa stabilnego wariantu `dev:frontend:force` i przebudowuje cache Vite poza problematycznym `node_modules/.vite/deps`.
+
+Jeśli uruchamiasz procesy osobno:
+
+```bash
+# terminal 1
+npm run dev:backend
+
+# terminal 2
+npm run dev:frontend:force
+```
+
+Błędy Vite typu `ECONNREFUSED` dla `/api/lpc/status`, `/api/scan` albo `/socket.io/socket.io.js` oznaczają, że frontend działa, ale backend nie działa albo nie nasłuchuje na porcie `3000`.
+
+Sprawdzenie backendu:
+
+```bash
+curl http://localhost:3000/health
+curl http://localhost:3000/api/lpc/status
+```
+
+Vite proxy dla `/api` i `/socket.io` wskazuje na `http://localhost:3000`. Jeśli zmienisz `APP_PORT` w `.env`, ustaw ten sam port w `vite.config.ts` albo uruchamiaj backend na porcie `3000` podczas developmentu.
 
 ## Troubleshooting
 

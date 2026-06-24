@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "dev": "concurrently \"npm:dev:backend\" \"npm:dev:frontend:force\"",
     "dev:backend": "tsx watch src/server/index.ts",
     "dev:frontend": "vite --host 0.0.0.0",
     "dev:frontend:force": "vite --host 0.0.0.0 --force",

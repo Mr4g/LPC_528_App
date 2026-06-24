@@ -75,6 +75,10 @@ app.use('/api/lpc', createLpcRouter({
 }));
 app.use('/api', createScannerRouter({ config, io, programStarter, currentTestStore }));
 
+app.get('/health', (_req, res) => {
+  res.json({ ok: true, service: 'lpc-528-app' });
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'lpc-528-app' });
 });

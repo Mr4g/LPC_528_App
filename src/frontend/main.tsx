@@ -1,6 +1,5 @@
-import React, { FormEvent, useEffect, useMemo, useState } from 'react';
+import React, { FormEvent, useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
-import { io } from 'socket.io-client';
 import type { BarcodeScan, CurrentTest, ProgramStartRequest, ProgramStartResult } from '../shared/types';
 import './styles.css';
 
@@ -22,6 +21,22 @@ interface ScanAcceptedResponse extends ScanAcceptedPayload {
   ok: true;
 }
 
+type SocketHandler<TPayload> = (payload: TPayload) => void;
+
+interface SocketLike {
+  on(event: 'scan:accepted', handler: SocketHandler<ScanAcceptedPayload>): void;
+  on(event: 'scan:rejected', handler: SocketHandler<ScanRejectedPayload>): void;
+  off(event: 'scan:accepted'): void;
+  off(event: 'scan:rejected'): void;
+  disconnect(): void;
+}
+
+declare global {
+  interface Window {
+    io?: () => SocketLike;
+  }
+}
+
 type OperatorStatus = 'ready' | 'scanning' | 'program-selected' | 'no-mapping' | 'start-error';
 
 const statusLabels: Record<OperatorStatus, string> = {
@@ -32,32 +47,52 @@ const statusLabels: Record<OperatorStatus, string> = {
   'start-error': 'Błąd startu programu',
 };
 
+function loadSocketIoClient(): Promise<SocketLike | null> {
+  if (window.io) return Promise.resolve(window.io());
+
+  return new Promise((resolve) => {
+    const script = document.createElement('script');
+    script.src = '/socket.io/socket.io.js';
+    script.async = true;
+    script.onload = () => resolve(window.io ? window.io() : null);
+    script.onerror = () => resolve(null);
+    document.head.appendChild(script);
+  });
+}
+
 function App() {
   const [barcode, setBarcode] = useState('');
   const [status, setStatus] = useState<OperatorStatus>('ready');
   const [lastAccepted, setLastAccepted] = useState<ScanAcceptedPayload | null>(null);
   const [lastRejected, setLastRejected] = useState<ScanRejectedPayload | null>(null);
 
-  const socket = useMemo(() => io(), []);
-
   useEffect(() => {
-    socket.on('scan:accepted', (payload: ScanAcceptedPayload) => {
-      setLastAccepted(payload);
-      setLastRejected(null);
-      setStatus(payload.programStart.success ? 'program-selected' : 'start-error');
-    });
+    let activeSocket: SocketLike | null = null;
+    let isMounted = true;
 
-    socket.on('scan:rejected', (payload: ScanRejectedPayload) => {
-      setLastRejected(payload);
-      setStatus('no-mapping');
+    void loadSocketIoClient().then((socket) => {
+      if (!isMounted || !socket) return;
+      activeSocket = socket;
+
+      socket.on('scan:accepted', (payload: ScanAcceptedPayload) => {
+        setLastAccepted(payload);
+        setLastRejected(null);
+        setStatus(payload.programStart.success ? 'program-selected' : 'start-error');
+      });
+
+      socket.on('scan:rejected', (payload: ScanRejectedPayload) => {
+        setLastRejected(payload);
+        setStatus('no-mapping');
+      });
     });
 
     return () => {
-      socket.off('scan:accepted');
-      socket.off('scan:rejected');
-      socket.disconnect();
+      isMounted = false;
+      activeSocket?.off('scan:accepted');
+      activeSocket?.off('scan:rejected');
+      activeSocket?.disconnect();
     };
-  }, [socket]);
+  }, []);
 
   async function submitScan(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

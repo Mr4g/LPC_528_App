@@ -138,3 +138,77 @@ h1 {
   margin: 0;
   font-size: 32px;
 }
+
+.lpc-status-panel {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  margin-bottom: 32px;
+  border-radius: 24px;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.lpc-status-panel .label {
+  display: block;
+  color: #94a3b8;
+  font-size: 22px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.lpc-status-panel strong {
+  display: block;
+  font-size: 44px;
+}
+
+.lpc-status-panel small,
+.lpc-status-panel p {
+  font-size: 24px;
+}
+
+.lpc-actions {
+  display: flex;
+  gap: 14px;
+}
+
+.lpc-actions button {
+  min-height: 64px;
+  border: 0;
+  border-radius: 18px;
+  padding: 0 24px;
+  color: #0f172a;
+  background: #bae6fd;
+  font-size: 26px;
+  font-weight: 900;
+}
+
+.live-details {
+  border: 3px solid #38bdf8;
+}
+
+.result-details {
+  border: 3px solid #64748b;
+}
+
+.result-accept {
+  border-color: #22c55e;
+}
+
+.result-reject,
+.result-error {
+  border-color: #ef4444;
+}
+
+.curve-list {
+  display: grid;
+  gap: 10px;
+  font-size: 24px;
+}
+
+.curve-list span {
+  border-radius: 14px;
+  padding: 10px 14px;
+  background: rgba(15, 23, 42, 0.8);
+}

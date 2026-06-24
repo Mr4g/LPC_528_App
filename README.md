@@ -57,7 +57,7 @@ Skopiuj plik przykładowy:
 cp .env.example .env
 ```
 
-Następnie uzupełnij wartości w `.env` dla swojego środowiska, szczególnie adres LPC, Zebra, ścieżki skryptów, mapę `BARCODE_PROGRAM_MAP` oraz ustawienia Splunka. Nie commituj prawdziwych tokenów ani sekretów. Domyślnie `PROGRAM_START_MODE=mock`, żeby development nie uruchamiał przypadkowo programu na LPC.
+Następnie uzupełnij wartości w `.env` dla swojego środowiska, szczególnie adres LPC, Zebra, ścieżki skryptów, mapę `BARCODE_PROGRAM_MAP` oraz ustawienia Splunka. Nie commituj prawdziwych tokenów ani sekretów. Domyślnie `PROGRAM_START_MODE=mock`, żeby development nie uruchamiał przypadkowo programu na LPC. LPC TCP konfiguruje się przez `LPC_HOST`, `LPC_PORT`, `LPC_AUTO_CONNECT`, `LPC_RECONNECT_ENABLED`, `LPC_AUTO_SELECT_INTERFACE`, `LPC_DEBUG_LINES` i `CURRENT_TEST_MAX_AGE_MS`.
 
 ### 3. Uruchom backend i frontend w trybie developerskim
 
@@ -93,6 +93,47 @@ curl http://localhost:3000/api/health
 ```
 
 Jeżeli zmienisz `APP_PORT` w `.env`, użyj odpowiedniego portu zamiast `3000`.
+
+## LPC TCP / Telnet
+
+Backend działa jako klient TCP/Telnet do testera LPC-528. Po połączeniu odbiera dane strumieniowo, dzieli tekst po `\n`, zachowuje ostatnie 100 raw lines diagnostycznych i używa istniejących parserów `parseLpcStream` oraz `parseLpcResult`.
+
+Jeżeli LPC pokaże menu `TCP/IP INTERFACE SELECTION` lub `* 1 Interface Connection1 *`, a `LPC_AUTO_SELECT_INTERFACE=true`, backend wyśle skonfigurowany wybór interfejsu (`LPC_INTERFACE_SELECTION`, domyślnie `1`) jako `1\r\n` i wyemituje event Socket.IO `lpc:interface-selected`.
+
+Socket.IO eventy LPC:
+
+- `lpc:connected`
+- `lpc:disconnected`
+- `lpc:error`
+- `lpc:line` tylko przy `LPC_DEBUG_LINES=true`
+- `lpc:stream`
+- `lpc:result`
+- `lpc:curve-completed`
+- `test:completed`
+- `lpc:interface-selected`
+
+### Endpointy diagnostyczne LPC
+
+```text
+GET  /api/lpc/status
+POST /api/lpc/connect
+POST /api/lpc/disconnect
+POST /api/lpc/send        body: { "data": "1\r\n" }
+GET  /api/lpc/raw-lines
+GET  /api/lpc/curve
+```
+
+`/api/lpc/status` zwraca m.in. status połączenia, host/port, auto connect, reconnect, ostatni błąd, liczbę raw lines i liczbę punktów aktualnej krzywej.
+
+### Ręczny test LPC TCP
+
+1. Uruchom backend i frontend: `npm run dev` albo osobno `npm run dev:backend` oraz `npm run dev:frontend`.
+2. Sprawdź status: `curl http://localhost:3000/api/lpc/status`.
+3. Kliknij `Połącz` w UI albo ustaw `LPC_AUTO_CONNECT=true` w `.env`.
+4. Sprawdź, czy po menu interface backend wysyła `1\r\n` i emituje `lpc:interface-selected`.
+5. Zeskanuj `7472475`, żeby ustawić `currentTest` na `P01`.
+6. Uruchom test na LPC.
+7. Sprawdź w UI live stream ciśnienia oraz końcowy wynik LPC powiązany z `currentTest`.
 
 ## Ręczny test scan flow
 
@@ -159,7 +200,7 @@ Konfiguracja Vite domyślnie używa cache w katalogu systemowym temp (`lpc-528-a
 
 ## Node-RED parity backlog
 
-- LPC TCP/Telnet: po połączeniu wykryć `* 1 Interface Connection1 *` i wysłać skonfigurowany wybór interfejsu.
+- LPC TCP/Telnet: klient TCP, auto reconnect, auto wybór interface, endpointy diagnostyczne i Socket.IO live data są zaimplementowane.
 - Parser result: zaimplementowany dla linii z wzorem `Cxx Nxx Pxx`, z filtrowaniem menu, raportów i śmieci Telnetowych.
 - Parser stream: zaimplementowany dla ramek ciśnienia; publikacja live przez Socket.IO pozostaje do podłączenia do TCP.
 - Bufor testu: przeliczać `bar` na `mbar`, limitować liczbę punktów i opcjonalnie próbkować co `LPC_MIN_ELAPSED_STEP_SEC`.
@@ -171,8 +212,8 @@ Konfiguracja Vite domyślnie używa cache w katalogu systemowym temp (`lpc-528-a
 
 ## Następne kroki
 
-1. Podłączyć klienta TCP/Telnet LPC i emisję ramek live przez Socket.IO.
-2. Zaimplementować bufor punktów testu dla danych stream z konwersją `bar` -> `mbar`.
-3. Podłączyć sprzętowy scanner barcode, gdy będzie dostępny na IPC.
-4. Podłączyć Splunk HEC, Zebra TCP i backup CSV.
-5. Rozbudować ekran operatorski o wykres ciśnienia i status testu LPC.
+1. Podłączyć Splunk HEC dla wyników testu.
+2. Podłączyć Zebra TCP/ZPL dla etykiet.
+3. Dokończyć backup CSV ponad obecny router szkieletowy.
+4. Zastąpić placeholder listy punktów pełnym wykresem ciśnienia.
+5. Podłączyć sprzętowy scanner HID bez inputu UI, jeśli będzie wymagany.

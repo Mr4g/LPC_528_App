@@ -39,11 +39,68 @@ Skopiuj `.env.example` do `.env` i dostosuj wartości do środowiska IPC. Token 
 cp .env.example .env
 ```
 
+## Jak odpalić projekt lokalnie
+
+### 1. Zainstaluj zależności
+
+W katalogu repozytorium uruchom:
+
+```bash
+npm install
+```
+
+### 2. Przygotuj konfigurację `.env`
+
+Skopiuj plik przykładowy:
+
+```bash
+cp .env.example .env
+```
+
+Następnie uzupełnij wartości w `.env` dla swojego środowiska, szczególnie adres LPC, Zebra, ścieżki skryptów oraz ustawienia Splunka. Nie commituj prawdziwych tokenów ani sekretów.
+
+### 3. Uruchom backend i frontend w trybie developerskim
+
+```bash
+npm run dev
+```
+
+Ta komenda uruchamia równolegle:
+
+- backend Express/Socket.IO z `src/server/index.ts`, domyślnie na porcie `APP_PORT` z `.env`,
+- frontend Vite/React dostępny przez serwer Vite.
+
+### 4. Alternatywnie uruchom tylko jedną część aplikacji
+
+Backend:
+
+```bash
+npm run dev:backend
+```
+
+Frontend:
+
+```bash
+npm run dev:frontend
+```
+
+### 5. Sprawdź backend
+
+Po starcie backendu healthcheck powinien odpowiadać pod adresem:
+
+```bash
+curl http://localhost:3000/api/health
+```
+
+Jeżeli zmienisz `APP_PORT` w `.env`, użyj odpowiedniego portu zamiast `3000`.
+
 ## Komendy developerskie
 
 ```bash
 npm install
 npm run dev
+npm run dev:backend
+npm run dev:frontend
 npm run typecheck
 npm test
 npm run build

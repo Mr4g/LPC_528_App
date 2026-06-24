@@ -1,33 +1,39 @@
 export type MeasurementValue = number | null;
+export type LpcResultValue = 'ACCEPT' | 'REJECT' | 'ERROR' | 'UNKNOWN';
 
 export interface LpcMeasurementMap {
   [key: string]: {
-    value: MeasurementValue;
-    unit: string | null;
+    value: number;
+    unit: string;
   };
 }
 
 export interface LpcResult {
   source: string;
   receivedAt: string;
-  messageId: string;
-  messageType: string;
-  channel: string;
-  port: string;
-  program: string;
-  programText: string;
-  linkInfo: string;
-  result: string;
-  testerTime: string;
-  testerDate: string;
-  uniqueId: string;
-  totalAbs: string;
-  programEvaluation: string;
-  spcFlag: string;
+  messageId: string | null;
+  messageType: string | null;
+  channel: string | null;
+  port: string | null;
+  program: string | null;
+  programText: string | null;
+  linkInfo: string | null;
+  result: LpcResultValue;
+  value: LpcResultValue;
+  testerTime: string | null;
+  testerDate: string | null;
+  uniqueId: string | null;
+  totalAbs: string | null;
+  programEvaluation: string | null;
+  spcFlag: string | null;
   barcode: string;
-  barcodeFromResult: string;
-  testType: string;
-  testEvaluation: string;
+  barcodeFromResult: string | null;
+  testType: string | null;
+  testEvaluation: string | null;
+  leakType: string | null;
+  leakValue: number | null;
+  leakUnit: string | null;
+  resultDetailsRaw: string | null;
   measurements: LpcMeasurementMap;
   RL: MeasurementValue;
   RL_unit: string | null;

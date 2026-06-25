@@ -448,3 +448,125 @@ button, input, textarea { font: inherit; }
   .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .metric-card.emphasis { grid-column: span 2; }
 }
+
+.login-shell,
+.users-shell {
+  min-height: 100vh;
+  padding: 32px;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at top, #17213d, #080b1c 65%);
+  color: #fff;
+}
+
+.login-card {
+  width: min(680px, 94vw);
+  display: grid;
+  gap: 18px;
+  padding: 42px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 28px;
+  background: rgba(15, 23, 42, 0.92);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.35);
+}
+
+.login-card h1 {
+  margin: 0 0 10px;
+  font-size: clamp(2.4rem, 5vw, 4.5rem);
+}
+
+.login-card label,
+.user-form input,
+.user-form select,
+.login-card input {
+  font-size: 1.35rem;
+}
+
+.login-card input,
+.user-form input,
+.user-form select {
+  min-height: 72px;
+  padding: 0 22px;
+  border: 2px solid rgba(148, 163, 184, 0.5);
+  border-radius: 18px;
+  background: #f8fafc;
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.login-card button,
+.users-header button,
+.user-form button,
+.users-table-wrap button {
+  min-height: 64px;
+  padding: 0 24px;
+  border: none;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #42e8c6, #6ee7b7);
+  color: #04111f;
+  font-size: 1.25rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.login-error {
+  color: #fecaca;
+  font-size: 1.15rem;
+  font-weight: 800;
+}
+
+.user-badge {
+  padding: 16px 20px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.76);
+  display: grid;
+  gap: 4px;
+}
+
+.user-badge small {
+  color: #aeb8d6;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.users-shell {
+  display: block;
+}
+
+.users-header,
+.user-form {
+  width: min(1500px, 96vw);
+  margin: 0 auto 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.users-header h1 {
+  margin: 0;
+  font-size: 3rem;
+}
+
+.user-form {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  padding: 22px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 24px;
+  background: rgba(15, 23, 42, 0.82);
+}
+
+.users-table-wrap {
+  width: min(1500px, 96vw);
+  margin: 0 auto;
+  overflow: auto;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 24px;
+  background: rgba(15, 23, 42, 0.82);
+}
+
+.users-table-wrap table {
+  width: 100%;
+}

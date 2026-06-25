@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { Server } from 'socket.io';
 import type { AppConfig } from '../config';
 import type { ProgramStarter } from '../programs/ProgramStarter';
+import { requireAuth, type AuthenticatedRequest } from '../server/auth/authMiddleware';
 import { parseBarcodeScan } from './parseBarcodeScan';
 import { mapBarcodeToProgram } from './mapBarcodeToProgram';
 import { CurrentTestStore } from './currentTestStore';
@@ -14,7 +15,9 @@ export function createScannerRouter(options: {
 }): Router {
   const router = Router();
 
-  router.post('/scan', async (req, res) => {
+  router.use(requireAuth);
+
+  router.post('/scan', async (req: AuthenticatedRequest, res) => {
     const rawBarcode = typeof req.body?.barcode === 'string' ? req.body.barcode : '';
     const scan = parseBarcodeScan(rawBarcode);
 
@@ -31,12 +34,19 @@ export function createScannerRouter(options: {
       return res.status(400).json({ ok: false, error: mapping.error, barcode: mapping.barcode, message });
     }
 
-    options.currentTestStore.set(mapping.currentTest);
-    const programStart = await options.programStarter.startProgram(mapping.programStartRequest);
+    const operatorContext = {
+      operatorLogin: req.user?.login,
+      operatorRole: req.user?.role,
+    };
+    const currentTest = { ...mapping.currentTest, ...operatorContext };
+    const programStartRequest = { ...mapping.programStartRequest, ...operatorContext };
+
+    options.currentTestStore.set(currentTest);
+    const programStart = await options.programStarter.startProgram(programStartRequest);
     const payload = {
       scan,
-      currentTest: mapping.currentTest,
-      programStartRequest: mapping.programStartRequest,
+      currentTest,
+      programStartRequest,
       programStart,
     };
 

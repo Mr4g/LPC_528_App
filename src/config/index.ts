@@ -14,6 +14,10 @@ const barcodeProgramMapSchema = z.preprocess((value: unknown) => {
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   APP_PORT: z.coerce.number().int().positive().default(3000),
+  AUTH_SESSION_SECRET: z.string().min(1).default('change-me'),
+  DEFAULT_ADMIN_LOGIN: z.string().regex(/^[A-Za-z]{3,5}$/).default('ADM'),
+  DEFAULT_ADMIN_PASSWORD: z.string().min(4).default('admin123'),
+  SQLITE_DB_PATH: z.string().min(1).default('data/lpc_app.sqlite'),
   LPC_HOST: z.string().min(1),
   LPC_PORT: z.coerce.number().int().positive().default(23),
   LPC_INTERFACE_SELECTION: z.string().min(1).default('1'),

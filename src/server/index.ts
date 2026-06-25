@@ -13,11 +13,19 @@ import { createProgramStarter } from '../programs/ProgramStarter';
 import { createProgramsRouter } from '../programs/programsRouter';
 import { CurrentTestStore } from '../scanner/currentTestStore';
 import { createScannerRouter } from '../scanner/scannerRouter';
+import { createAuthRouter } from './auth/authRouter';
+import { attachAuth, requireAuth } from './auth/authMiddleware';
+import { AuthService } from './auth/authService';
+import { createDatabase } from './db/database';
+import { createUsersRouter } from './users/usersRouter';
 
 const config = loadConfig();
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: '*' } });
+const database = createDatabase(config.SQLITE_DB_PATH);
+const authService = new AuthService(database, config.AUTH_SESSION_SECRET);
+authService.seedDefaultAdmin(config.DEFAULT_ADMIN_LOGIN, config.DEFAULT_ADMIN_PASSWORD);
 const currentTestStore = new CurrentTestStore();
 const programStarter = createProgramStarter({
   mode: config.PROGRAM_START_MODE,
@@ -87,8 +95,11 @@ app.use((_req, res, next) => {
   next();
 });
 app.use(express.json());
+app.use(attachAuth(authService));
+app.use('/api/auth', createAuthRouter(authService));
+app.use('/api/users', createUsersRouter(authService));
 app.use('/api/backup', createBackupRouter());
-app.use('/api/programs', createProgramsRouter({ config, programStarter }));
+app.use('/api/programs', requireAuth, createProgramsRouter({ config, programStarter }));
 app.use('/api/lpc', createLpcRouter({
   config,
   tcpClient: lpcTcpClient,

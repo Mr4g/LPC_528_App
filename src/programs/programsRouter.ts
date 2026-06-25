@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { Router } from 'express';
 import type { AppConfig } from '../config';
+import type { AuthenticatedRequest } from '../server/auth/authMiddleware';
 import type { ProgramStartRequest } from '../shared/types';
 import type { ProgramStarter } from './ProgramStarter';
 
@@ -23,7 +24,7 @@ export function createProgramsRouter(options: { config: AppConfig; programStarte
     });
   });
 
-  router.post('/start', async (req, res) => {
+  router.post('/start', async (req: AuthenticatedRequest, res) => {
     const program = Number(req.body?.program);
     if (!Number.isInteger(program) || program < 1 || program > 31) {
       return res.status(400).json({ ok: false, error: 'INVALID_PROGRAM', message: 'Program must be an integer from 1 to 31' });
@@ -38,6 +39,8 @@ export function createProgramsRouter(options: { config: AppConfig; programStarte
       program,
       programText: formatProgramText(program),
       selectedAt: now,
+      operatorLogin: req.user?.login,
+      operatorRole: req.user?.role,
     };
     const result = await options.programStarter.startProgram(request);
     return res.status(result.success ? 200 : 500).json({ ok: result.success, request, result });

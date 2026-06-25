@@ -51,6 +51,8 @@ export interface LpcResult {
   FPR_unit: string | null;
   raw: string;
   normalized: string;
+  operatorLogin?: string | null;
+  operatorRole?: string | null;
 }
 
 export interface LpcStreamPoint {
@@ -84,6 +86,8 @@ export interface CurrentTest {
   program: number;
   programText: string;
   selectedAt: string;
+  operatorLogin?: string;
+  operatorRole?: string;
 }
 
 export interface ProgramStartResult {
@@ -107,4 +111,6 @@ export interface ProgramStartRequest {
   program: number;
   programText: string;
   selectedAt: string;
+  operatorLogin?: string;
+  operatorRole?: string;
 }

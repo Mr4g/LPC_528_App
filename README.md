@@ -505,3 +505,56 @@ Wtedy backend loguje `RAW LPC LINE`, `PARSED STREAM`, `PARSED RESULT`, `IGNORED 
 Jeżeli `/api/lpc/raw-lines` pokazuje odebrane ramki, ale wykres w przeglądarce nadal stoi, frontend odświeża awaryjnie `/api/lpc/curve`, `/api/lpc/last-result` i `/api/lpc/results` co 1 sekundę. Dzięki temu można rozróżnić problem Socket.IO od problemu parsera/TCP: jeśli endpointy mają dane, ale liczniki eventów w diagnostyce nie rosną, problem jest w kanale Socket.IO; jeśli endpointy też są puste, problem jest po stronie odbioru TCP lub parsera.
 
 Niektóre urządzenia LPC/Telnet potrafią wysłać kompletną ramkę stream/result bez końcowego `\n`. Klient TCP buforuje takie dane i po krótkim czasie flushuje kompletną ramkę do tego samego pipeline, żeby wykres i tabela wyników nie czekały w nieskończoność na znak nowej linii.
+
+## Logowanie i użytkownicy
+
+Aplikacja wymaga zalogowania operatora przed wejściem do panelu testów i przed wywołaniem `/api/scan` lub diagnostycznego `/api/programs/start`.
+
+### Pierwszy start
+
+Przy starcie backend tworzy domyślnego administratora tylko wtedy, gdy tabela `users` jest pusta. Dane startowe pochodzą z `.env`:
+
+```env
+AUTH_SESSION_SECRET=change-me
+DEFAULT_ADMIN_LOGIN=ADM
+DEFAULT_ADMIN_PASSWORD=admin123
+SQLITE_DB_PATH=data/lpc_app.sqlite
+```
+
+Domyślny login to `ADM`, a domyślne hasło to `admin123`. Po wdrożeniu trzeba zmienić hasło administratora i ustawić własny `AUTH_SESSION_SECRET`.
+
+### Format loginu operatora
+
+Login jest normalizowany do uppercase i musi mieć 3–5 znaków ASCII A-Z:
+
+- poprawne: `ABC`, `KOW`, `NOWA`, `TEST`,
+- błędne: `AB`, `ABCDEF`, `A12`, `KO-W`, `ŁUK`, `JAN1`, `A B`.
+
+### Role
+
+- `operator` — panel operatora, skanowanie barcode, start testu i podgląd wyników,
+- `line_leader` — uprawnienia operatora oraz zarządzanie operatorami i diagnostyka,
+- `admin` — pełny dostęp, zmiana ról i zarządzanie wszystkimi użytkownikami.
+
+### Dodawanie operatora
+
+1. Zaloguj się jako `ADM` na `/login`.
+2. Wejdź w `/admin/users` albo kliknij `Użytkownicy` w top barze.
+3. Dodaj użytkownika z loginem 3–5 liter A-Z, hasłem tymczasowym i rolą `operator`.
+4. `line_leader` może tworzyć tylko operatorów; `admin` może tworzyć także `line_leader` i `admin`.
+
+### Operator przy teście i wyniku
+
+Po skanie backend zapisuje `operatorLogin` i `operatorRole` w `currentTest`. Końcowy wynik LPC dziedziczy operatora z `currentTest`, a tabela wyników pokazuje kolumnę `Operator`. Można to sprawdzić:
+
+```bash
+curl http://localhost:3000/api/lpc/results
+```
+
+### Endpointy wymagające logowania
+
+- `POST /api/scan`,
+- `GET /api/current-test`,
+- `GET /api/programs/config`,
+- `POST /api/programs/start`,
+- wszystkie endpointy `/api/users/*` dodatkowo wymagają roli `line_leader` albo `admin`.

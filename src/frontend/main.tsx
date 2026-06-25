@@ -108,6 +108,21 @@ declare global {
 }
 
 type OperatorStatus = 'ready' | 'scanning' | 'program-selected' | 'no-mapping' | 'start-error';
+type UserRole = 'operator' | 'line_leader' | 'admin';
+
+interface AuthUser {
+  id: string;
+  login: string;
+  role: UserRole;
+}
+
+interface PublicUser extends AuthUser {
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt: string | null;
+  createdBy: string | null;
+}
 
 const statusLabels: Record<OperatorStatus, string> = {
   ready: 'Gotowy do skanu',
@@ -119,6 +134,20 @@ const statusLabels: Record<OperatorStatus, string> = {
 
 const measurementKeys = ['RL', 'Pt', 'EDC', 'PL', 'LLR', 'HLR', 'FPR'] as const;
 const showDiagnostics = ((import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SHOW_DIAGNOSTICS ?? 'false') === 'true';
+const LOGIN_REGEX = /^[A-Za-z]{3,5}$/;
+
+function getInitialRoute(): string {
+  return window.location.pathname === '/login' || window.location.pathname === '/admin/users' ? window.location.pathname : '/operator';
+}
+
+function navigateTo(path: string, setRoute: (route: string) => void): void {
+  window.history.pushState({}, '', path);
+  setRoute(path);
+}
+
+function isManager(user: AuthUser | null): boolean {
+  return user?.role === 'admin' || user?.role === 'line_leader';
+}
 
 function loadSocketIoClient(): Promise<SocketLike | null> {
   if (window.io) return Promise.resolve(window.io());
@@ -185,7 +214,159 @@ function getSafeLpcConnectionLabel(status: LpcStatusPayload | null): string {
   return getConnectionLabel(status.status, safeConnected);
 }
 
+function LoginPage(props: { onLoggedIn: (user: AuthUser) => void }) {
+  const [login, setLogin] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  async function submitLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalizedLogin = login.trim().toUpperCase();
+    if (!LOGIN_REGEX.test(normalizedLogin)) {
+      setError('Skrót musi mieć 3–5 liter A-Z, bez cyfr i znaków specjalnych.');
+      return;
+    }
+    if (password.length < 4) {
+      setError('Hasło musi mieć minimum 4 znaki.');
+      return;
+    }
+
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ login: normalizedLogin, password }),
+    });
+    const payload = (await response.json()) as { ok: boolean; user?: AuthUser; error?: string };
+    if (!response.ok || !payload.user) {
+      setError(payload.error ?? 'Nieprawidłowy login lub hasło');
+      return;
+    }
+    props.onLoggedIn(payload.user);
+  }
+
+  return (
+    <main className="login-shell">
+      <form className="login-card" onSubmit={submitLogin}>
+        <span className="eyebrow">LPC-528</span>
+        <h1>Logowanie operatora</h1>
+        <label>Login / skrót osobowy</label>
+        <input autoFocus value={login} onChange={(event) => setLogin(event.target.value.toUpperCase())} placeholder="ABC" />
+        <label>Hasło</label>
+        <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Hasło" />
+        {error && <p className="login-error">{error}</p>}
+        <button type="submit">Zaloguj</button>
+      </form>
+    </main>
+  );
+}
+
+function UsersPage(props: { user: AuthUser; onBack: () => void }) {
+  const [users, setUsers] = useState<PublicUser[]>([]);
+  const [login, setLogin] = useState('');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState<UserRole>('operator');
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function loadUsers() {
+    const payload = await fetchJson<{ ok: true; users: PublicUser[] }>('/api/users');
+    if (payload?.users) setUsers(payload.users);
+  }
+
+  useEffect(() => {
+    void loadUsers();
+  }, []);
+
+  async function createUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalizedLogin = login.trim().toUpperCase();
+    if (!LOGIN_REGEX.test(normalizedLogin)) {
+      setMessage('Skrót musi mieć 3–5 liter A-Z, bez cyfr i znaków specjalnych.');
+      return;
+    }
+    if (password.length < 4) {
+      setMessage('Hasło musi mieć minimum 4 znaki.');
+      return;
+    }
+
+    const response = await fetch('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ login: normalizedLogin, password, role }),
+    });
+    const payload = (await response.json()) as { ok: boolean; message?: string };
+    setMessage(response.ok ? 'Użytkownik dodany.' : payload.message ?? 'Nie udało się dodać użytkownika.');
+    if (response.ok) {
+      setLogin('');
+      setPassword('');
+      setRole('operator');
+      await loadUsers();
+    }
+  }
+
+  async function userAction(id: string, action: 'enable' | 'disable') {
+    await fetch(`/api/users/${id}/${action}`, { method: 'PATCH' });
+    await loadUsers();
+  }
+
+  async function resetPassword(id: string) {
+    const newPassword = window.prompt('Nowe hasło (min. 4 znaki)');
+    if (!newPassword) return;
+    await fetch(`/api/users/${id}/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: newPassword }),
+    });
+    await loadUsers();
+  }
+
+  return (
+    <main className="users-shell">
+      <header className="users-header">
+        <div>
+          <span className="eyebrow">Administracja</span>
+          <h1>Użytkownicy</h1>
+        </div>
+        <button type="button" onClick={props.onBack}>Wróć do panelu</button>
+      </header>
+      <form className="user-form" onSubmit={createUser}>
+        <input value={login} onChange={(event) => setLogin(event.target.value.toUpperCase())} placeholder="Login ABC" />
+        <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Hasło tymczasowe" />
+        <select value={role} onChange={(event) => setRole(event.target.value as UserRole)} disabled={props.user.role !== 'admin'}>
+          <option value="operator">operator</option>
+          <option value="line_leader">line_leader</option>
+          <option value="admin">admin</option>
+        </select>
+        <button type="submit">Dodaj użytkownika</button>
+      </form>
+      {message && <p className="login-error">{message}</p>}
+      <section className="users-table-wrap">
+        <table>
+          <thead><tr><th>Login</th><th>Rola</th><th>Status</th><th>Utworzono</th><th>Ostatnie logowanie</th><th>Akcje</th></tr></thead>
+          <tbody>
+            {users.map((item) => (
+              <tr key={item.id}>
+                <td>{item.login}</td>
+                <td>{item.role}</td>
+                <td>{item.isActive ? 'aktywny' : 'nieaktywny'}</td>
+                <td>{formatDateTime(item.createdAt)}</td>
+                <td>{formatDateTime(item.lastLoginAt)}</td>
+                <td>
+                  <button type="button" onClick={() => void resetPassword(item.id)}>Resetuj hasło</button>
+                  <button type="button" onClick={() => void userAction(item.id, item.isActive ? 'disable' : 'enable')}>{item.isActive ? 'Dezaktywuj' : 'Aktywuj'}</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+    </main>
+  );
+}
+
 function App() {
+  const [route, setRoute] = useState(getInitialRoute);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [barcode, setBarcode] = useState('');
   const [status, setStatus] = useState<OperatorStatus>('ready');
   const [lastAccepted, setLastAccepted] = useState<ScanAcceptedPayload | null>(null);
@@ -212,6 +393,23 @@ function App() {
     curveCompletedEvents: 0,
   });
   const barcodeInputRef = useRef<HTMLInputElement | null>(null);
+
+  async function refreshMe() {
+    const payload = await fetchJson<{ ok: true; user: AuthUser | null }>('/api/auth/me');
+    setAuthUser(payload?.user ?? null);
+    setAuthLoading(false);
+    return payload?.user ?? null;
+  }
+
+  useEffect(() => {
+    const onPopState = () => setRoute(getInitialRoute());
+    window.addEventListener('popstate', onPopState);
+    void refreshMe().then((user) => {
+      if (!user && route !== '/login') navigateTo('/login', setRoute);
+      if (user && route === '/login') navigateTo('/operator', setRoute);
+    });
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   async function refreshLpcStatus() {
     const nextStatus = await fetchLpcStatus();
@@ -322,6 +520,10 @@ function App() {
 
   async function submitScan(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!authUser) {
+      navigateTo('/login', setRoute);
+      return;
+    }
     const trimmedBarcode = barcode.trim();
     if (!trimmedBarcode) return;
 
@@ -335,6 +537,12 @@ function App() {
     });
 
     const payload = (await response.json()) as ScanAcceptedResponse | ScanRejectedPayload;
+
+    if (response.status === 401) {
+      setAuthUser(null);
+      navigateTo('/login', setRoute);
+      return;
+    }
 
     if (!response.ok || !('programStart' in payload)) {
       const rejectedPayload = payload as ScanRejectedPayload;
@@ -387,6 +595,12 @@ function App() {
     setProgramStartTestResponse(JSON.stringify(await response.json(), null, 2));
   }
 
+  async function logout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    setAuthUser(null);
+    navigateTo('/login', setRoute);
+  }
+
   async function sendMockLine() {
     const response = await fetch('/api/lpc/mock-line', {
       method: 'POST',
@@ -404,6 +618,22 @@ function App() {
   const startOk = lastAccepted?.programStart.success ?? false;
   const connectionLabel = getSafeLpcConnectionLabel(lpcStatus);
   const connectionClass = lpcStatus?.lastError ? 'connection-error' : `connection-${lpcStatus?.status ?? 'idle'}`;
+
+  if (authLoading) {
+    return <main className="login-shell"><div className="login-card"><h1>Ładowanie...</h1></div></main>;
+  }
+
+  if (!authUser || route === '/login') {
+    return <LoginPage onLoggedIn={(user) => {
+      setAuthUser(user);
+      navigateTo('/operator', setRoute);
+    }} />;
+  }
+
+  if (route === '/admin/users') {
+    if (!isManager(authUser)) return <main className="login-shell"><div className="login-card"><h1>Brak uprawnień</h1><button type="button" onClick={() => navigateTo('/operator', setRoute)}>Wróć</button></div></main>;
+    return <UsersPage user={authUser} onBack={() => navigateTo('/operator', setRoute)} />;
+  }
 
   return (
     <main className="app-shell">
@@ -424,7 +654,13 @@ function App() {
             {lpcStatus?.lastError && <small className="connection-error-text">{lpcStatus.lastError}</small>}
           </div>
         </div>
-        {showDiagnostics && <button className="diagnostics-button" type="button" onClick={() => setDiagnosticsOpen(true)}>Diagnostyka</button>}
+        <div className="user-badge">
+          <strong>Operator: {authUser.login}</strong>
+          <small>{authUser.role}</small>
+        </div>
+        {isManager(authUser) && <button className="diagnostics-button" type="button" onClick={() => navigateTo('/admin/users', setRoute)}>Użytkownicy</button>}
+        <button className="diagnostics-button" type="button" onClick={() => void logout()}>Wyloguj</button>
+        {showDiagnostics && isManager(authUser) && <button className="diagnostics-button" type="button" onClick={() => setDiagnosticsOpen(true)}>Diagnostyka</button>}
       </header>
 
       <section className="operator-grid">
@@ -523,12 +759,13 @@ function App() {
             {resultHistory.length > 0 ? (
               <table>
                 <thead>
-                  <tr><th>Czas</th><th>Wynik</th><th>Program</th><th>Barcode</th><th>ID</th><th>Pomiar</th><th>RL</th><th>Pt</th><th>EDC</th><th>PL</th><th>LLR</th><th>HLR</th><th>FPR</th></tr>
+                  <tr><th>Czas</th><th>Operator</th><th>Wynik</th><th>Program</th><th>Barcode</th><th>ID</th><th>Pomiar</th><th>RL</th><th>Pt</th><th>EDC</th><th>PL</th><th>LLR</th><th>HLR</th><th>FPR</th></tr>
                 </thead>
                 <tbody>
                   {resultHistory.slice(0, 10).map((result) => (
                     <tr key={`${result.receivedAt}-${result.uniqueId}`}>
                       <td>{formatDateTime(result.receivedAt)}</td>
+                      <td>{result.operatorLogin ?? '-'}</td>
                       <td><span className={`result-badge ${getResultClass(result.result)}`}>{formatResultLabel(result.result)}</span></td>
                       <td>{result.programText}</td>
                       <td>{result.barcode}</td>

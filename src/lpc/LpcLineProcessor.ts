@@ -18,6 +18,8 @@ export interface EnrichedLpcResult extends LpcResult {
   currentTestProgram?: number;
   currentTestProgramText?: string;
   currentTestSelectedAt?: string;
+  operatorLogin?: string | null;
+  operatorRole?: string | null;
 }
 
 export interface LpcRawLineDiagnostic {
@@ -195,6 +197,8 @@ export class LpcLineProcessor {
       currentTestProgram: currentTest.program,
       currentTestProgramText: currentTest.programText,
       currentTestSelectedAt: currentTest.selectedAt,
+      operatorLogin: currentTest.operatorLogin ?? null,
+      operatorRole: currentTest.operatorRole ?? null,
       barcode: this.resolveBarcode(result, currentTest),
       program: currentTest.programText,
       programText: currentTest.programText,

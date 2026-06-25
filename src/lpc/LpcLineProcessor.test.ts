@@ -17,6 +17,8 @@ function currentTest(): CurrentTest {
     program: 1,
     programText: 'P01',
     selectedAt: new Date().toISOString(),
+    operatorLogin: 'ABC',
+    operatorRole: 'operator',
   };
 }
 
@@ -93,6 +95,8 @@ describe('LpcLineProcessor', () => {
       programText: 'P01',
       currentTestValid: true,
       currentTestProgramText: 'P01',
+      operatorLogin: 'ABC',
+      operatorRole: 'operator',
     });
   });
 

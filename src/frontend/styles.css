@@ -351,7 +351,8 @@ button, input, textarea { font: inherit; }
   margin: 0 0 12px;
   font-size: clamp(24px, 1.6vw, 34px);
 }
-.history-panel table { width: 100%; border-collapse: collapse; font-size: clamp(14px, 0.88vw, 18px); }
+.history-panel { overflow: auto; }
+.history-panel table { min-width: 1040px; width: 100%; border-collapse: collapse; font-size: clamp(14px, 0.88vw, 18px); }
 .history-panel th { color: #94a3b8; font-size: 13px; text-transform: uppercase; text-align: left; }
 .history-panel th,
 .history-panel td { padding: 8px 6px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); vertical-align: top; }

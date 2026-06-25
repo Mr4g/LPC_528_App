@@ -463,3 +463,40 @@ VITE_SHOW_DIAGNOSTICS=true
 Panel diagnostyczny otwiera modal, dzięki czemu nie rozciąga głównego layoutu operatora. W diagnostyce są dostępne: test portu LPC, heartbeat, force refresh status, mock line, connect/disconnect diagnostyczne oraz pełny wynik `ProgramStarter` wraz ze `stdout` i `stderr`.
 
 Operator w normalnej pracy nie używa przycisków `connect` / `disconnect`; połączenie LPC działa automatycznie przez backend i reconnect.
+
+## Debugowanie przepływu danych LPC
+
+Jeśli program startuje na LPC, ale UI nie pokazuje wykresu albo końcowego wyniku, sprawdzaj pipeline w tej kolejności:
+
+1. **Czy test został uruchomiony przez ProgramStarter** — odpowiedź `/api/scan` albo `/api/programs/start` musi mieć `programStart.success=true`.
+2. **Czy backend odbiera surowe linie z LPC**:
+   ```bash
+   curl http://localhost:3000/api/lpc/raw-lines
+   ```
+   Każda linia ma diagnostykę `receivedAt`, `raw`, `normalized`, `parsedAs`, a dla ignorowanych linii także `reason`.
+3. **Czy parser rozpoznaje stream/result i czy emitowane są eventy**:
+   ```bash
+   curl http://localhost:3000/api/lpc/pipeline-status
+   ```
+   Sprawdź `lastRawLineAt`, `lastStreamAt`, `lastResultAt`, `streamCount`, `resultCount`, `curvePointCount`, `resultHistoryCount` i `socketClientsCount`.
+4. **Czy historia wyników ma dane**:
+   ```bash
+   curl http://localhost:3000/api/lpc/results
+   curl http://localhost:3000/api/lpc/last-result
+   curl http://localhost:3000/api/lpc/curve
+   ```
+5. **Czy UI dostaje Socket.IO eventy** — ustaw `VITE_SHOW_DIAGNOSTICS=true`, otwórz modal `Diagnostyka` i sprawdź liczniki `streamEvents`, `resultEvents`, `resultsUpdatedEvents`, `curveUpdatedEvents` i `curveCompletedEvents`.
+6. **Test bez realnego LPC** — zasymuluj kompletny test przez ten sam `LpcLineProcessor`:
+   ```bash
+   curl -X POST http://localhost:3000/api/lpc/mock-test \
+     -H "Content-Type: application/json" \
+     -d '{"barcode":"5901234123457","programText":"P01"}'
+   ```
+
+Dodatkowe logowanie backendowego pipeline można włączyć przez:
+
+```env
+LPC_DEBUG_PIPELINE=true
+```
+
+Wtedy backend loguje `RAW LPC LINE`, `PARSED STREAM`, `PARSED RESULT`, `IGNORED LINE reason` i `SOCKET EMIT event name`.

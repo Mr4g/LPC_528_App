@@ -71,3 +71,46 @@ describe('LpcTcpClient', () => {
     client.disconnect();
   });
 });
+
+describe('LpcTcpClient line splitting', () => {
+  it('splits one packet containing two LF lines', () => {
+    const client = new LpcTcpClient(options(23));
+    const lines: string[] = [];
+    client.on('line', (line) => lines.push(line));
+
+    client.receiveTextForTest('first\nsecond\n');
+
+    expect(lines).toEqual(['first', 'second']);
+  });
+
+  it('keeps a partial line until the next packet arrives', () => {
+    const client = new LpcTcpClient(options(23));
+    const lines: string[] = [];
+    client.on('line', (line) => lines.push(line));
+
+    client.receiveTextForTest('first ');
+    client.receiveTextForTest('line\n');
+
+    expect(lines).toEqual(['first line']);
+  });
+
+  it('splits CRLF lines', () => {
+    const client = new LpcTcpClient(options(23));
+    const lines: string[] = [];
+    client.on('line', (line) => lines.push(line));
+
+    client.receiveTextForTest('first\r\nsecond\r\n');
+
+    expect(lines).toEqual(['first', 'second']);
+  });
+
+  it('splits CR-only lines', () => {
+    const client = new LpcTcpClient(options(23));
+    const lines: string[] = [];
+    client.on('line', (line) => lines.push(line));
+
+    client.receiveTextForTest('first\rsecond\r');
+
+    expect(lines).toEqual(['first', 'second']);
+  });
+});

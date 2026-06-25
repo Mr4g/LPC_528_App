@@ -27,7 +27,7 @@ function createProcessor() {
   const currentTestStore = new CurrentTestStore();
   const curveBuffer = new LpcTestCurveBuffer();
   const lastResultStore = new LastResultStore();
-  const resultHistoryStore = new ResultHistoryStore(20);
+  const resultHistoryStore = new ResultHistoryStore(50);
   const processor = new LpcLineProcessor({
     io: io as never,
     tcpClient: tcpClient as never,
@@ -52,6 +52,8 @@ describe('LpcLineProcessor', () => {
 
     expect(curveBuffer.getPoints()).toHaveLength(1);
     expect(emitted.some((item) => item.event === 'lpc:stream')).toBe(true);
+    expect(emitted.some((item) => item.event === 'lpc:curve-updated')).toBe(true);
+    expect(processor.getPipelineStatus()).toMatchObject({ streamCount: 1 });
   });
 
   it('recognizes result, stores it and emits completion events', () => {
@@ -62,8 +64,10 @@ describe('LpcLineProcessor', () => {
     expect(emitted.some((item) => item.event === 'lpc:result')).toBe(true);
     expect(emitted.some((item) => item.event === 'test:completed')).toBe(true);
     expect(emitted.some((item) => item.event === 'lpc:curve-completed')).toBe(true);
+    expect(emitted.some((item) => item.event === 'lpc:results-updated')).toBe(true);
     expect(lastResultStore.get()?.result).toBe('REJECT');
     expect(resultHistoryStore.getAll()).toHaveLength(1);
+    expect(processor.getPipelineStatus()).toMatchObject({ resultCount: 1 });
   });
 
   it('ignores menu after sending interface selection', () => {
@@ -96,5 +100,6 @@ describe('LpcLineProcessor', () => {
     const { processor } = createProcessor();
 
     expect(() => processor.processLine('garbage telnet noise')).not.toThrow();
+    expect(processor.getRawLines().at(-1)).toMatchObject({ parsedAs: 'ignored' });
   });
 });

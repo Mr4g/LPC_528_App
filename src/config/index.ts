@@ -30,6 +30,7 @@ const envSchema = z.object({
   LPC_HEARTBEAT_PAYLOAD: z.string().default(''),
   LPC_AUTO_SELECT_INTERFACE: z.coerce.boolean().default(true),
   LPC_DEBUG_LINES: z.coerce.boolean().default(false),
+  LPC_DEBUG_PIPELINE: z.coerce.boolean().default(false),
   CURRENT_TEST_MAX_AGE_MS: z.coerce.number().int().positive().default(600000),
   ENABLE_MOCK_LPC_ENDPOINTS: z.coerce.boolean().default(false),
   PROGRAM_START_MODE: z.enum(['mock', 'script']).default('mock'),

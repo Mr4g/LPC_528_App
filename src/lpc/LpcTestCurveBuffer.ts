@@ -16,6 +16,12 @@ export interface LpcCurveSummary {
   maxPressureMbar: number | null;
 }
 
+export interface LpcCurveSnapshot {
+  points: LpcCurvePoint[];
+  summary: LpcCurveSummary;
+  completed: boolean;
+}
+
 export interface LpcTestCurveBufferOptions {
   maxPoints?: number;
   minElapsedStepSec?: number;
@@ -26,6 +32,8 @@ export class LpcTestCurveBuffer {
   private readonly minElapsedStepSec: number;
   private points: LpcCurvePoint[] = [];
   private lastStoredElapsedTimeSec: number | null = null;
+  private lastCompletedPoints: LpcCurvePoint[] = [];
+  private lastCompletedSummary: LpcCurveSummary = this.buildSummary([]);
 
   constructor(options: LpcTestCurveBufferOptions = {}) {
     this.maxPoints = options.maxPoints ?? 1000;
@@ -64,20 +72,50 @@ export class LpcTestCurveBuffer {
     return [...this.points];
   }
 
+  getSnapshot(): LpcCurveSnapshot {
+    if (this.points.length > 0) {
+      return { points: this.getPoints(), summary: this.getSummary(), completed: false };
+    }
+
+    return {
+      points: [...this.lastCompletedPoints],
+      summary: { ...this.lastCompletedSummary },
+      completed: this.lastCompletedPoints.length > 0,
+    };
+  }
+
+  completeAndClear(): LpcCurveSnapshot {
+    this.lastCompletedPoints = this.getPoints();
+    this.lastCompletedSummary = this.getSummary();
+    const snapshot = { points: [...this.lastCompletedPoints], summary: { ...this.lastCompletedSummary }, completed: true };
+    this.clearCurrent();
+    return snapshot;
+  }
+
   clear(): void {
+    this.clearCurrent();
+    this.lastCompletedPoints = [];
+    this.lastCompletedSummary = this.buildSummary([]);
+  }
+
+  getSummary(): LpcCurveSummary {
+    return this.buildSummary(this.points);
+  }
+
+  private clearCurrent(): void {
     this.points = [];
     this.lastStoredElapsedTimeSec = null;
   }
 
-  getSummary(): LpcCurveSummary {
-    const pressureValues = this.points
+  private buildSummary(points: LpcCurvePoint[]): LpcCurveSummary {
+    const pressureValues = points
       .map((point) => point.pressureMbar)
       .filter((value): value is number => value !== null);
 
     return {
-      pointCount: this.points.length,
-      firstElapsedTimeSec: this.points[0]?.elapsedTimeSec ?? null,
-      lastElapsedTimeSec: this.points.at(-1)?.elapsedTimeSec ?? null,
+      pointCount: points.length,
+      firstElapsedTimeSec: points[0]?.elapsedTimeSec ?? null,
+      lastElapsedTimeSec: points.at(-1)?.elapsedTimeSec ?? null,
       minPressureMbar: pressureValues.length ? Math.min(...pressureValues) : null,
       maxPressureMbar: pressureValues.length ? Math.max(...pressureValues) : null,
     };

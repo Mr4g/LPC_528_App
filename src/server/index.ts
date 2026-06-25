@@ -42,7 +42,7 @@ const lpcCurveBuffer = new LpcTestCurveBuffer({
   minElapsedStepSec: config.LPC_MIN_ELAPSED_STEP_SEC,
 });
 const lastResultStore = new LastResultStore();
-const resultHistoryStore = new ResultHistoryStore(20);
+const resultHistoryStore = new ResultHistoryStore(50);
 const lpcLineProcessor = new LpcLineProcessor({
   io,
   tcpClient: lpcTcpClient,
@@ -54,6 +54,7 @@ const lpcLineProcessor = new LpcLineProcessor({
   interfaceSelection: config.LPC_INTERFACE_SELECTION,
   currentTestMaxAgeMs: config.CURRENT_TEST_MAX_AGE_MS,
   debugLines: config.LPC_DEBUG_LINES,
+  debugPipeline: config.LPC_DEBUG_PIPELINE,
 });
 
 lpcTcpClient.on('status', (state) => {
@@ -95,6 +96,7 @@ app.use('/api/lpc', createLpcRouter({
   curveBuffer: lpcCurveBuffer,
   lastResultStore,
   resultHistoryStore,
+  getSocketClientsCount: () => io.engine.clientsCount,
 }));
 app.use('/api', createScannerRouter({ config, io, programStarter, currentTestStore }));
 

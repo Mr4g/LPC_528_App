@@ -193,6 +193,10 @@ export class LpcTcpClient extends EventEmitter {
     return this.state.getSnapshot();
   }
 
+  receiveTextForTest(text: string): void {
+    this.processIncomingText(text);
+  }
+
   forceRefreshStatus(): LpcConnectionStateSnapshot {
     if (this.state.getStatus() === 'connected' && (!this.socket || this.socket.destroyed || !this.socket.writable)) {
       this.markStaleConnection('Stale LPC connection detected');
@@ -256,13 +260,24 @@ export class LpcTcpClient extends EventEmitter {
   private processIncomingText(text: string): void {
     this.receiveBuffer += text;
 
-    let newlineIndex = this.receiveBuffer.indexOf('\n');
-    while (newlineIndex >= 0) {
-      const line = this.receiveBuffer.slice(0, newlineIndex);
-      this.receiveBuffer = this.receiveBuffer.slice(newlineIndex + 1);
-      this.emit('line', line);
-      newlineIndex = this.receiveBuffer.indexOf('\n');
+    let delimiter = this.findLineDelimiterIndex();
+    while (delimiter >= 0) {
+      const line = this.receiveBuffer.slice(0, delimiter);
+      const delimiterLength = this.receiveBuffer[delimiter] === '\r' && this.receiveBuffer[delimiter + 1] === '\n' ? 2 : 1;
+      this.receiveBuffer = this.receiveBuffer.slice(delimiter + delimiterLength);
+      if (line || delimiter !== 0) {
+        this.emit('line', line);
+      }
+      delimiter = this.findLineDelimiterIndex();
     }
+  }
+
+  private findLineDelimiterIndex(): number {
+    const newlineIndex = this.receiveBuffer.indexOf('\n');
+    const carriageReturnIndex = this.receiveBuffer.indexOf('\r');
+    if (newlineIndex < 0) return carriageReturnIndex;
+    if (carriageReturnIndex < 0) return newlineIndex;
+    return Math.min(newlineIndex, carriageReturnIndex);
   }
 
   private startHeartbeat(): void {

@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import type { BarcodeScan, CurrentTest, LpcResult, LpcStreamPoint, ProgramStartRequest, ProgramStartResult } from '../shared/types';
 import { formatDateTime, formatNumber, formatResultLabel, getConnectionLabel, getResultClass } from './formatters';
 import { getProgramStartOperatorMessage } from './programStartMessages';
+import { mergeResultIntoHistory, replaceHistoryFromResultsUpdated } from './resultHistoryState';
 import './styles.css';
 
 interface ScanAcceptedPayload {
@@ -92,7 +93,9 @@ interface SocketLike {
   on(event: 'lpc:error', handler: SocketHandler<{ message: string; state?: LpcStatusPayload }>): void;
   on(event: 'lpc:stream', handler: SocketHandler<LpcStreamPayload>): void;
   on(event: 'lpc:result', handler: SocketHandler<EnrichedLpcResult>): void;
+  on(event: 'lpc:curve-updated', handler: SocketHandler<{ points: LpcCurvePoint[] }>): void;
   on(event: 'lpc:curve-completed', handler: SocketHandler<{ points: LpcCurvePoint[] }>): void;
+  on(event: 'lpc:results-updated', handler: SocketHandler<{ results: EnrichedLpcResult[] }>): void;
   on(event: 'test:completed', handler: SocketHandler<EnrichedLpcResult>): void;
   off(event: string): void;
   disconnect(): void;
@@ -130,10 +133,14 @@ function loadSocketIoClient(): Promise<SocketLike | null> {
   });
 }
 
-async function fetchLpcStatus(): Promise<LpcStatusPayload | null> {
-  const response = await fetch('/api/lpc/status');
+async function fetchJson<T>(url: string): Promise<T | null> {
+  const response = await fetch(url);
   if (!response.ok) return null;
-  return response.json() as Promise<LpcStatusPayload>;
+  return response.json() as Promise<T>;
+}
+
+async function fetchLpcStatus(): Promise<LpcStatusPayload | null> {
+  return fetchJson<LpcStatusPayload>('/api/lpc/status');
 }
 
 function buildChartPolyline(points: LpcCurvePoint[]): string {
@@ -179,6 +186,13 @@ function App() {
   const [diagnosticProgram, setDiagnosticProgram] = useState('1');
   const [programStartTestResponse, setProgramStartTestResponse] = useState<string | null>(null);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [eventCounters, setEventCounters] = useState({
+    streamEvents: 0,
+    resultEvents: 0,
+    resultsUpdatedEvents: 0,
+    curveUpdatedEvents: 0,
+    curveCompletedEvents: 0,
+  });
   const barcodeInputRef = useRef<HTMLInputElement | null>(null);
 
   async function refreshLpcStatus() {
@@ -188,6 +202,15 @@ function App() {
 
   useEffect(() => {
     void refreshLpcStatus();
+    void fetchJson<{ ok: true; result: EnrichedLpcResult | null }>('/api/lpc/last-result').then((payload) => {
+      if (payload?.result) setLastResult(payload.result);
+    });
+    void fetchJson<{ ok: true; results: EnrichedLpcResult[] }>('/api/lpc/results').then((payload) => {
+      if (payload?.results) setResultHistory(replaceHistoryFromResultsUpdated(payload.results, 10));
+    });
+    void fetchJson<{ ok: true; points: LpcCurvePoint[] }>('/api/lpc/curve').then((payload) => {
+      if (payload?.points) setCurvePoints(payload.points.slice(-150));
+    });
   }, []);
 
   useEffect(() => {
@@ -221,6 +244,7 @@ function App() {
       });
 
       socket.on('lpc:stream', (payload) => {
+        setEventCounters((counters) => ({ ...counters, streamEvents: counters.streamEvents + 1 }));
         setLastStream(payload);
         setCurvePoints((points) => [...points.slice(-149), {
           elapsedTimeSec: payload.elapsedTimeSec ?? 0,
@@ -231,18 +255,30 @@ function App() {
         }]);
       });
 
+      socket.on('lpc:curve-updated', (payload) => {
+        setEventCounters((counters) => ({ ...counters, curveUpdatedEvents: counters.curveUpdatedEvents + 1 }));
+        setCurvePoints(payload.points.slice(-150));
+      });
+
       socket.on('lpc:result', (payload) => {
+        setEventCounters((counters) => ({ ...counters, resultEvents: counters.resultEvents + 1 }));
         setLastResult(payload);
-        setResultHistory((results) => [payload, ...results].slice(0, 10));
+        setResultHistory((results) => mergeResultIntoHistory(results, payload, 10));
+      });
+
+      socket.on('lpc:results-updated', (payload) => {
+        setEventCounters((counters) => ({ ...counters, resultsUpdatedEvents: counters.resultsUpdatedEvents + 1 }));
+        setResultHistory(replaceHistoryFromResultsUpdated(payload.results, 10));
       });
 
       socket.on('lpc:curve-completed', (payload) => {
+        setEventCounters((counters) => ({ ...counters, curveCompletedEvents: counters.curveCompletedEvents + 1 }));
         setCurvePoints(payload.points.slice(-150));
       });
 
       socket.on('test:completed', (payload) => {
         setLastResult(payload);
-        setResultHistory((results) => [payload, ...results.filter((item) => item.receivedAt !== payload.receivedAt)].slice(0, 10));
+        setResultHistory((results) => mergeResultIntoHistory(results, payload, 10));
       });
     });
 
@@ -257,6 +293,8 @@ function App() {
       activeSocket?.off('lpc:error');
       activeSocket?.off('lpc:stream');
       activeSocket?.off('lpc:result');
+      activeSocket?.off('lpc:results-updated');
+      activeSocket?.off('lpc:curve-updated');
       activeSocket?.off('lpc:curve-completed');
       activeSocket?.off('test:completed');
       activeSocket?.disconnect();
@@ -466,17 +504,24 @@ function App() {
             {resultHistory.length > 0 ? (
               <table>
                 <thead>
-                  <tr><th>Czas</th><th>Program</th><th>Barcode</th><th>Wynik</th><th>Pomiar</th><th>ID</th></tr>
+                  <tr><th>Czas</th><th>Wynik</th><th>Program</th><th>Barcode</th><th>ID</th><th>Pomiar</th><th>RL</th><th>Pt</th><th>EDC</th><th>PL</th><th>LLR</th><th>HLR</th><th>FPR</th></tr>
                 </thead>
                 <tbody>
                   {resultHistory.slice(0, 10).map((result) => (
                     <tr key={`${result.receivedAt}-${result.uniqueId}`}>
                       <td>{formatDateTime(result.receivedAt)}</td>
+                      <td><span className={`result-badge ${getResultClass(result.result)}`}>{formatResultLabel(result.result)}</span></td>
                       <td>{result.programText}</td>
                       <td>{result.barcode}</td>
-                      <td><span className={`result-badge ${getResultClass(result.result)}`}>{formatResultLabel(result.result)}</span></td>
+                      <td>{result.uniqueId ?? result.totalAbs}</td>
                       <td>{formatNumber(result.leakValue, 4)} {result.leakUnit}</td>
-                      <td>{result.totalAbs}</td>
+                      <td>{formatNumber(result.RL, 3)}</td>
+                      <td>{formatNumber(result.Pt, 3)}</td>
+                      <td>{formatNumber(result.EDC, 3)}</td>
+                      <td>{formatNumber(result.PL, 3)}</td>
+                      <td>{formatNumber(result.LLR, 3)}</td>
+                      <td>{formatNumber(result.HLR, 3)}</td>
+                      <td>{formatNumber(result.FPR, 3)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -503,6 +548,7 @@ function App() {
                   <button type="button" onClick={() => void heartbeatTest()}>Heartbeat test</button>
                   <button type="button" onClick={() => void forceRefreshStatus()}>Force refresh status</button>
                 </div>
+                <pre>{JSON.stringify(eventCounters, null, 2)}</pre>
                 {lpcActionMessage && <pre>{lpcActionMessage}</pre>}
                 {portCheck && <pre>{JSON.stringify(portCheck, null, 2)}</pre>}
                 {heartbeatResponse && <pre>{heartbeatResponse}</pre>}

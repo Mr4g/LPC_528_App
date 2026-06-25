@@ -564,3 +564,17 @@ curl http://localhost:3000/api/lpc/results
 1. Upewnij się, że `.env` zawiera `DEFAULT_ADMIN_LOGIN=ADM`, `DEFAULT_ADMIN_PASSWORD=admin123` i `SQLITE_DB_PATH=data/lpc_app.sqlite`.
 2. Zrestartuj backend — jeśli baza nie ma żadnego admina, aplikacja naprawi/utworzy domyślnego admina.
 3. Jeśli baza zawiera starego admina ze zmienionym hasłem, usuń plik `data/lpc_app.sqlite` tylko w środowisku developerskim i uruchom backend ponownie, żeby odtworzyć domyślnego admina.
+
+### Backend nie startuje i Vite pokazuje ECONNREFUSED dla `/api/auth/login`
+
+`ECONNREFUSED` w logu Vite oznacza, że frontend działa, ale backend na `http://localhost:3000` nie odpowiada. Najczęstsza przyczyna po dodaniu logowania to stary/uszkodzony plik bazy użytkowników albo niedziałający backend.
+
+Sprawdź w osobnym terminalu:
+
+```bash
+npm run dev:backend
+curl http://localhost:3000/health
+curl http://localhost:3000/api/auth/me
+```
+
+Aktualny moduł użytkowników używa przenośnego lokalnego pliku pod ścieżką `SQLITE_DB_PATH` i nie wymaga natywnego modułu `better-sqlite3`. Jeśli pod tą ścieżką leży stary nieczytelny plik, backend przeniesie go do `*.invalid-<timestamp>` i utworzy nową bazę użytkowników z adminem `ADM/admin123`.

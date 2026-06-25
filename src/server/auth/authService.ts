@@ -1,11 +1,25 @@
 import crypto from 'node:crypto';
-import bcrypt from 'bcryptjs';
 import type { AppDatabase } from '../db/database';
 import { normalizeOperatorLogin, validateOperatorLogin } from './operatorLogin';
 import type { AuthUser, PublicUser, UserRecord, UserRole } from './types';
 
 const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 const ALLOWED_ROLES: UserRole[] = ['operator', 'line_leader', 'admin'];
+const PASSWORD_HASH_PREFIX = 'scrypt';
+
+function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16).toString('base64url');
+  const hash = crypto.scryptSync(password, salt, 64).toString('base64url');
+  return `${PASSWORD_HASH_PREFIX}$${salt}$${hash}`;
+}
+
+function verifyPassword(password: string, storedHash: string): boolean {
+  const [prefix, salt, hash] = storedHash.split('$');
+  if (prefix !== PASSWORD_HASH_PREFIX || !salt || !hash) return false;
+  const computed = crypto.scryptSync(password, salt, 64).toString('base64url');
+  if (computed.length !== hash.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(hash));
+}
 
 export interface SessionPayload extends AuthUser {
   exp: number;
@@ -15,9 +29,9 @@ export class AuthService {
   constructor(private readonly db: AppDatabase, private readonly sessionSecret: string) {}
 
   seedDefaultAdmin(login: string, password: string): void {
-    const count = this.db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };
-    const adminCount = this.db.prepare('SELECT COUNT(*) as count FROM users WHERE role = ?').get('admin') as { count: number };
-    if (count.count > 0 && adminCount.count > 0) return;
+    const count = this.db.countUsers();
+    const adminCount = this.db.countAdmins();
+    if (count > 0 && adminCount > 0) return;
 
     const existingDefaultUser = this.findUserByLogin(login);
     if (existingDefaultUser) {
@@ -42,7 +56,7 @@ export class AuthService {
     const user: UserRecord = {
       id: crypto.randomUUID(),
       login,
-      passwordHash: bcrypt.hashSync(input.password, 10),
+      passwordHash: hashPassword(input.password),
       role: input.role,
       isActive: 1,
       createdAt: now,
@@ -51,10 +65,7 @@ export class AuthService {
       createdBy: input.createdBy,
     };
 
-    this.db.prepare(`
-      INSERT INTO users (id, login, passwordHash, role, isActive, createdAt, updatedAt, lastLoginAt, createdBy)
-      VALUES (@id, @login, @passwordHash, @role, @isActive, @createdAt, @updatedAt, @lastLoginAt, @createdBy)
-    `).run(user);
+    this.db.insertUser(user);
 
     return this.toPublicUser(user);
   }
@@ -65,45 +76,45 @@ export class AuthService {
 
     const user = this.findUserByLogin(login);
     if (!user || !user.isActive) return null;
-    if (!bcrypt.compareSync(password, user.passwordHash)) return null;
+    if (!verifyPassword(password, user.passwordHash)) return null;
 
     const lastLoginAt = new Date().toISOString();
-    this.db.prepare('UPDATE users SET lastLoginAt = @lastLoginAt, updatedAt = @lastLoginAt WHERE id = @id').run({ id: user.id, lastLoginAt });
+    this.db.updateUser(user.id, { lastLoginAt, updatedAt: lastLoginAt });
     return { id: user.id, login: user.login, role: user.role };
   }
 
   listUsers(): PublicUser[] {
-    return (this.db.prepare('SELECT * FROM users ORDER BY login ASC').all() as UserRecord[]).map((user) => this.toPublicUser(user));
+    return this.db.listUsers().map((user) => this.toPublicUser(user));
   }
 
   getUserById(id: string): PublicUser | null {
-    const user = this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRecord | undefined;
+    const user = this.db.findById(id);
     return user ? this.toPublicUser(user) : null;
   }
 
   findUserByLogin(login: string): UserRecord | null {
-    return (this.db.prepare('SELECT * FROM users WHERE login = ?').get(normalizeOperatorLogin(login)) as UserRecord | undefined) ?? null;
+    return this.db.findByLogin(normalizeOperatorLogin(login));
   }
 
   setRole(id: string, role: UserRole): PublicUser | null {
     this.assertValidRole(role);
     const updatedAt = new Date().toISOString();
-    this.db.prepare('UPDATE users SET role = @role, updatedAt = @updatedAt WHERE id = @id').run({ id, role, updatedAt });
-    return this.getUserById(id);
+    const user = this.db.updateUser(id, { role, updatedAt });
+    return user ? this.toPublicUser(user) : null;
   }
 
   setActive(id: string, active: boolean): PublicUser | null {
     const updatedAt = new Date().toISOString();
-    this.db.prepare('UPDATE users SET isActive = @isActive, updatedAt = @updatedAt WHERE id = @id').run({ id, isActive: active ? 1 : 0, updatedAt });
-    return this.getUserById(id);
+    const user = this.db.updateUser(id, { isActive: active ? 1 : 0, updatedAt });
+    return user ? this.toPublicUser(user) : null;
   }
 
   resetPassword(id: string, password: string): PublicUser | null {
     this.assertValidPassword(password);
-    const passwordHash = bcrypt.hashSync(password, 10);
+    const passwordHash = hashPassword(password);
     const updatedAt = new Date().toISOString();
-    this.db.prepare('UPDATE users SET passwordHash = @passwordHash, updatedAt = @updatedAt WHERE id = @id').run({ id, passwordHash, updatedAt });
-    return this.getUserById(id);
+    const user = this.db.updateUser(id, { passwordHash, updatedAt });
+    return user ? this.toPublicUser(user) : null;
   }
 
   createSession(user: AuthUser): string {

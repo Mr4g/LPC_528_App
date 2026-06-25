@@ -998,6 +998,8 @@ function App() {
   const connectionClass = lpcStatus?.lastError ? 'connection-error' : `connection-${lpcStatus?.status ?? 'idle'}`;
   const displayedCurvePoints = curvePoints.length > 0 ? curvePoints : completedCurvePoints;
   const scanLocked = Boolean(testSession?.locked);
+  const scanStatusText = scanLocked ? 'Test w toku' : (status === 'program-selected' && lastAccepted ? `${lastAccepted.currentTest.programText} wybrany` : statusLabels[status]);
+  const activeTestHelper = scanLocked ? [testSession?.programText, testSession?.barcode].filter(Boolean).join(' / ') : '';
   const resultsTable = resultHistory.length > 0 ? (
     <table className="results-table">
       <thead>
@@ -1144,28 +1146,27 @@ function App() {
         <aside className={`panel scan-panel status-${status}`}>
           <div className="panel-header scan-header">
             <span>Skanowanie</span>
-            <strong className="scan-status">{status === 'program-selected' && lastAccepted ? `${lastAccepted.currentTest.programText} wybrany` : statusLabels[status]}</strong>
+            <strong className="scan-status">{scanStatusText}</strong>
           </div>
           <form className="scan-form" onSubmit={submitScan}>
             <label htmlFor="barcode-input">Barcode</label>
             <input
               id="barcode-input"
-              className="scan-input"
+              className={`scan-input${scanLocked ? ' is-disabled' : ''}`}
               ref={barcodeInputRef}
               autoFocus
               disabled={scanLocked}
-              value={barcode}
+              value={scanLocked ? 'Trwa test...' : barcode}
               onChange={(event) => setBarcode(event.target.value)}
-              placeholder="Zeskanuj barcode"
+              placeholder={scanLocked ? 'Trwa test...' : 'Zeskanuj barcode'}
             />
-            <button type="submit" disabled={status === 'scanning' || scanLocked}>Wyślij skan</button>
+            {scanLocked && (
+              <p className="scan-helper">
+                Poczekaj na wynik bieżącego testu{activeTestHelper ? <>: <strong>{activeTestHelper}</strong></> : '.'}
+              </p>
+            )}
+            <button className="scan-submit" type="submit" disabled={status === 'scanning' || scanLocked}>Wyślij skan</button>
           </form>
-          {scanLocked && (
-            <div className="scan-error">
-              <strong>Test w toku — poczekaj na wynik</strong>
-              <span>{testSession?.programText ?? '-'} / {testSession?.barcode ?? '-'}</span>
-            </div>
-          )}
 
           {lastAccepted && (
             <div className="scan-summary">
@@ -1178,7 +1179,7 @@ function App() {
             </div>
           )}
 
-          {lastRejected && (
+          {lastRejected && lastRejected.error !== 'TEST_IN_PROGRESS' && (
             <div className="scan-error">
               <strong>{lastRejected.error}</strong>
               <span>{lastRejected.message}: {lastRejected.barcode}</span>

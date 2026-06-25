@@ -686,7 +686,7 @@ Aplikacja używa lokalnej bazy SQLite wskazanej przez `SQLITE_DB_PATH` (domyśln
 
 ## Blokada testu
 
-Po zaakceptowanym skanie backend tworzy aktywną sesję testu i blokuje kolejne skany, dopóki test jest w stanie `starting`, `running` albo `waiting_for_result`. Próba skanu w trakcie testu zwraca `TEST_IN_PROGRESS`, a frontend blokuje input barcode oraz pokazuje komunikat `Test w toku — poczekaj na wynik`.
+Po zaakceptowanym skanie backend tworzy aktywną sesję testu i blokuje kolejne skany, dopóki test jest w stanie `starting`, `running` albo `waiting_for_result`. Próba skanu w trakcie testu zwraca `TEST_IN_PROGRESS`, a frontend wyszarza pole barcode, pokazuje w nim subtelny tekst `Trwa test...`, blokuje przycisk skanu i pod inputem pokazuje mały opis bieżącego programu/barcode. Po finalnym wyniku input wraca do normalnego stanu i odzyskuje focus.
 
 Timeout aktywnego testu konfiguruje `ACTIVE_TEST_TIMEOUT_MS` (domyślnie `60000`). Jeśli w tym czasie nie przyjdzie finalny wynik, sesja przechodzi w `timeout` i skanowanie zostaje odblokowane. `ACTIVE_TEST_NO_DATA_WARNING_MS` pokazuje ostrzeżenie `Brak danych z LPC`, jeśli po starcie testu nie przychodzi streaming. Line leader albo admin może użyć diagnostycznego `POST /api/test-session/unlock`, żeby ręcznie odblokować test.
 

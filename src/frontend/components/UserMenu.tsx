@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 interface UserMenuProps {
   login: string;
   role: string;
@@ -13,11 +14,32 @@ interface UserMenuProps {
   onDiagnostics: () => void;
   onThemeChange: (theme: 'light' | 'dark') => void;
   onLogout: () => void;
+  onClose: () => void;
 }
 
 export function UserMenu(props: UserMenuProps) {
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!props.open) return;
+
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) props.onClose();
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') props.onClose();
+    };
+
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [props.open, props.onClose]);
+
   return (
-    <div className="user-menu">
+    <div className="user-menu" ref={menuRef}>
       <button type="button" className="operator-card" onClick={props.onToggle} aria-expanded={props.open}>
         <span>
           <strong>Operator: {props.login}</strong>

@@ -619,3 +619,11 @@ Tabela historii nie zajmuje już dolnego pasa głównego panelu. Jest dostępna 
 ## Programy / mapowanie barcode
 
 Moduł `Programy` jest dostępny dla ról `line_leader` i `admin`. Pozwala dodawać oraz edytować aktywne mapowania `barcodePattern -> programNumber` z typem dopasowania `exact` albo `contains`. Backend używa aktywnych rekordów przy każdym skanie, więc zmiany działają bez restartu aplikacji. Jeżeli lista mapowań w lokalnej bazie jest pusta, aplikacja nadal korzysta z fallbacku `BARCODE_PROGRAM_MAP` z `.env`.
+
+## Poprawki regresji UI: wykres, top bar i menu
+
+- Reset wykresu po nowym skanie czyści punkty oraz marker końcowy starego testu, ale pierwsze nowe dane z `lpc:stream`, `lpc:curve-updated`, `lpc:curve-completed` albo pollingu `/api/lpc/curve` ponownie odblokowują rysowanie krzywej.
+- Diagnostyka frontendowa pokazuje liczniki zdarzeń oraz stan wykresu: liczbę punktów, `ignoreCompletedCurveUntilNewStream`, status wykresu i finalny wynik markera.
+- Legenda wykresu jest renderowana pod SVG jako osobny element HTML, więc nie nachodzi na opis osi X `Czas [s]`.
+- Menu operatora zamyka się po kliknięciu poza menu oraz po naciśnięciu `Escape`; po zamknięciu fokus wraca do pola barcode, jeśli operator jest na panelu i nie ma otwartego modala.
+- Przycisk `Wyniki testów` jest dostępny bezpośrednio w prawym panelu pod kartą ostatniego wyniku i otwiera modal historii pomiarów.

@@ -25,7 +25,7 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
   const hasLine = validPoints.length >= 2;
   const width = 930;
   const height = 420;
-  const plot = { left: 62, top: 42, right: 900, bottom: 344 };
+  const plot = { left: 62, top: 36, right: 900, bottom: 326 };
   const minX = validPoints.length ? Math.min(...validPoints.map((point) => point.elapsedTimeSec)) : 0;
   const maxX = validPoints.length ? Math.max(...validPoints.map((point) => point.elapsedTimeSec)) : 1;
   const rawMinY = validPoints.length ? Math.min(...validPoints.map((point) => point.pressureMbar)) : -1;
@@ -76,7 +76,7 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
             </foreignObject>
           </g>
         )}
-        <text className="chart-label" x="430" y="404">Czas [s]</text>
+        <text className="chart-label" x="430" y="382">Czas [s]</text>
         <text className="chart-label" x="80" y="26">Ciśnienie [mbar]</text>
       </svg>
       {validPoints.length === 0 && <div className="chart-empty">Brak danych z testu</div>}

@@ -114,6 +114,7 @@ declare global {
 
 type OperatorStatus = 'ready' | 'scanning' | 'program-selected' | 'no-mapping' | 'start-error';
 type UserRole = 'operator' | 'line_leader' | 'admin';
+type ChartStatus = 'waiting' | 'live' | 'completed';
 
 interface AuthUser {
   id: string;
@@ -221,6 +222,13 @@ function getSafeLpcConnectionLabel(status: LpcStatusPayload | null): string {
   if (!status) return getConnectionLabel(null, false);
   const safeConnected = status.connected && !status.lastError && status.socketDestroyed !== true && status.socketWritable !== false;
   return getConnectionLabel(status.status, safeConnected);
+}
+
+
+function buildCurveSignature(points: LpcCurvePoint[]): string {
+  const lastPoint = points.at(-1);
+  if (!lastPoint) return 'empty';
+  return `${points.length}:${lastPoint.elapsedTimeSec}:${lastPoint.pressureMbar ?? 'null'}:${lastPoint.segment}`;
 }
 
 function LoginPage(props: { onLoggedIn: (user: AuthUser) => void }) {
@@ -511,6 +519,7 @@ function App() {
   const [curvePoints, setCurvePoints] = useState<LpcCurvePoint[]>([]);
   const [completedCurvePoints, setCompletedCurvePoints] = useState<LpcCurvePoint[]>([]);
   const [chartFinalResult, setChartFinalResult] = useState<EnrichedLpcResult | null>(null);
+  const [chartStatus, setChartStatus] = useState<ChartStatus>('waiting');
   const [ignoreCompletedCurveUntilNewStream, setIgnoreCompletedCurveUntilNewStream] = useState(false);
   const [carrierLogoAvailable, setCarrierLogoAvailable] = useState(true);
   const [lpcActionMessage, setLpcActionMessage] = useState<string | null>(null);
@@ -537,6 +546,9 @@ function App() {
   const resultsOpenRef = useRef(resultsOpen);
   const userMenuOpenRef = useRef(userMenuOpen);
   const ignoreCompletedCurveUntilNewStreamRef = useRef(ignoreCompletedCurveUntilNewStream);
+  const hasLiveCurveRef = useRef(false);
+  const ignoredCurveSignatureRef = useRef<string | null>(null);
+  const chartStatusRef = useRef<ChartStatus>(chartStatus);
 
   function focusBarcodeInput(delayMs = 0) {
     window.setTimeout(() => {
@@ -558,10 +570,15 @@ function App() {
 
 
   function resetChartForNewTest() {
+    const displayedBeforeReset = curvePoints.length > 0 ? curvePoints : completedCurvePoints;
+    ignoredCurveSignatureRef.current = buildCurveSignature(displayedBeforeReset);
+    hasLiveCurveRef.current = false;
     setCurvePoints([]);
     setCompletedCurvePoints([]);
     setChartFinalResult(null);
     setLastStream(null);
+    chartStatusRef.current = 'waiting';
+    setChartStatus('waiting');
     ignoreCompletedCurveUntilNewStreamRef.current = true;
     setIgnoreCompletedCurveUntilNewStream(true);
   }
@@ -615,6 +632,10 @@ function App() {
   }, [ignoreCompletedCurveUntilNewStream]);
 
   useEffect(() => {
+    chartStatusRef.current = chartStatus;
+  }, [chartStatus]);
+
+  useEffect(() => {
     if (authUser && route === '/operator') focusBarcodeInput(120);
   }, [authUser, route]);
 
@@ -635,7 +656,20 @@ function App() {
       void fetchLpcRuntimeState().then((payload) => {
         if (payload.lastResult) setLastResult(payload.lastResult);
         if (payload.results.length > 0) setResultHistory(replaceHistoryFromResultsUpdated(payload.results, 50));
-        if (payload.points.length > 0 && !ignoreCompletedCurveUntilNewStreamRef.current) setCurvePoints(payload.points.slice(-150));
+        if (payload.points.length > 0) {
+          const nextPoints = payload.points.slice(-150);
+          const nextSignature = buildCurveSignature(nextPoints);
+          const shouldIgnoreOldCompletedCurve = ignoreCompletedCurveUntilNewStreamRef.current && nextSignature === ignoredCurveSignatureRef.current;
+          if (!shouldIgnoreOldCompletedCurve) {
+            if (chartStatusRef.current !== 'live') setChartFinalResult(null);
+            hasLiveCurveRef.current = true;
+            chartStatusRef.current = 'live';
+            ignoreCompletedCurveUntilNewStreamRef.current = false;
+            setIgnoreCompletedCurveUntilNewStream(false);
+            setChartStatus('live');
+            setCurvePoints(nextPoints);
+          }
+        }
       });
     };
     refreshRuntimeState();
@@ -655,7 +689,7 @@ function App() {
         setLastAccepted(payload);
         setLastRejected(null);
         setStatus(payload.programStart.success ? 'program-selected' : 'start-error');
-        if (payload.programStart.success) resetChartForNewTest();
+        if (payload.programStart.success && !hasLiveCurveRef.current) resetChartForNewTest();
       });
 
       socket.on('scan:rejected', (payload: ScanRejectedPayload) => {
@@ -677,6 +711,11 @@ function App() {
       socket.on('lpc:stream', (payload) => {
         setEventCounters((counters) => ({ ...counters, streamEvents: counters.streamEvents + 1 }));
         setLastStream(payload);
+        if (chartStatusRef.current !== 'live') setChartFinalResult(null);
+        chartStatusRef.current = 'live';
+        setChartStatus('live');
+        hasLiveCurveRef.current = true;
+        ignoredCurveSignatureRef.current = null;
         ignoreCompletedCurveUntilNewStreamRef.current = false;
         setIgnoreCompletedCurveUntilNewStream(false);
         setCompletedCurvePoints([]);
@@ -691,10 +730,17 @@ function App() {
 
       socket.on('lpc:curve-updated', (payload) => {
         setEventCounters((counters) => ({ ...counters, curveUpdatedEvents: counters.curveUpdatedEvents + 1 }));
-        ignoreCompletedCurveUntilNewStreamRef.current = false;
-        setIgnoreCompletedCurveUntilNewStream(false);
-        setCompletedCurvePoints([]);
-        setCurvePoints(payload.points.slice(-150));
+        if (payload.points.length > 0) {
+          if (chartStatusRef.current !== 'live') setChartFinalResult(null);
+          hasLiveCurveRef.current = true;
+          ignoredCurveSignatureRef.current = null;
+          chartStatusRef.current = 'live';
+          setChartStatus('live');
+          ignoreCompletedCurveUntilNewStreamRef.current = false;
+          setIgnoreCompletedCurveUntilNewStream(false);
+          setCompletedCurvePoints([]);
+          setCurvePoints(payload.points.slice(-150));
+        }
       });
 
       socket.on('lpc:result', (payload) => {
@@ -713,6 +759,10 @@ function App() {
       socket.on('lpc:curve-completed', (payload) => {
         const completedPoints = payload.points.slice(-150);
         setEventCounters((counters) => ({ ...counters, curveCompletedEvents: counters.curveCompletedEvents + 1 }));
+        hasLiveCurveRef.current = completedPoints.length > 0;
+        ignoredCurveSignatureRef.current = null;
+        chartStatusRef.current = 'completed';
+        setChartStatus('completed');
         setCompletedCurvePoints(completedPoints);
         setCurvePoints(completedPoints);
         ignoreCompletedCurveUntilNewStreamRef.current = false;
@@ -760,6 +810,7 @@ function App() {
 
     setStatus('scanning');
     setLastRejected(null);
+    resetChartForNewTest();
 
     const response = await fetch('/api/scan', {
       method: 'POST',
@@ -787,7 +838,6 @@ function App() {
     setLastRejected(null);
     setBarcode('');
     setStatus(payload.programStart.success ? 'program-selected' : 'start-error');
-    if (payload.programStart.success) resetChartForNewTest();
     focusBarcodeInput(0);
   }
 
@@ -941,6 +991,10 @@ function App() {
               if (open) focusBarcodeInput(120);
               return nextOpen;
             })}
+            onClose={() => {
+              setUserMenuOpen(false);
+              focusBarcodeInput(120);
+            }}
             onResults={() => {
               setUserMenuOpen(false);
               setResultsOpen(true);
@@ -1025,6 +1079,10 @@ function App() {
 
         <aside className="panel result-column">
           <LastResultPanel result={lastResult} />
+          <button type="button" className="results-cta" onClick={() => setResultsOpen(true)}>
+            <strong>Wyniki testów</strong>
+            <span>Otwórz historię pomiarów</span>
+          </button>
         </aside>
       </section>
 
@@ -1073,7 +1131,15 @@ function App() {
                   <button type="button" onClick={() => void heartbeatTest()}>Heartbeat test</button>
                   <button type="button" onClick={() => void forceRefreshStatus()}>Force refresh status</button>
                 </div>
-                <pre>{JSON.stringify(eventCounters, null, 2)}</pre>
+                <pre>{JSON.stringify({
+                  ...eventCounters,
+                  chartPointsCount: displayedCurvePoints.length,
+                  currentCurvePoints: curvePoints.length,
+                  completedCurvePoints: completedCurvePoints.length,
+                  ignoreCompletedCurveUntilNewStream,
+                  chartStatus,
+                  chartFinalResult: chartFinalResult?.result ?? null,
+                }, null, 2)}</pre>
                 {lpcActionMessage && <pre>{lpcActionMessage}</pre>}
                 {portCheck && <pre>{JSON.stringify(portCheck, null, 2)}</pre>}
                 {heartbeatResponse && <pre>{heartbeatResponse}</pre>}

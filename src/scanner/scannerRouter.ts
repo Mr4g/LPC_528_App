@@ -5,6 +5,7 @@ import type { ProgramStarter } from '../programs/ProgramStarter';
 import { requireAuth, type AuthenticatedRequest } from '../server/auth/authMiddleware';
 import { parseBarcodeScan } from './parseBarcodeScan';
 import { mapBarcodeToProgram } from './mapBarcodeToProgram';
+import type { ProgramMappingService } from '../programs/programMappingStore';
 import { CurrentTestStore } from './currentTestStore';
 
 export function createScannerRouter(options: {
@@ -12,6 +13,7 @@ export function createScannerRouter(options: {
   io: Server;
   programStarter: ProgramStarter;
   currentTestStore: CurrentTestStore;
+  programMappingService?: ProgramMappingService;
 }): Router {
   const router = Router();
 
@@ -27,7 +29,9 @@ export function createScannerRouter(options: {
       return res.status(400).json({ ok: false, error: 'NO_MAPPING', barcode: rawBarcode, message });
     }
 
-    const mapping = mapBarcodeToProgram(scan, options.config.BARCODE_PROGRAM_MAP);
+    const mapping = options.programMappingService
+      ? options.programMappingService.mapBarcode(scan, options.config.BARCODE_PROGRAM_MAP)
+      : mapBarcodeToProgram(scan, options.config.BARCODE_PROGRAM_MAP);
     if (!mapping.ok) {
       const message = 'Brak programu dla barcode';
       options.io.emit('scan:rejected', { barcode: mapping.barcode, error: mapping.error, message });

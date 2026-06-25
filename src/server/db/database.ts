@@ -1,13 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { UserRecord } from '../auth/types';
+import type { ProgramMappingRecord } from '../../programs/programMappingStore';
 
 interface UserDatabaseFile {
   users: UserRecord[];
+  programMappings: ProgramMappingRecord[];
 }
 
 export class UserStore {
-  private data: UserDatabaseFile = { users: [] };
+  private data: UserDatabaseFile = { users: [], programMappings: [] };
 
   constructor(private readonly dbPath: string) {
     this.load();
@@ -47,29 +49,54 @@ export class UserStore {
     return this.data.users[index];
   }
 
+  listProgramMappings(): ProgramMappingRecord[] {
+    return [...this.data.programMappings].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  findProgramMappingById(id: string): ProgramMappingRecord | null {
+    return this.data.programMappings.find((mapping) => mapping.id === id) ?? null;
+  }
+
+  insertProgramMapping(mapping: ProgramMappingRecord): void {
+    this.data.programMappings.push(mapping);
+    this.save();
+  }
+
+  updateProgramMapping(id: string, patch: Partial<ProgramMappingRecord>): ProgramMappingRecord | null {
+    const index = this.data.programMappings.findIndex((mapping) => mapping.id === id);
+    if (index < 0) return null;
+    this.data.programMappings[index] = { ...this.data.programMappings[index], ...patch };
+    this.save();
+    return this.data.programMappings[index];
+  }
+
   private load(): void {
     if (this.dbPath !== ':memory:') {
       fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
     }
 
     if (this.dbPath === ':memory:' || !fs.existsSync(this.dbPath)) {
-      this.data = { users: [] };
+      this.data = { users: [], programMappings: [] };
       return;
     }
 
     const raw = fs.readFileSync(this.dbPath, 'utf8').trim();
     if (!raw) {
-      this.data = { users: [] };
+      this.data = { users: [], programMappings: [] };
       return;
     }
 
     try {
-      this.data = JSON.parse(raw) as UserDatabaseFile;
+      const parsed = JSON.parse(raw) as Partial<UserDatabaseFile>;
+      this.data = {
+        users: Array.isArray(parsed.users) ? parsed.users : [],
+        programMappings: Array.isArray(parsed.programMappings) ? parsed.programMappings : [],
+      };
     } catch {
       const backupPath = `${this.dbPath}.invalid-${Date.now()}`;
       fs.renameSync(this.dbPath, backupPath);
       console.warn(`Auth user database was not readable and was moved to ${backupPath}. A new user database will be created.`);
-      this.data = { users: [] };
+      this.data = { users: [], programMappings: [] };
       this.save();
     }
   }

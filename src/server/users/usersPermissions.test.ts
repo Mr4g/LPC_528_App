@@ -7,8 +7,9 @@ describe('users permissions', () => {
     expect(canManageTarget('line_leader', 'admin')).toBe(false);
   });
 
-  it('admin can create/manage line_leader', () => {
+  it('admin can create/manage line_leader but not another admin from UI/API', () => {
     expect(canManageTarget('admin', 'line_leader')).toBe(true);
+    expect(canManageTarget('admin', 'admin')).toBe(false);
   });
 
   it('operator cannot manage users', () => {

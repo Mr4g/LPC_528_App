@@ -11,6 +11,8 @@ import { LpcTestCurveBuffer } from '../lpc/LpcTestCurveBuffer';
 import { ResultHistoryStore } from '../lpc/ResultHistoryStore';
 import { createProgramStarter } from '../programs/ProgramStarter';
 import { createProgramsRouter } from '../programs/programsRouter';
+import { ProgramMappingService } from '../programs/programMappingStore';
+import { createProgramMappingsRouter } from '../programs/programMappingsRouter';
 import { CurrentTestStore } from '../scanner/currentTestStore';
 import { createScannerRouter } from '../scanner/scannerRouter';
 import { createAuthRouter } from './auth/authRouter';
@@ -27,6 +29,7 @@ const database = createDatabase(config.SQLITE_DB_PATH);
 const authService = new AuthService(database, config.AUTH_SESSION_SECRET);
 authService.seedDefaultAdmin(config.DEFAULT_ADMIN_LOGIN, config.DEFAULT_ADMIN_PASSWORD);
 const currentTestStore = new CurrentTestStore();
+const programMappingService = new ProgramMappingService(database);
 const programStarter = createProgramStarter({
   mode: config.PROGRAM_START_MODE,
   command: config.PROGRAM_START_COMMAND,
@@ -100,6 +103,7 @@ app.use('/api/auth', createAuthRouter(authService));
 app.use('/api/users', createUsersRouter(authService));
 app.use('/api/backup', createBackupRouter());
 app.use('/api/programs', requireAuth, createProgramsRouter({ config, programStarter }));
+app.use('/api/program-mappings', createProgramMappingsRouter(programMappingService));
 app.use('/api/lpc', createLpcRouter({
   config,
   tcpClient: lpcTcpClient,
@@ -109,7 +113,7 @@ app.use('/api/lpc', createLpcRouter({
   resultHistoryStore,
   getSocketClientsCount: () => io.engine.clientsCount,
 }));
-app.use('/api', createScannerRouter({ config, io, programStarter, currentTestStore }));
+app.use('/api', createScannerRouter({ config, io, programStarter, currentTestStore, programMappingService }));
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'lpc-528-app' });

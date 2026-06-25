@@ -601,3 +601,21 @@ Aktualny moduł użytkowników używa przenośnego lokalnego pliku pod ścieżk�
 - Placeholder pola skanowania jest mniejszy i czytelny; placeholdery logowania to `Login` oraz `Hasło`.
 - Tabela `Wyniki testów` jest przeniesiona do pełnej szerokości pod głównymi panelami. Mniej krytyczne kolumny mogą ukrywać się na średnich ekranach, a poziomy scroll zostaje tylko jako awaryjne zachowanie dla małych ekranów.
 - Po zaakceptowaniu nowego skanu wykres live test resetuje aktualne punkty oraz marker końcowy wyniku, ale historia wyników i panel ostatniego zakończonego wyniku zostają widoczne.
+
+## Light/Dark theme
+
+Panel operatorski ma dwa motywy: jasny `Light` oraz ciemny `Dark`. Przełącznik znajduje się w menu operatora w prawym górnym rogu. Wybrany motyw jest zapisywany w `localStorage`, więc po odświeżeniu przeglądarki panel wraca do ostatniego wyboru.
+
+## Role i uprawnienia
+
+- `operator` ma dostęp do panelu operatorskiego, skanowania, uruchamiania testu i okna `Wyniki testów`.
+- `line_leader` ma dostęp do funkcji operatora, zarządzania operatorami oraz modułu `Programy` do mapowania barcode na program LPC. Nie może tworzyć liderów ani adminów.
+- `admin` ma dostęp do panelu, wyników, użytkowników, programu mapowań oraz diagnostyki. Z poziomu UI/API zarządzania użytkownikami tworzy i obsługuje operatorów oraz line leaderów.
+
+## Wyniki testów
+
+Tabela historii nie zajmuje już dolnego pasa głównego panelu. Jest dostępna z menu operatora przez przycisk `Wyniki testów` i otwiera się w szerokim modalu z przewijaniem wewnątrz okna. Historia wyników nie jest czyszczona po nowym skanie; resetowany jest tylko wykres bieżącego testu i jego finalny marker OK/NOK/ERROR.
+
+## Programy / mapowanie barcode
+
+Moduł `Programy` jest dostępny dla ról `line_leader` i `admin`. Pozwala dodawać oraz edytować aktywne mapowania `barcodePattern -> programNumber` z typem dopasowania `exact` albo `contains`. Backend używa aktywnych rekordów przy każdym skanie, więc zmiany działają bez restartu aplikacji. Jeżeli lista mapowań w lokalnej bazie jest pusta, aplikacja nadal korzysta z fallbacku `BARCODE_PROGRAM_MAP` z `.env`.

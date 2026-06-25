@@ -85,6 +85,8 @@ export interface CurrentTest {
   matchedKey: string;
   program: number;
   programText: string;
+  mappingId?: string | null;
+  matchType?: 'exact' | 'contains' | null;
   selectedAt: string;
   operatorLogin?: string;
   operatorRole?: string;
@@ -110,6 +112,8 @@ export interface ProgramStartRequest {
   matchedKey: string;
   program: number;
   programText: string;
+  mappingId?: string | null;
+  matchType?: 'exact' | 'contains' | null;
   selectedAt: string;
   operatorLogin?: string;
   operatorRole?: string;

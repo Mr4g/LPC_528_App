@@ -6,8 +6,12 @@ import type { UserRole } from '../auth/types';
 
 const MANAGER_ROLES: UserRole[] = ['admin', 'line_leader'];
 
+function isUserRole(value: unknown): value is UserRole {
+  return value === 'operator' || value === 'line_leader' || value === 'admin';
+}
+
 export function canManageTarget(actorRole: UserRole, targetRole: UserRole): boolean {
-  if (actorRole === 'admin') return true;
+  if (actorRole === 'admin') return targetRole !== 'admin';
   if (actorRole === 'line_leader') return targetRole === 'operator';
   return false;
 }
@@ -16,15 +20,20 @@ export function createUsersRouter(authService: AuthService): Router {
   const router = Router();
   router.use(requireRole(MANAGER_ROLES));
 
-  router.get('/', (_req, res) => {
-    res.json({ ok: true, users: authService.listUsers() });
+  router.get('/', (req: AuthenticatedRequest, res) => {
+    const users = authService.listUsers().filter((user) => {
+      if (req.user?.role === 'line_leader') return user.role === 'operator';
+      return user.role !== 'admin';
+    });
+    res.json({ ok: true, users });
   });
 
   router.post('/', (req: AuthenticatedRequest, res) => {
     const login = typeof req.body?.login === 'string' ? normalizeOperatorLogin(req.body.login) : '';
     const password = typeof req.body?.password === 'string' ? req.body.password : '';
-    const role = req.body?.role as UserRole;
+    const role = req.body?.role;
 
+    if (!isUserRole(role)) return res.status(400).json({ ok: false, error: 'INVALID_ROLE', message: 'Nieprawidłowa rola.' });
     if (!validateOperatorLogin(login)) return res.status(400).json({ ok: false, error: 'INVALID_LOGIN', message: 'Skrót musi mieć 3–5 liter A-Z, bez cyfr i znaków specjalnych.' });
     if (password.length < 4) return res.status(400).json({ ok: false, error: 'INVALID_PASSWORD', message: 'Hasło musi mieć minimum 4 znaki.' });
     if (!canManageTarget(req.user?.role ?? 'operator', role)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Brak uprawnień do utworzenia tej roli.' });
@@ -39,7 +48,11 @@ export function createUsersRouter(authService: AuthService): Router {
 
   router.patch('/:id', (req: AuthenticatedRequest, res) => {
     if (req.user?.role !== 'admin') return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Tylko admin może zmieniać rolę.' });
-    const role = req.body?.role as UserRole;
+    const role = req.body?.role;
+    if (!isUserRole(role)) return res.status(400).json({ ok: false, error: 'INVALID_ROLE', message: 'Nieprawidłowa rola.' });
+    if (!canManageTarget('admin', role)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Nie można ustawić tej roli.' });
+    const target = authService.getUserById(req.params.id);
+    if (!target || !canManageTarget('admin', target.role)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Brak uprawnień.' });
     const user = authService.setRole(req.params.id, role);
     return user ? res.json({ ok: true, user }) : res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
   });

@@ -8,6 +8,7 @@ import { PressureChart } from './components/PressureChart';
 import { UserMenu } from './components/UserMenu';
 import { getProgramStartOperatorMessage } from './programStartMessages';
 import { mergeResultIntoHistory, replaceHistoryFromResultsUpdated } from './resultHistoryState';
+import { persistTheme, readStoredTheme, type ThemeMode } from './theme';
 import './styles.css';
 
 interface ScanAcceptedPayload {
@@ -120,6 +121,21 @@ interface AuthUser {
   role: UserRole;
 }
 
+
+interface ProgramMappingRecord {
+  id: string;
+  barcodePattern: string;
+  programNumber: number;
+  programText: string;
+  description: string | null;
+  isActive: boolean;
+  matchType: 'exact' | 'contains';
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string | null;
+  updatedBy: string | null;
+}
+
 interface PublicUser extends AuthUser {
   isActive: boolean;
   createdAt: string;
@@ -140,7 +156,7 @@ const showDiagnostics = ((import.meta as unknown as { env?: Record<string, strin
 const LOGIN_REGEX = /^[A-Za-z]{3,5}$/;
 
 function getInitialRoute(): string {
-  return window.location.pathname === '/login' || window.location.pathname === '/admin/users' ? window.location.pathname : '/operator';
+  return ['/login', '/admin/users', '/admin/programs'].includes(window.location.pathname) ? window.location.pathname : '/operator';
 }
 
 function navigateTo(path: string, setRoute: (route: string) => void): void {
@@ -150,6 +166,14 @@ function navigateTo(path: string, setRoute: (route: string) => void): void {
 
 function isManager(user: AuthUser | null): boolean {
   return user?.role === 'admin' || user?.role === 'line_leader';
+}
+
+function canManagePrograms(user: AuthUser | null): boolean {
+  return user?.role === 'admin' || user?.role === 'line_leader';
+}
+
+function canOpenDiagnostics(user: AuthUser | null): boolean {
+  return user?.role === 'admin' && showDiagnostics;
 }
 
 function loadSocketIoClient(): Promise<SocketLike | null> {
@@ -258,8 +282,9 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
   }
 
   useEffect(() => {
+    if (props.user.role === 'line_leader') setRole('operator');
     void loadUsers();
-  }, []);
+  }, [props.user.role]);
 
   async function createUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -314,12 +339,11 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
         <button type="button" onClick={props.onBack}>Wróć do panelu</button>
       </header>
       <form className="user-form" onSubmit={createUser}>
-        <input value={login} onChange={(event) => setLogin(event.target.value.toUpperCase())} placeholder="Login ABC" />
+        <input value={login} onChange={(event) => setLogin(event.target.value.toUpperCase())} placeholder="Login" />
         <input className="auth-input" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Hasło tymczasowe" />
         <select value={role} onChange={(event) => setRole(event.target.value as UserRole)} disabled={props.user.role !== 'admin'}>
           <option value="operator">operator</option>
-          <option value="line_leader">line_leader</option>
-          <option value="admin">admin</option>
+          {props.user.role === 'admin' && <option value="line_leader">line_leader</option>}
         </select>
         <button type="submit">Dodaj użytkownika</button>
       </form>
@@ -348,10 +372,134 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
   );
 }
 
+
+function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
+  const [mappings, setMappings] = useState<ProgramMappingRecord[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [barcodePattern, setBarcodePattern] = useState('');
+  const [matchType, setMatchType] = useState<'exact' | 'contains'>('exact');
+  const [programNumber, setProgramNumber] = useState(1);
+  const [description, setDescription] = useState('');
+  const [isActive, setIsActive] = useState(true);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function loadMappings() {
+    const payload = await fetchJson<{ ok: true; mappings: ProgramMappingRecord[] }>('/api/program-mappings');
+    if (payload?.mappings) setMappings(payload.mappings);
+  }
+
+  useEffect(() => {
+    void loadMappings();
+  }, []);
+
+  function resetForm() {
+    setEditingId(null);
+    setBarcodePattern('');
+    setMatchType('exact');
+    setProgramNumber(1);
+    setDescription('');
+    setIsActive(true);
+  }
+
+  function editMapping(mapping: ProgramMappingRecord) {
+    setEditingId(mapping.id);
+    setBarcodePattern(mapping.barcodePattern);
+    setMatchType(mapping.matchType);
+    setProgramNumber(mapping.programNumber);
+    setDescription(mapping.description ?? '');
+    setIsActive(mapping.isActive);
+  }
+
+  async function saveMapping(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmedPattern = barcodePattern.trim();
+    if (!trimmedPattern) {
+      setMessage('Barcode jest wymagany');
+      return;
+    }
+    if (trimmedPattern.length < 3 || trimmedPattern.length > 100) {
+      setMessage('Barcode musi mieć od 3 do 100 znaków');
+      return;
+    }
+    if (!Number.isInteger(programNumber) || programNumber < 1 || programNumber > 31) {
+      setMessage('Program musi być w zakresie 1–31');
+      return;
+    }
+
+    const response = await fetch(editingId ? `/api/program-mappings/${editingId}` : '/api/program-mappings', {
+      method: editingId ? 'PATCH' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ barcodePattern: trimmedPattern, matchType, programNumber, description, isActive }),
+    });
+    const payload = (await response.json()) as { ok: boolean; message?: string };
+    setMessage(response.ok ? 'Mapowanie zapisane' : payload.message ?? 'Nie udało się zapisać mapowania');
+    if (response.ok) {
+      resetForm();
+      await loadMappings();
+    }
+  }
+
+  async function toggleMapping(mapping: ProgramMappingRecord) {
+    if (mapping.isActive && !window.confirm('Czy dezaktywować to mapowanie?')) return;
+    await fetch(`/api/program-mappings/${mapping.id}/${mapping.isActive ? 'disable' : 'enable'}`, { method: 'PATCH' });
+    await loadMappings();
+  }
+
+  return (
+    <main className="users-shell programs-shell">
+      <header className="users-header">
+        <div>
+          <span className="eyebrow">Programy</span>
+          <h1>Programy / Mapowanie barcode</h1>
+          <p>Zarządzanie przypisaniem barcode do programu LPC.</p>
+        </div>
+        <button type="button" onClick={props.onBack}>Wróć do panelu</button>
+      </header>
+      <form className="user-form mapping-form" onSubmit={saveMapping}>
+        <input value={barcodePattern} onChange={(event) => setBarcodePattern(event.target.value)} placeholder="Barcode / pattern" />
+        <select value={matchType} onChange={(event) => setMatchType(event.target.value as 'exact' | 'contains')}>
+          <option value="exact">Dokładne</option>
+          <option value="contains">Zawiera</option>
+        </select>
+        <select value={programNumber} onChange={(event) => setProgramNumber(Number(event.target.value))}>
+          {Array.from({ length: 31 }, (_, index) => index + 1).map((program) => <option key={program} value={program}>P{String(program).padStart(2, '0')}</option>)}
+        </select>
+        <input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Opis" />
+        <label className="inline-check"><input type="checkbox" checked={isActive} onChange={(event) => setIsActive(event.target.checked)} /> Aktywny</label>
+        <button type="submit">{editingId ? 'Zapisz zmiany' : 'Dodaj mapowanie'}</button>
+        {editingId && <button type="button" onClick={resetForm}>Anuluj</button>}
+      </form>
+      {message && <p className="login-error">{message}</p>}
+      <section className="users-table-wrap">
+        <table>
+          <thead><tr><th>Barcode / pattern</th><th>Typ</th><th>Program</th><th>Opis</th><th>Status</th><th>UpdatedAt</th><th>Akcje</th></tr></thead>
+          <tbody>
+            {mappings.map((mapping) => (
+              <tr key={mapping.id}>
+                <td title={mapping.barcodePattern}>{mapping.barcodePattern}</td>
+                <td>{mapping.matchType === 'exact' ? 'Dokładne' : 'Zawiera'}</td>
+                <td>{mapping.programText}</td>
+                <td title={mapping.description ?? ''}>{mapping.description ?? '-'}</td>
+                <td>{mapping.isActive ? 'aktywny' : 'nieaktywny'}</td>
+                <td>{formatDateTime(mapping.updatedAt)}</td>
+                <td>
+                  <button type="button" onClick={() => editMapping(mapping)}>Edytuj</button>
+                  <button type="button" onClick={() => void toggleMapping(mapping)}>{mapping.isActive ? 'Dezaktywuj' : 'Aktywuj'}</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+    </main>
+  );
+}
+
 function App() {
   const [route, setRoute] = useState(getInitialRoute);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [theme, setTheme] = useState<ThemeMode>(() => readStoredTheme());
   const [barcode, setBarcode] = useState('');
   const [status, setStatus] = useState<OperatorStatus>('ready');
   const [lastAccepted, setLastAccepted] = useState<ScanAcceptedPayload | null>(null);
@@ -374,6 +522,7 @@ function App() {
   const [diagnosticProgram, setDiagnosticProgram] = useState('1');
   const [programStartTestResponse, setProgramStartTestResponse] = useState<string | null>(null);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [resultsOpen, setResultsOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [eventCounters, setEventCounters] = useState({
     streamEvents: 0,
@@ -385,13 +534,14 @@ function App() {
   const barcodeInputRef = useRef<HTMLInputElement | null>(null);
   const routeRef = useRef(route);
   const diagnosticsOpenRef = useRef(diagnosticsOpen);
+  const resultsOpenRef = useRef(resultsOpen);
   const userMenuOpenRef = useRef(userMenuOpen);
   const ignoreCompletedCurveUntilNewStreamRef = useRef(ignoreCompletedCurveUntilNewStream);
 
   function focusBarcodeInput(delayMs = 0) {
     window.setTimeout(() => {
       const input = barcodeInputRef.current;
-      if (!input || routeRef.current !== '/operator' || diagnosticsOpenRef.current || userMenuOpenRef.current) return;
+      if (!input || routeRef.current !== '/operator' || diagnosticsOpenRef.current || resultsOpenRef.current || userMenuOpenRef.current) return;
 
       const activeElement = document.activeElement as HTMLElement | null;
       const activeTag = activeElement?.tagName.toLowerCase();
@@ -447,6 +597,16 @@ function App() {
   }, [diagnosticsOpen]);
 
   useEffect(() => {
+    resultsOpenRef.current = resultsOpen;
+  }, [resultsOpen]);
+
+  useEffect(() => {
+    persistTheme(theme);
+    document.body.classList.remove('theme-light', 'theme-dark');
+    document.body.classList.add(`theme-${theme}`);
+  }, [theme]);
+
+  useEffect(() => {
     userMenuOpenRef.current = userMenuOpen;
   }, [userMenuOpen]);
 
@@ -459,11 +619,22 @@ function App() {
   }, [authUser, route]);
 
   useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && resultsOpen) {
+        setResultsOpen(false);
+        focusBarcodeInput(120);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [resultsOpen]);
+
+  useEffect(() => {
     void refreshLpcStatus();
     const refreshRuntimeState = () => {
       void fetchLpcRuntimeState().then((payload) => {
         if (payload.lastResult) setLastResult(payload.lastResult);
-        if (payload.results.length > 0) setResultHistory(replaceHistoryFromResultsUpdated(payload.results, 10));
+        if (payload.results.length > 0) setResultHistory(replaceHistoryFromResultsUpdated(payload.results, 50));
         if (payload.points.length > 0 && !ignoreCompletedCurveUntilNewStreamRef.current) setCurvePoints(payload.points.slice(-150));
       });
     };
@@ -530,13 +701,13 @@ function App() {
         setEventCounters((counters) => ({ ...counters, resultEvents: counters.resultEvents + 1 }));
         setLastResult(payload);
         setChartFinalResult(payload);
-        setResultHistory((results) => mergeResultIntoHistory(results, payload, 10));
+        setResultHistory((results) => mergeResultIntoHistory(results, payload, 50));
         focusBarcodeInput(180);
       });
 
       socket.on('lpc:results-updated', (payload) => {
         setEventCounters((counters) => ({ ...counters, resultsUpdatedEvents: counters.resultsUpdatedEvents + 1 }));
-        setResultHistory(replaceHistoryFromResultsUpdated(payload.results, 10));
+        setResultHistory(replaceHistoryFromResultsUpdated(payload.results, 50));
       });
 
       socket.on('lpc:curve-completed', (payload) => {
@@ -551,7 +722,7 @@ function App() {
       socket.on('test:completed', (payload) => {
         setLastResult(payload);
         setChartFinalResult(payload);
-        setResultHistory((results) => mergeResultIntoHistory(results, payload, 10));
+        setResultHistory((results) => mergeResultIntoHistory(results, payload, 50));
         focusBarcodeInput(220);
       });
     });
@@ -679,6 +850,33 @@ function App() {
   const connectionLabel = getSafeLpcConnectionLabel(lpcStatus);
   const connectionClass = lpcStatus?.lastError ? 'connection-error' : `connection-${lpcStatus?.status ?? 'idle'}`;
   const displayedCurvePoints = curvePoints.length > 0 ? curvePoints : completedCurvePoints;
+  const resultsTable = resultHistory.length > 0 ? (
+    <table className="results-table">
+      <thead>
+        <tr><th>Czas</th><th>Wynik</th><th>Operator</th><th>Program</th><th>Barcode</th><th>ID</th><th>Pomiar</th><th>RL</th><th>Pt</th><th>EDC</th><th>PL</th><th className="hide-on-medium">LLR</th><th className="hide-on-medium">HLR</th><th className="hide-on-medium">FPR</th></tr>
+      </thead>
+      <tbody>
+        {resultHistory.map((result) => (
+          <tr key={`${result.receivedAt}-${result.uniqueId}`}>
+            <td title={formatDateTime(result.receivedAt)}>{formatDateTime(result.receivedAt)}</td>
+            <td><span className={`result-badge ${getResultClass(result.result)}`}>{formatResultLabel(result.result)}</span></td>
+            <td title={result.operatorLogin ?? '-'}>{result.operatorLogin ?? '-'}</td>
+            <td title={result.programText}>{result.programText}</td>
+            <td title={result.barcode}>{result.barcode}</td>
+            <td title={String(result.uniqueId ?? result.totalAbs)}>{result.uniqueId ?? result.totalAbs}</td>
+            <td title={`${result.leakType} ${formatMeasurement(result.leakValue, result.leakUnit)}`}>{result.leakType} {formatMeasurement(result.leakValue, result.leakUnit)}</td>
+            <td>{formatNumber(result.RL, 2)}</td>
+            <td>{formatNumber(result.Pt, 2)}</td>
+            <td>{formatNumber(result.EDC, 2)}</td>
+            <td>{formatNumber(result.PL, 2)}</td>
+            <td className="hide-on-medium">{formatNumber(result.LLR, 2)}</td>
+            <td className="hide-on-medium">{formatNumber(result.HLR, 2)}</td>
+            <td className="hide-on-medium">{formatNumber(result.FPR, 2)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  ) : <p className="empty-state">Brak historii</p>;
 
   if (authLoading) {
     return <main className="login-shell"><div className="login-card"><h1>Ładowanie...</h1></div></main>;
@@ -696,8 +894,13 @@ function App() {
     return <UsersPage user={authUser} onBack={() => navigateTo('/operator', setRoute)} />;
   }
 
+  if (route === '/admin/programs') {
+    if (!canManagePrograms(authUser)) return <main className="login-shell"><div className="login-card"><h1>Brak uprawnień</h1><button type="button" onClick={() => navigateTo('/operator', setRoute)}>Wróć</button></div></main>;
+    return <ProgramsPage user={authUser} onBack={() => navigateTo('/operator', setRoute)} />;
+  }
+
   return (
-    <main className="app-shell">
+    <main className={`app-shell theme-${theme}`}>
       <header className="top-bar">
         <div className="brand-block">
           {carrierLogoAvailable ? (
@@ -728,22 +931,33 @@ function App() {
           <UserMenu
             login={authUser.login}
             role={authUser.role}
+            theme={theme}
             canManageUsers={isManager(authUser)}
-            canOpenDiagnostics={showDiagnostics && isManager(authUser)}
+            canManagePrograms={canManagePrograms(authUser)}
+            canOpenDiagnostics={canOpenDiagnostics(authUser)}
             open={userMenuOpen}
             onToggle={() => setUserMenuOpen((open) => {
               const nextOpen = !open;
               if (open) focusBarcodeInput(120);
               return nextOpen;
             })}
+            onResults={() => {
+              setUserMenuOpen(false);
+              setResultsOpen(true);
+            }}
             onUsers={() => {
               setUserMenuOpen(false);
               navigateTo('/admin/users', setRoute);
+            }}
+            onPrograms={() => {
+              setUserMenuOpen(false);
+              navigateTo('/admin/programs', setRoute);
             }}
             onDiagnostics={() => {
               setUserMenuOpen(false);
               setDiagnosticsOpen(true);
             }}
+            onThemeChange={(nextTheme) => setTheme(nextTheme)}
             onLogout={() => {
               setUserMenuOpen(false);
               void logout();
@@ -812,38 +1026,32 @@ function App() {
         <aside className="panel result-column">
           <LastResultPanel result={lastResult} />
         </aside>
-
-        <section className="history-panel results-section">
-            <h2>Wyniki testów</h2>
-            {resultHistory.length > 0 ? (
-              <table className="results-table">
-                <thead>
-                  <tr><th>Czas</th><th>Wynik</th><th>Operator</th><th>Program</th><th>Barcode</th><th>ID</th><th>Pomiar</th><th>RL</th><th>Pt</th><th>EDC</th><th>PL</th><th className="hide-on-medium">LLR</th><th className="hide-on-medium">HLR</th><th className="hide-on-medium">FPR</th></tr>
-                </thead>
-                <tbody>
-                  {resultHistory.slice(0, 10).map((result) => (
-                    <tr key={`${result.receivedAt}-${result.uniqueId}`}>
-                      <td title={formatDateTime(result.receivedAt)}>{formatDateTime(result.receivedAt)}</td>
-                      <td><span className={`result-badge ${getResultClass(result.result)}`}>{formatResultLabel(result.result)}</span></td>
-                      <td title={result.operatorLogin ?? '-'}>{result.operatorLogin ?? '-'}</td>
-                      <td title={result.programText}>{result.programText}</td>
-                      <td title={result.barcode}>{result.barcode}</td>
-                      <td title={String(result.uniqueId ?? result.totalAbs)}>{result.uniqueId ?? result.totalAbs}</td>
-                      <td title={`${result.leakType} ${formatMeasurement(result.leakValue, result.leakUnit)}`}>{result.leakType} {formatMeasurement(result.leakValue, result.leakUnit)}</td>
-                      <td>{formatNumber(result.RL, 2)}</td>
-                      <td>{formatNumber(result.Pt, 2)}</td>
-                      <td>{formatNumber(result.EDC, 2)}</td>
-                      <td>{formatNumber(result.PL, 2)}</td>
-                      <td className="hide-on-medium">{formatNumber(result.LLR, 2)}</td>
-                      <td className="hide-on-medium">{formatNumber(result.HLR, 2)}</td>
-                      <td className="hide-on-medium">{formatNumber(result.FPR, 2)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : <p className="empty-state">Brak historii</p>}
-        </section>
       </section>
+
+      {resultsOpen && (
+        <div className="app-modal-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) {
+            setResultsOpen(false);
+            focusBarcodeInput(120);
+          }
+        }}>
+          <section className="app-modal results-modal" role="dialog" aria-modal="true" aria-label="Wyniki testów">
+            <header className="modal-header">
+              <div>
+                <span className="eyebrow">Historia</span>
+                <h2>Wyniki testów</h2>
+              </div>
+              <button type="button" className="modal-close" onClick={() => {
+                setResultsOpen(false);
+                focusBarcodeInput(120);
+              }}>×</button>
+            </header>
+            <div className="results-modal-table">
+              {resultsTable}
+            </div>
+          </section>
+        </div>
+      )}
 
       {showDiagnostics && diagnosticsOpen && (
         <div className="diagnostics-modal" role="dialog" aria-modal="true" aria-label="Diagnostyka">

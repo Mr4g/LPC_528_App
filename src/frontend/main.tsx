@@ -1,7 +1,10 @@
-import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import React, { FormEvent, useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import type { BarcodeScan, CurrentTest, LpcResult, LpcStreamPoint, ProgramStartRequest, ProgramStartResult } from '../shared/types';
 import { formatDateTime, formatNumber, formatResultLabel, getConnectionLabel, getResultClass } from './formatters';
+import { LastResultPanel } from './components/LastResultPanel';
+import { PressureChart } from './components/PressureChart';
+import { UserMenu } from './components/UserMenu';
 import { getProgramStartOperatorMessage } from './programStartMessages';
 import { mergeResultIntoHistory, replaceHistoryFromResultsUpdated } from './resultHistoryState';
 import './styles.css';
@@ -132,7 +135,6 @@ const statusLabels: Record<OperatorStatus, string> = {
   'start-error': 'Błąd startu programu',
 };
 
-const measurementKeys = ['RL', 'Pt', 'EDC', 'PL', 'LLR', 'HLR', 'FPR'] as const;
 const showDiagnostics = ((import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SHOW_DIAGNOSTICS ?? 'false') === 'true';
 const LOGIN_REGEX = /^[A-Za-z]{3,5}$/;
 
@@ -188,24 +190,6 @@ async function fetchLpcRuntimeState(): Promise<{
     results: resultsPayload?.results ?? [],
     points: curvePayload?.points ?? [],
   };
-}
-
-function buildChartPolyline(points: LpcCurvePoint[]): string {
-  const validPoints = points.filter((point) => point.pressureMbar !== null);
-  if (validPoints.length < 2) return '';
-
-  const minX = Math.min(...validPoints.map((point) => point.elapsedTimeSec));
-  const maxX = Math.max(...validPoints.map((point) => point.elapsedTimeSec));
-  const minY = Math.min(...validPoints.map((point) => point.pressureMbar ?? 0));
-  const maxY = Math.max(...validPoints.map((point) => point.pressureMbar ?? 0));
-  const xRange = maxX - minX || 1;
-  const yRange = maxY - minY || 1;
-
-  return validPoints.map((point) => {
-    const x = 52 + ((point.elapsedTimeSec - minX) / xRange) * 820;
-    const y = 330 - (((point.pressureMbar ?? 0) - minY) / yRange) * 280;
-    return `${x},${y}`;
-  }).join(' ');
 }
 
 function getSafeLpcConnectionLabel(status: LpcStatusPayload | null): string {
@@ -385,6 +369,7 @@ function App() {
   const [diagnosticProgram, setDiagnosticProgram] = useState('1');
   const [programStartTestResponse, setProgramStartTestResponse] = useState<string | null>(null);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [eventCounters, setEventCounters] = useState({
     streamEvents: 0,
     resultEvents: 0,
@@ -610,7 +595,6 @@ function App() {
     setMockLineResponse(JSON.stringify(await response.json(), null, 2));
   }
 
-  const chartPoints = useMemo(() => buildChartPolyline(curvePoints), [curvePoints]);
   const lastBarcode = lastAccepted?.currentTest.barcode ?? lastResult?.barcode ?? '-';
   const currentProgram = lastAccepted?.currentTest.programText ?? lastResult?.programText ?? '-';
   const topResultLabel = lastResult ? formatResultLabel(lastResult.result) : '-';
@@ -645,22 +629,37 @@ function App() {
         <div className="top-metric"><span>Program</span><strong>{currentProgram}</strong></div>
         <div className="top-metric"><span>Barcode</span><strong>{lastBarcode}</strong></div>
         <div className={`top-result ${lastResult ? getResultClass(lastResult.result) : 'status-unknown'}`}><span>Wynik</span><strong>{topResultLabel}</strong></div>
-        <div className={`connection-badge ${connectionClass}`}>
-          <span className="connection-dot" />
-          <div>
-            <strong>{connectionLabel}</strong>
-            <small>{lpcStatus ? `${lpcStatus.host}:${lpcStatus.port}` : 'LPC status...'}</small>
-            {lpcStatus?.nextReconnectAt && <small>Ponowna próba: {formatDateTime(lpcStatus.nextReconnectAt)}</small>}
-            {lpcStatus?.lastError && <small className="connection-error-text">{lpcStatus.lastError}</small>}
+        <div className="top-bar-actions">
+          <div className={`connection-badge ${connectionClass}`}>
+            <span className="connection-dot" />
+            <div>
+              <strong>{connectionLabel}</strong>
+              <small>{lpcStatus ? `${lpcStatus.host}:${lpcStatus.port}` : 'LPC status...'}</small>
+              {lpcStatus?.nextReconnectAt && <small>Ponowna próba: {formatDateTime(lpcStatus.nextReconnectAt)}</small>}
+              {lpcStatus?.lastError && <small className="connection-error-text">{lpcStatus.lastError}</small>}
+            </div>
           </div>
+          <UserMenu
+            login={authUser.login}
+            role={authUser.role}
+            canManageUsers={isManager(authUser)}
+            canOpenDiagnostics={showDiagnostics && isManager(authUser)}
+            open={userMenuOpen}
+            onToggle={() => setUserMenuOpen((open) => !open)}
+            onUsers={() => {
+              setUserMenuOpen(false);
+              navigateTo('/admin/users', setRoute);
+            }}
+            onDiagnostics={() => {
+              setUserMenuOpen(false);
+              setDiagnosticsOpen(true);
+            }}
+            onLogout={() => {
+              setUserMenuOpen(false);
+              void logout();
+            }}
+          />
         </div>
-        <div className="user-badge">
-          <strong>Operator: {authUser.login}</strong>
-          <small>{authUser.role}</small>
-        </div>
-        {isManager(authUser) && <button className="diagnostics-button" type="button" onClick={() => navigateTo('/admin/users', setRoute)}>Użytkownicy</button>}
-        <button className="diagnostics-button" type="button" onClick={() => void logout()}>Wyloguj</button>
-        {showDiagnostics && isManager(authUser) && <button className="diagnostics-button" type="button" onClick={() => setDiagnosticsOpen(true)}>Diagnostyka</button>}
       </header>
 
       <section className="operator-grid">
@@ -716,43 +715,11 @@ function App() {
             <div className="metric-card emphasis"><span>Pressure [mbar]</span><strong>{formatNumber(lastStream?.pressureMbar, 2)}</strong></div>
           </div>
 
-          <div className="chart-wrap">
-            <svg className="pressure-chart" viewBox="0 0 930 380" role="img" aria-label="Ciśnienie w czasie">
-              <line x1="52" y1="330" x2="890" y2="330" />
-              <line x1="52" y1="40" x2="52" y2="330" />
-              {chartPoints && <polyline points={chartPoints} />}
-              <text x="415" y="366">Czas [s]</text>
-              <text x="70" y="30">Ciśnienie [mbar]</text>
-            </svg>
-            {!chartPoints && <div className="chart-empty">Brak danych z testu</div>}
-          </div>
+          <PressureChart points={curvePoints} lastResult={lastResult} />
         </section>
 
         <aside className="panel result-column">
-          <section className="last-result-panel">
-            <div className={`result-status ${lastResult ? getResultClass(lastResult.result) : 'status-unknown'}`}>
-              <span>Ostatni wynik</span>
-              <strong>{lastResult ? formatResultLabel(lastResult.result) : '-'}</strong>
-            </div>
-            {lastResult ? (
-              <div className="result-data-grid">
-                <div><span>Barcode</span><strong>{lastResult.barcode}</strong></div>
-                <div><span>Program</span><strong>{lastResult.programText}</strong></div>
-                <div><span>TotalAbs / ID</span><strong>{lastResult.totalAbs} / {lastResult.uniqueId}</strong></div>
-                <div><span>Data / czas</span><strong>{lastResult.testerDate} {lastResult.testerTime}</strong></div>
-                <div><span>Leak</span><strong>{lastResult.leakType} {formatNumber(lastResult.leakValue, 6)} {lastResult.leakUnit}</strong></div>
-                {measurementKeys.map((key) => {
-                  const value = lastResult[key];
-                  const unit = lastResult[`${key}_unit` as keyof EnrichedLpcResult];
-                  return value === null || value === undefined ? null : (
-                    <div key={key}><span>{key}</span><strong>{formatNumber(Number(value), 6)} {String(unit ?? '')}</strong></div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="empty-state">Brak końcowego wyniku testu</p>
-            )}
-          </section>
+          <LastResultPanel result={lastResult} />
 
           <section className="history-panel">
             <h2>Ostatnie wyniki</h2>

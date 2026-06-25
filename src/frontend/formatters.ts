@@ -9,6 +9,8 @@ export function formatResultLabel(result?: LpcResultValue | null): string {
   return 'UNKNOWN';
 }
 
+export const getResultDisplayLabel = formatResultLabel;
+
 export function getResultClass(result?: LpcResultValue | null): string {
   if (result === 'ACCEPT') return 'status-ok';
   if (result === 'REJECT') return 'status-nok';
@@ -16,9 +18,17 @@ export function getResultClass(result?: LpcResultValue | null): string {
   return 'status-unknown';
 }
 
+export const getResultBadgeClass = getResultClass;
+
 export function formatNumber(value: number | null | undefined, digits = 2): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '-';
   return value.toFixed(digits);
+}
+
+export function formatMeasurement(value: number | null | undefined, unit: string | null | undefined, digits = 2): string {
+  const formattedValue = formatNumber(value, digits);
+  if (formattedValue === '-') return '-';
+  return `${formattedValue} ${unit ?? ''}`.trim();
 }
 
 export function formatDateTime(iso: string | null | undefined): string {

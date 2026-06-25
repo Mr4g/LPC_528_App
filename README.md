@@ -578,3 +578,10 @@ curl http://localhost:3000/api/auth/me
 ```
 
 Aktualny moduł użytkowników używa przenośnego lokalnego pliku pod ścieżką `SQLITE_DB_PATH` i nie wymaga natywnego modułu `better-sqlite3`. Jeśli pod tą ścieżką leży stary nieczytelny plik, backend przeniesie go do `*.invalid-<timestamp>` i utworzy nową bazę użytkowników z adminem `ADM/admin123`.
+
+## UI operatora: menu i wykres wyniku
+
+- Akcje użytkownika zostały przeniesione do kompaktowego menu operatora w prawym obszarze top bara. Główny ekran operatora nie pokazuje już dużych przycisków `Użytkownicy` ani `Wyloguj` jako głównych akcji.
+- Menu operatora pokazuje skrót zalogowanego użytkownika i rolę. Po rozwinięciu dostępne są tylko akcje zgodne z uprawnieniami: `Użytkownicy` dla `admin` / `line_leader`, `Diagnostyka` zgodnie z flagą diagnostyczną oraz `Wyloguj` dla każdego zalogowanego użytkownika.
+- Wykres ciśnienia ma oś X `Czas [s]`, oś Y `Ciśnienie [mbar]`, ticki/skale osi oraz legendę. Po odebraniu końcowego wyniku testu ostatni punkt krzywej jest oznaczany markerem i etykietą z wynikiem `OK` / `NOK` / `ERROR` oraz głównym pomiarem, np. `RL 10.79 pa/s`.
+- Panel `Ostatni wynik` pokazuje najpierw duży status operatorski i główny pomiar, a dopiero niżej barcode, program, identyfikator oraz szczegóły pomiarów.

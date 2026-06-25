@@ -558,3 +558,9 @@ curl http://localhost:3000/api/lpc/results
 - `GET /api/programs/config`,
 - `POST /api/programs/start`,
 - wszystkie endpointy `/api/users/*` dodatkowo wymagają roli `line_leader` albo `admin`.
+
+### Gdy logowanie ADM/admin123 nie działa
+
+1. Upewnij się, że `.env` zawiera `DEFAULT_ADMIN_LOGIN=ADM`, `DEFAULT_ADMIN_PASSWORD=admin123` i `SQLITE_DB_PATH=data/lpc_app.sqlite`.
+2. Zrestartuj backend — jeśli baza nie ma żadnego admina, aplikacja naprawi/utworzy domyślnego admina.
+3. Jeśli baza zawiera starego admina ze zmienionym hasłem, usuń plik `data/lpc_app.sqlite` tylko w środowisku developerskim i uruchom backend ponownie, żeby odtworzyć domyślnego admina.

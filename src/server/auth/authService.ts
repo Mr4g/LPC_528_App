@@ -16,7 +16,17 @@ export class AuthService {
 
   seedDefaultAdmin(login: string, password: string): void {
     const count = this.db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };
-    if (count.count > 0) return;
+    const adminCount = this.db.prepare('SELECT COUNT(*) as count FROM users WHERE role = ?').get('admin') as { count: number };
+    if (count.count > 0 && adminCount.count > 0) return;
+
+    const existingDefaultUser = this.findUserByLogin(login);
+    if (existingDefaultUser) {
+      this.setRole(existingDefaultUser.id, 'admin');
+      this.setActive(existingDefaultUser.id, true);
+      this.resetPassword(existingDefaultUser.id, password);
+      console.warn('Default admin user was repaired. Change DEFAULT_ADMIN_PASSWORD after deployment.');
+      return;
+    }
 
     this.createUser({ login, password, role: 'admin', createdBy: null });
     console.warn('Default admin user was created. Change DEFAULT_ADMIN_PASSWORD after deployment.');

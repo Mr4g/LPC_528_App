@@ -16,6 +16,13 @@ describe('AuthService', () => {
     expect(users[0]).not.toHaveProperty('passwordHash');
   });
 
+  it('repairs missing admin when a database has users but no admin', () => {
+    const auth = service();
+    auth.createUser({ login: 'OPR', password: 'test123', role: 'operator', createdBy: null });
+    auth.seedDefaultAdmin('ADM', 'admin123');
+    expect(auth.login('ADM', 'admin123')).toMatchObject({ login: 'ADM', role: 'admin' });
+  });
+
   it('logs in valid user and rejects bad password or inactive user', () => {
     const auth = service();
     const user = auth.createUser({ login: 'abc', password: 'test123', role: 'operator', createdBy: null });

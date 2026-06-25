@@ -42,6 +42,22 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
   const finalClass = lastResult ? getResultBadgeClass(lastResult.result).replace('status-', 'chart-result-') : 'chart-result-unknown';
   const resultLabel = lastResult ? getResultDisplayLabel(lastResult.result) : null;
   const measurementLabel = lastResult ? `${lastResult.leakType ?? ''} ${formatMeasurement(lastResult.leakValue, lastResult.leakUnit)}`.trim() : null;
+  const finalMarkerX = finalPoint ? xScale(finalPoint.elapsedTimeSec) : 0;
+  const finalMarkerY = finalPoint ? yScale(finalPoint.pressureMbar) : 0;
+  const resultLabelWidth = 190;
+  const resultLabelHeight = 76;
+  const resultLabelX = finalPoint
+    ? Math.min(
+        Math.max(
+          finalMarkerX + 14 > plot.right - resultLabelWidth - 8 ? finalMarkerX - resultLabelWidth - 14 : finalMarkerX + 14,
+          plot.left + 8,
+        ),
+        plot.right - resultLabelWidth - 8,
+      )
+    : 0;
+  const resultLabelY = finalPoint
+    ? Math.min(Math.max(finalMarkerY - 58, plot.top + 4), plot.bottom - resultLabelHeight - 8)
+    : 0;
   const xTicks = buildTicks(minX, maxX, 5);
   const yTicks = buildTicks(minY, maxY, 5);
 
@@ -66,9 +82,9 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
         {hasLine && <polyline className="chart-pressure-line" points={polyline} />}
         {lastResult && finalPoint && (
           <g className={`chart-final-marker ${finalClass}`}>
-            <line x1={xScale(finalPoint.elapsedTimeSec)} y1={plot.top} x2={xScale(finalPoint.elapsedTimeSec)} y2={plot.bottom} />
-            <circle cx={xScale(finalPoint.elapsedTimeSec)} cy={yScale(finalPoint.pressureMbar)} r="9" />
-            <foreignObject x={Math.min(xScale(finalPoint.elapsedTimeSec) + 14, plot.right - 190)} y={Math.max(yScale(finalPoint.pressureMbar) - 58, plot.top + 4)} width="190" height="76">
+            <line x1={finalMarkerX} y1={plot.top} x2={finalMarkerX} y2={plot.bottom} />
+            <circle cx={finalMarkerX} cy={finalMarkerY} r="9" />
+            <foreignObject x={resultLabelX} y={resultLabelY} width={resultLabelWidth} height={resultLabelHeight}>
               <div className="chart-result-label">
                 <strong>{resultLabel}</strong>
                 <span>{measurementLabel}</span>

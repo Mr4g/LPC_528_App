@@ -927,6 +927,28 @@ function App() {
       </tbody>
     </table>
   ) : <p className="empty-state">Brak historii</p>;
+  const resultsPreview = resultHistory.length > 0 ? (
+    <div className="results-preview-table-wrap">
+      <table className="results-preview-table">
+        <thead>
+          <tr><th>Czas</th><th>Wynik</th><th>Program</th><th>Barcode</th><th>Pomiar</th></tr>
+        </thead>
+        <tbody>
+          {resultHistory.slice(0, 5).map((result) => (
+            <tr key={`preview-${result.receivedAt}-${result.uniqueId}`}>
+              <td title={formatDateTime(result.receivedAt)}>{formatDateTime(result.receivedAt)}</td>
+              <td><span className={`result-badge ${getResultClass(result.result)}`}>{formatResultLabel(result.result)}</span></td>
+              <td title={result.programText}>{result.programText}</td>
+              <td title={result.barcode}>{result.barcode}</td>
+              <td title={`${result.leakType} ${formatMeasurement(result.leakValue, result.leakUnit)}`}>
+                {result.leakType} {formatMeasurement(result.leakValue, result.leakUnit)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  ) : <p className="empty-state results-preview-empty">Brak historii</p>;
 
   if (authLoading) {
     return <main className="login-shell"><div className="login-card"><h1>Ładowanie...</h1></div></main>;
@@ -1022,9 +1044,9 @@ function App() {
 
       <section className="operator-grid">
         <aside className={`panel scan-panel status-${status}`}>
-          <div className="panel-header">
+          <div className="panel-header scan-header">
             <span>Skanowanie</span>
-            <strong>{status === 'program-selected' && lastAccepted ? `${lastAccepted.currentTest.programText} wybrany` : statusLabels[status]}</strong>
+            <strong className="scan-status">{status === 'program-selected' && lastAccepted ? `${lastAccepted.currentTest.programText} wybrany` : statusLabels[status]}</strong>
           </div>
           <form className="scan-form" onSubmit={submitScan}>
             <label htmlFor="barcode-input">Barcode</label>
@@ -1079,10 +1101,16 @@ function App() {
 
         <aside className="panel result-column">
           <LastResultPanel result={lastResult} />
-          <button type="button" className="results-cta" onClick={() => setResultsOpen(true)}>
-            <strong>Wyniki testów</strong>
-            <span>Otwórz historię pomiarów</span>
-          </button>
+          <section className="results-preview" aria-label="Wyniki testów">
+            <div className="results-preview-header">
+              <span>Wyniki testów</span>
+              <button type="button" className="results-cta" onClick={() => setResultsOpen(true)}>
+                <strong>Wyniki testów</strong>
+                <span>Otwórz pełną historię pomiarów</span>
+              </button>
+            </div>
+            {resultsPreview}
+          </section>
         </aside>
       </section>
 

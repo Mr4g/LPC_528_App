@@ -627,3 +627,11 @@ Moduł `Programy` jest dostępny dla ról `line_leader` i `admin`. Pozwala dodaw
 - Legenda wykresu jest renderowana pod SVG jako osobny element HTML, więc nie nachodzi na opis osi X `Czas [s]`.
 - Menu operatora zamyka się po kliknięciu poza menu oraz po naciśnięciu `Escape`; po zamknięciu fokus wraca do pola barcode, jeśli operator jest na panelu i nie ma otwartego modala.
 - Przycisk `Wyniki testów` jest dostępny bezpośrednio w prawym panelu pod kartą ostatniego wyniku i otwiera modal historii pomiarów.
+
+### Drobne poprawki UI/UX panelu operatora
+
+- Tytuł `Panel operatorski` w top barze jest mniejszy i mieści się obok lokalnego logo Carrier bez nachodzenia na kafel programu.
+- Status skanowania (`Gotowy do skanu`, `P01 wybrany` itd.) jest pokazany bezpośrednio pod nagłówkiem `SKANOWANIE`, mniejszą czcionką niż główne akcje operatora.
+- Wykres ciśnienia nadal resetuje stary marker po nowym skanie, ale po finalnym wyniku rysuje etykietę przy ostatnim punkcie krzywej, np. `NOK` oraz `RL 10.79 pa/s`.
+- Prawy panel ma sekcję `Wyniki testów`: widoczny przycisk otwiera pełny modal historii, a pod nim jest kompaktowy podgląd ostatnich wyników.
+- Po zamknięciu pełnego modala wyników focus wraca do pola barcode, żeby operator mógł skanować kolejną sztukę bez klikania w ekran.

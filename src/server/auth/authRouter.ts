@@ -8,6 +8,7 @@ export interface AuthRouterOptions {
   defaultAdminLogin: string;
   nodeEnv: string;
   authDebug: boolean;
+  resetDefaultAdmin: boolean;
 }
 
 export function createAuthRouter(authService: AuthService, options: AuthRouterOptions): Router {
@@ -49,14 +50,18 @@ export function createAuthRouter(authService: AuthService, options: AuthRouterOp
     return res.json({
       ok: true,
       dbPath: options.dbPath,
+      dbExists: stats.dbExists,
+      usersTableExists: stats.usersTableExists,
       usersCount: stats.usersCount,
       activeUsersCount: stats.activeUsersCount,
       adminUsersCount: stats.adminUsersCount,
       activeAdminUsersCount: stats.activeAdminUsersCount,
+      users: stats.users,
       defaultAdminLogin: normalizeOperatorLogin(options.defaultAdminLogin),
       cookieName: cookie.name,
       cookieSecure: cookie.secure,
       sameSite: cookie.sameSite,
+      resetDefaultAdmin: options.resetDefaultAdmin,
     });
   });
 

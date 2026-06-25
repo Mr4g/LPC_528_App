@@ -577,7 +577,7 @@ curl http://localhost:3000/health
 curl http://localhost:3000/api/auth/me
 ```
 
-Aktualny moduł użytkowników zapisuje konta w lokalnej bazie SQLite pod ścieżką `SQLITE_DB_PATH` i korzysta z wbudowanego modułu `node:sqlite`. Jeśli baza nie zawiera żadnego admina, backend utworzy domyślnego admina z wartości `DEFAULT_ADMIN_LOGIN` / `DEFAULT_ADMIN_PASSWORD`.
+Aktualny moduł użytkowników zapisuje konta w lokalnej bazie SQLite pod ścieżką `SQLITE_DB_PATH` i korzysta z biblioteki `better-sqlite3`, dzięki czemu backend działa na Node.js 20.x. Jeśli baza nie zawiera żadnego aktywnego admina, backend utworzy albo naprawi domyślnego admina z wartości `DEFAULT_ADMIN_LOGIN` / `DEFAULT_ADMIN_PASSWORD`.
 
 ## UI operatora: menu i wykres wyniku
 
@@ -673,11 +673,11 @@ Diagnostyka developerska bez `passwordHash`:
 curl http://localhost:3000/api/auth/debug
 ```
 
-Endpoint zwraca m.in. `dbPath`, `usersCount`, `activeUsersCount`, `adminUsersCount`, `activeAdminUsersCount`, `defaultAdminLogin`, nazwę cookie i ustawienia `sameSite` / `secure`.
+Endpoint zwraca m.in. `dbPath`, `dbExists`, `usersTableExists`, `usersCount`, `activeUsersCount`, `adminUsersCount`, `activeAdminUsersCount`, bezpieczną listę użytkowników bez `passwordHash`, `defaultAdminLogin`, nazwę cookie i ustawienia `sameSite` / `secure`. Jeśli logowanie nie działa, najpierw sprawdź właśnie `/api/auth/debug`.
 
 ## SQLite database
 
-Aplikacja używa lokalnej bazy SQLite wskazanej przez `SQLITE_DB_PATH` (domyślnie `data/lpc_app.sqlite`). Przy starcie wykonywany jest prosty init `CREATE TABLE IF NOT EXISTS` dla tabel:
+Aplikacja używa lokalnej bazy SQLite wskazanej przez `SQLITE_DB_PATH` (domyślnie `data/lpc_app.sqlite`) przez `better-sqlite3` zamiast `node:sqlite`, więc backend jest zgodny z Node.js 20.x. Przy starcie wykonywany jest prosty init `CREATE TABLE IF NOT EXISTS` dla tabel:
 
 - `users` — konta operatorów, line leaderów i adminów, razem z hashem hasła oraz statusem aktywności.
 - `test_results` — finalne wyniki LPC wraz z barcode, programem, operatorem, wartościami RL/Pt/EDC/PL/LLR/HLR/FPR i surową ramką.

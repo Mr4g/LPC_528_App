@@ -1,36 +1,54 @@
 import crypto from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import type { AppDatabase } from '../db/database';
 import { normalizeOperatorLogin, validateOperatorLogin } from './operatorLogin';
 import type { AuthUser, PublicUser, UserRecord, UserRole } from './types';
 
 const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 const ALLOWED_ROLES: UserRole[] = ['operator', 'line_leader', 'admin'];
-const PASSWORD_HASH_PREFIX = 'scrypt';
+const LEGACY_PASSWORD_HASH_PREFIX = 'scrypt';
 
 function hashPassword(password: string): string {
-  const salt = crypto.randomBytes(16).toString('base64url');
-  const hash = crypto.scryptSync(password, salt, 64).toString('base64url');
-  return `${PASSWORD_HASH_PREFIX}$${salt}$${hash}`;
+  return bcrypt.hashSync(password, 10);
 }
 
-function verifyPassword(password: string, storedHash: string): boolean {
+function verifyLegacyScryptPassword(password: string, storedHash: string): boolean {
   const [prefix, salt, hash] = storedHash.split('$');
-  if (prefix !== PASSWORD_HASH_PREFIX || !salt || !hash) return false;
+  if (prefix !== LEGACY_PASSWORD_HASH_PREFIX || !salt || !hash) return false;
   const computed = crypto.scryptSync(password, salt, 64).toString('base64url');
   if (computed.length !== hash.length) return false;
   return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(hash));
+}
+
+function verifyPassword(password: string, storedHash: string): boolean {
+  if (storedHash.startsWith(`${LEGACY_PASSWORD_HASH_PREFIX}$`)) {
+    return verifyLegacyScryptPassword(password, storedHash);
+  }
+  return bcrypt.compareSync(password, storedHash);
 }
 
 export interface SessionPayload extends AuthUser {
   exp: number;
 }
 
+export interface AuthDebugUser {
+  login: string;
+  role: UserRole;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt: string | null;
+}
+
 export interface AuthDbStats {
   dbPath: string;
+  dbExists: boolean;
+  usersTableExists: boolean;
   usersCount: number;
   activeUsersCount: number;
   adminUsersCount: number;
   activeAdminUsersCount: number;
+  users: AuthDebugUser[];
 }
 
 export type DefaultAdminSeedResult =
@@ -84,10 +102,20 @@ export class AuthService {
   getDbStats(): AuthDbStats {
     return {
       dbPath: this.db.getPath(),
+      dbExists: this.db.dbExists(),
+      usersTableExists: this.db.tableExists('users'),
       usersCount: this.db.countUsers(),
       activeUsersCount: this.db.countActiveUsers(),
       adminUsersCount: this.db.countAdminUsers(),
       activeAdminUsersCount: this.db.countActiveAdminUsers(),
+      users: this.db.listUsers().map((user) => ({
+        login: user.login,
+        role: user.role,
+        isActive: Boolean(user.isActive),
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+        lastLoginAt: user.lastLoginAt,
+      })),
     };
   }
 

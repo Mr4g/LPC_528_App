@@ -40,13 +40,16 @@ const authService = new AuthService(database, config.AUTH_SESSION_SECRET, authCo
 const adminSeed = config.AUTH_RESET_DEFAULT_ADMIN && config.NODE_ENV !== 'production'
   ? authService.resetDefaultAdminFromEnv(config.DEFAULT_ADMIN_LOGIN, config.DEFAULT_ADMIN_PASSWORD)
   : authService.seedDefaultAdmin(config.DEFAULT_ADMIN_LOGIN, config.DEFAULT_ADMIN_PASSWORD);
-console.info(`Auth DB: ${adminSeed.after.dbPath}`);
-console.info(`Users count: ${adminSeed.before.usersCount}`);
-console.info(`Active admins: ${adminSeed.before.activeAdminUsersCount}`);
-if (adminSeed.action === 'created') console.info(`Created default admin: ${adminSeed.login}`);
-if (adminSeed.action === 'repaired') console.info(`Repaired default admin: ${adminSeed.login}`);
-if (adminSeed.action === 'reset') console.warn(`DEV ONLY: default admin was reset from env: ${adminSeed.login}`);
-if (config.AUTH_RESET_DEFAULT_ADMIN && config.NODE_ENV === 'production') console.warn('AUTH_RESET_DEFAULT_ADMIN is ignored in production.');
+console.info(`[AUTH] DB path: ${adminSeed.after.dbPath}`);
+console.info(`[AUTH] usersCount: ${adminSeed.before.usersCount}`);
+console.info(`[AUTH] activeAdminUsersCount: ${adminSeed.before.activeAdminUsersCount}`);
+console.info(`[AUTH] defaultAdminLogin: ${adminSeed.login}`);
+console.info(`[AUTH] resetDefaultAdmin: ${config.AUTH_RESET_DEFAULT_ADMIN && config.NODE_ENV !== 'production'}`);
+if (adminSeed.action === 'created') console.info('[AUTH] default admin created');
+if (adminSeed.action === 'repaired') console.info('[AUTH] default admin repaired');
+if (adminSeed.action === 'reset') console.warn('[AUTH] DEV ONLY: default admin was reset from env');
+if (adminSeed.action === 'none') console.info('[AUTH] default admin already exists');
+if (config.AUTH_RESET_DEFAULT_ADMIN && config.NODE_ENV === 'production') console.warn('[AUTH] AUTH_RESET_DEFAULT_ADMIN is ignored in production.');
 const currentTestStore = new CurrentTestStore();
 const programMappingService = new ProgramMappingService(database);
 programMappingService.seedFromFallbackMap(config.BARCODE_PROGRAM_MAP);
@@ -134,6 +137,7 @@ app.use('/api/auth', createAuthRouter(authService, {
   defaultAdminLogin: config.DEFAULT_ADMIN_LOGIN,
   nodeEnv: config.NODE_ENV,
   authDebug: config.AUTH_DEBUG,
+  resetDefaultAdmin: config.AUTH_RESET_DEFAULT_ADMIN && config.NODE_ENV !== 'production',
 }));
 app.use('/api/users', createUsersRouter(authService));
 app.use('/api/test-results', createTestResultsRouter(database));

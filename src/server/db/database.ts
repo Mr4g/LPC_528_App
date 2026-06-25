@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import Database, { type Database as BetterSqliteDatabase } from 'better-sqlite3';
 import type { UserRecord } from '../auth/types';
 import type { ProgramMappingRecord } from '../../programs/programMappingStore';
 import type { LpcResult } from '../../shared/types';
@@ -131,24 +131,34 @@ function rowToResult(row: Record<string, unknown>): LpcResult {
 }
 
 export class AppDatabase {
-  private readonly db: DatabaseSync;
+  private readonly db: BetterSqliteDatabase;
 
   constructor(private readonly dbPath: string) {
     if (dbPath !== ':memory:') fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-    this.db = new DatabaseSync(dbPath);
-    this.db.exec('PRAGMA journal_mode = WAL;');
+    this.db = new Database(dbPath);
+    this.db.pragma('journal_mode = WAL');
+    this.db.pragma('foreign_keys = ON');
     this.migrate();
   }
 
   getPath(): string { return this.dbPath; }
-  countUsers(): number { return Number(this.db.prepare('SELECT COUNT(*) AS count FROM users').get()?.count ?? 0); }
-  countActiveUsers(): number { return Number(this.db.prepare('SELECT COUNT(*) AS count FROM users WHERE isActive = 1').get()?.count ?? 0); }
+  dbExists(): boolean { return this.dbPath === ':memory:' || fs.existsSync(this.dbPath); }
+  tableExists(tableName: string): boolean {
+    const row = this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(tableName) as Record<string, unknown> | undefined;
+    return Boolean(row);
+  }
+  private count(sql: string): number {
+    const row = this.db.prepare(sql).get() as { count?: number } | undefined;
+    return Number(row?.count ?? 0);
+  }
+  countUsers(): number { return this.count('SELECT COUNT(*) AS count FROM users'); }
+  countActiveUsers(): number { return this.count('SELECT COUNT(*) AS count FROM users WHERE isActive = 1'); }
   countAdmins(): number { return this.countAdminUsers(); }
-  countAdminUsers(): number { return Number(this.db.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'admin'").get()?.count ?? 0); }
-  countActiveAdminUsers(): number { return Number(this.db.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND isActive = 1").get()?.count ?? 0); }
-  listUsers(): UserRecord[] { return this.db.prepare('SELECT * FROM users ORDER BY login ASC').all().map((row: Record<string, unknown>) => rowToUser(row)); }
-  findByLogin(login: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE login = ?').get(login); return row ? rowToUser(row) : null; }
-  findById(id: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE id = ?').get(id); return row ? rowToUser(row) : null; }
+  countAdminUsers(): number { return this.count("SELECT COUNT(*) AS count FROM users WHERE role = 'admin'"); }
+  countActiveAdminUsers(): number { return this.count("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND isActive = 1"); }
+  listUsers(): UserRecord[] { return (this.db.prepare('SELECT * FROM users ORDER BY login ASC').all() as Record<string, unknown>[]).map(rowToUser); }
+  findByLogin(login: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE login = ?').get(login) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
+  findById(id: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
 
   insertUser(user: UserRecord): void {
     this.db.prepare(`INSERT INTO users (id, login, passwordHash, role, isActive, createdAt, updatedAt, lastLoginAt, createdBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -164,9 +174,9 @@ export class AppDatabase {
     return this.findById(id);
   }
 
-  countProgramMappings(): number { return Number(this.db.prepare('SELECT COUNT(*) AS count FROM program_mappings').get()?.count ?? 0); }
-  listProgramMappings(): ProgramMappingRecord[] { return this.db.prepare('SELECT * FROM program_mappings ORDER BY updatedAt DESC').all().map((row: Record<string, unknown>) => rowToProgramMapping(row)); }
-  findProgramMappingById(id: string): ProgramMappingRecord | null { const row = this.db.prepare('SELECT * FROM program_mappings WHERE id = ?').get(id); return row ? rowToProgramMapping(row) : null; }
+  countProgramMappings(): number { return this.count('SELECT COUNT(*) AS count FROM program_mappings'); }
+  listProgramMappings(): ProgramMappingRecord[] { return (this.db.prepare('SELECT * FROM program_mappings ORDER BY updatedAt DESC').all() as Record<string, unknown>[]).map(rowToProgramMapping); }
+  findProgramMappingById(id: string): ProgramMappingRecord | null { const row = this.db.prepare('SELECT * FROM program_mappings WHERE id = ?').get(id) as Record<string, unknown> | undefined; return row ? rowToProgramMapping(row) : null; }
 
   insertProgramMapping(mapping: ProgramMappingRecord): void {
     this.db.prepare(`INSERT INTO program_mappings (id, barcodePattern, programNumber, programText, description, isActive, matchType, createdAt, updatedAt, createdBy, updatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -212,15 +222,16 @@ export class AppDatabase {
     if (query.dateFrom) { where.push('receivedAt >= ?'); params.push(query.dateFrom); }
     if (query.dateTo) { where.push('receivedAt <= ?'); params.push(query.dateTo); }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const total = Number(this.db.prepare(`SELECT COUNT(*) AS count FROM test_results ${whereSql}`).get(...params)?.count ?? 0);
+    const totalRow = this.db.prepare(`SELECT COUNT(*) AS count FROM test_results ${whereSql}`).get(...params) as { count?: number } | undefined;
+    const total = Number(totalRow?.count ?? 0);
     const limit = Math.min(Math.max(query.limit ?? 50, 1), 500);
     const offset = Math.max(query.offset ?? 0, 0);
-    const rows = this.db.prepare(`SELECT * FROM test_results ${whereSql} ORDER BY receivedAt DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
-    return { total, results: rows.map((row: Record<string, unknown>) => rowToResult(row)) };
+    const rows = this.db.prepare(`SELECT * FROM test_results ${whereSql} ORDER BY receivedAt DESC LIMIT ? OFFSET ?`).all(...params, limit, offset) as Record<string, unknown>[];
+    return { total, results: rows.map(rowToResult) };
   }
 
   getLastTestResult(): LpcResult | null {
-    const row = this.db.prepare('SELECT * FROM test_results ORDER BY receivedAt DESC LIMIT 1').get();
+    const row = this.db.prepare('SELECT * FROM test_results ORDER BY receivedAt DESC LIMIT 1').get() as Record<string, unknown> | undefined;
     return row ? rowToResult(row) : null;
   }
 
@@ -234,7 +245,7 @@ export class AppDatabase {
   }
 
   getLatestTestSession(): StoredTestSession | null {
-    const row = this.db.prepare('SELECT * FROM test_sessions ORDER BY COALESCE(startedAt, completedAt, timeoutAt) DESC LIMIT 1').get();
+    const row = this.db.prepare('SELECT * FROM test_sessions ORDER BY COALESCE(startedAt, completedAt, timeoutAt) DESC LIMIT 1').get() as Record<string, unknown> | undefined;
     return row ? rowToSession(row) : null;
   }
 

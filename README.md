@@ -585,3 +585,11 @@ Aktualny moduł użytkowników używa przenośnego lokalnego pliku pod ścieżk�
 - Menu operatora pokazuje skrót zalogowanego użytkownika i rolę. Po rozwinięciu dostępne są tylko akcje zgodne z uprawnieniami: `Użytkownicy` dla `admin` / `line_leader`, `Diagnostyka` zgodnie z flagą diagnostyczną oraz `Wyloguj` dla każdego zalogowanego użytkownika.
 - Wykres ciśnienia ma oś X `Czas [s]`, oś Y `Ciśnienie [mbar]`, ticki/skale osi oraz legendę. Po odebraniu końcowego wyniku testu ostatni punkt krzywej jest oznaczany markerem i etykietą z wynikiem `OK` / `NOK` / `ERROR` oraz głównym pomiarem, np. `RL 10.79 pa/s`.
 - Panel `Ostatni wynik` pokazuje najpierw duży status operatorski i główny pomiar, a dopiero niżej barcode, program, identyfikator oraz szczegóły pomiarów.
+
+## Ergonomia skanowania
+
+- Pole `Barcode` na ekranie operatora ma autofocus po wejściu na panel operatora.
+- Po każdym skanie — zarówno poprawnym, jak i odrzuconym — fokus wraca do pola barcode, więc operator może skanować kolejną sztukę bez klikania w ekran.
+- Po odebraniu końcowego wyniku LPC (`lpc:result` / `test:completed`) aplikacja ponownie ustawia fokus na polu barcode z krótkim opóźnieniem po renderze.
+- Naciśnięcie `Enter` w polu barcode wysyła skan, co obsługuje typowy skaner HID kończący odczyt Enterem.
+- Menu operatora znajduje się w prawym górnym rogu, jest pozycjonowane względem karty operatora i nie powinno przykrywać kafla `Wynik` / `NOK`.

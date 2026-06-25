@@ -24,8 +24,16 @@ button, input, textarea { font: inherit; }
 
 .top-bar {
   display: grid;
-  grid-template-columns: minmax(190px, 1.1fr) minmax(130px, 0.7fr) minmax(220px, 1.2fr) minmax(120px, 0.7fr) minmax(260px, 1.2fr) auto;
+  grid-template-columns: minmax(220px, 0.85fr) minmax(430px, 1.85fr) minmax(430px, 1.25fr);
   align-items: stretch;
+  gap: 14px;
+  overflow: visible;
+}
+
+.top-bar-center {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(110px, 0.75fr) minmax(180px, 1.5fr) minmax(110px, 0.75fr);
   gap: 14px;
 }
 
@@ -166,21 +174,37 @@ button, input, textarea { font: inherit; }
 .scan-panel.status-start-error { border-left-color: #ef4444; }
 .scan-panel.status-scanning { border-left-color: #f59e0b; }
 
-.scan-form { display: grid; gap: 14px; }
-.scan-form label { font-size: clamp(22px, 1.5vw, 30px); font-weight: 1000; }
+.scan-form { display: grid; gap: 16px; }
+.scan-form label {
+  display: block;
+  margin-bottom: 2px;
+  font-size: clamp(22px, 1.5vw, 30px);
+  font-weight: 1000;
+  line-height: 1.1;
+}
 .scan-form input,
 .scan-form button {
   width: 100%;
   border: 0;
   border-radius: 22px;
+  box-sizing: border-box;
 }
 .scan-form input {
-  min-height: 84px;
-  padding: 16px 22px;
+  min-height: 76px;
+  padding: 0 24px;
   color: #0f172a;
   background: #f8fafc;
-  font-size: clamp(28px, 2.5vw, 44px);
+  font-size: clamp(24px, 2.1vw, 38px);
+  line-height: 1.15;
+  letter-spacing: 0;
   font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scan-form input::placeholder {
+  color: #64748b;
+  opacity: 1;
 }
 .scan-form button {
   min-height: 76px;
@@ -426,8 +450,8 @@ button, input, textarea { font: inherit; }
 
 @media (max-width: 1366px) {
   .app-shell { padding: 12px; gap: 12px; }
-  .top-bar { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .connection-badge { grid-column: span 2; }
+  .top-bar { grid-template-columns: minmax(180px, 0.7fr) minmax(420px, 1.5fr) minmax(360px, 1fr); }
+  .top-bar-center { grid-template-columns: minmax(90px, 0.7fr) minmax(160px, 1.4fr) minmax(90px, 0.7fr); }
   .diagnostics-button { grid-column: span 2; }
   .operator-grid { grid-template-columns: 0.88fr 1.45fr 1fr; gap: 12px; }
   .panel { padding: 16px; }
@@ -440,6 +464,8 @@ button, input, textarea { font: inherit; }
   body { overflow: auto; }
   .app-shell { min-height: 100vh; }
   .top-bar,
+  .top-bar-center,
+  .top-bar-actions,
   .operator-grid,
   .diagnostics-grid { grid-template-columns: 1fr; }
   .connection-badge,
@@ -572,25 +598,32 @@ button, input, textarea { font: inherit; }
 }
 
 .top-bar-actions {
-  display: flex;
-  align-items: stretch;
-  justify-content: flex-end;
-  gap: 14px;
   min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(210px, 1fr) minmax(190px, auto);
+  align-items: stretch;
+  justify-content: end;
+  gap: 14px;
+  overflow: visible;
 }
 
 .top-bar-actions .connection-badge {
-  min-width: min(320px, 24vw);
+  min-width: 0;
 }
 
 .user-menu {
   position: relative;
   display: flex;
   align-items: stretch;
+  justify-content: flex-end;
+  min-width: 0;
+  overflow: visible;
 }
 
 .operator-card {
+  position: relative;
   min-width: 190px;
+  max-width: min(260px, 24vw);
   padding: 14px 16px;
   border: 1px solid rgba(148, 163, 184, 0.24);
   border-radius: 18px;
@@ -639,10 +672,11 @@ button, input, textarea { font: inherit; }
 
 .user-menu-popover {
   position: absolute;
-  z-index: 30;
-  top: calc(100% + 10px);
+  z-index: 60;
+  top: calc(100% + 8px);
   right: 0;
-  width: 240px;
+  width: min(240px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
   padding: 10px;
   border: 1px solid rgba(148, 163, 184, 0.26);
   border-radius: 18px;
@@ -839,14 +873,11 @@ button, input, textarea { font: inherit; }
 
 @media (max-width: 1400px) {
   .top-bar-actions {
-    grid-column: 1 / -1;
     justify-content: stretch;
   }
 
-  .top-bar-actions .connection-badge,
-  .user-menu,
   .operator-card {
-    flex: 1;
+    max-width: none;
   }
 }
 .user-menu-button {

@@ -378,6 +378,27 @@ function App() {
     curveCompletedEvents: 0,
   });
   const barcodeInputRef = useRef<HTMLInputElement | null>(null);
+  const routeRef = useRef(route);
+  const diagnosticsOpenRef = useRef(diagnosticsOpen);
+  const userMenuOpenRef = useRef(userMenuOpen);
+
+  function focusBarcodeInput(delayMs = 0) {
+    window.setTimeout(() => {
+      const input = barcodeInputRef.current;
+      if (!input || routeRef.current !== '/operator' || diagnosticsOpenRef.current || userMenuOpenRef.current) return;
+
+      const activeElement = document.activeElement as HTMLElement | null;
+      const activeTag = activeElement?.tagName.toLowerCase();
+      const isEditingAnotherField = Boolean(
+        activeElement
+        && activeElement !== input
+        && (activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select' || activeElement.isContentEditable),
+      );
+      if (isEditingAnotherField) return;
+
+      input.focus({ preventScroll: true });
+    }, delayMs);
+  }
 
   async function refreshMe() {
     const payload = await fetchJson<{ ok: true; user: AuthUser | null }>('/api/auth/me');
@@ -400,6 +421,22 @@ function App() {
     const nextStatus = await fetchLpcStatus();
     if (nextStatus) setLpcStatus(nextStatus);
   }
+
+  useEffect(() => {
+    routeRef.current = route;
+  }, [route]);
+
+  useEffect(() => {
+    diagnosticsOpenRef.current = diagnosticsOpen;
+  }, [diagnosticsOpen]);
+
+  useEffect(() => {
+    userMenuOpenRef.current = userMenuOpen;
+  }, [userMenuOpen]);
+
+  useEffect(() => {
+    if (authUser && route === '/operator') focusBarcodeInput(120);
+  }, [authUser, route]);
 
   useEffect(() => {
     void refreshLpcStatus();
@@ -466,6 +503,7 @@ function App() {
         setEventCounters((counters) => ({ ...counters, resultEvents: counters.resultEvents + 1 }));
         setLastResult(payload);
         setResultHistory((results) => mergeResultIntoHistory(results, payload, 10));
+        focusBarcodeInput(180);
       });
 
       socket.on('lpc:results-updated', (payload) => {
@@ -481,6 +519,7 @@ function App() {
       socket.on('test:completed', (payload) => {
         setLastResult(payload);
         setResultHistory((results) => mergeResultIntoHistory(results, payload, 10));
+        focusBarcodeInput(220);
       });
     });
 
@@ -510,7 +549,10 @@ function App() {
       return;
     }
     const trimmedBarcode = barcode.trim();
-    if (!trimmedBarcode) return;
+    if (!trimmedBarcode) {
+      focusBarcodeInput(0);
+      return;
+    }
 
     setStatus('scanning');
     setLastRejected(null);
@@ -533,7 +575,7 @@ function App() {
       const rejectedPayload = payload as ScanRejectedPayload;
       setLastRejected({ barcode: rejectedPayload.barcode, error: 'NO_MAPPING', message: rejectedPayload.message });
       setStatus('no-mapping');
-      window.setTimeout(() => barcodeInputRef.current?.focus(), 0);
+      focusBarcodeInput(0);
       return;
     }
 
@@ -541,7 +583,7 @@ function App() {
     setLastRejected(null);
     setBarcode('');
     setStatus(payload.programStart.success ? 'program-selected' : 'start-error');
-    window.setTimeout(() => barcodeInputRef.current?.focus(), 0);
+    focusBarcodeInput(0);
   }
 
   async function lpcAction(action: 'connect' | 'disconnect') {
@@ -626,9 +668,11 @@ function App() {
           <span className="eyebrow">LPC-528</span>
           <strong>Panel operatorski</strong>
         </div>
-        <div className="top-metric"><span>Program</span><strong>{currentProgram}</strong></div>
-        <div className="top-metric"><span>Barcode</span><strong>{lastBarcode}</strong></div>
-        <div className={`top-result ${lastResult ? getResultClass(lastResult.result) : 'status-unknown'}`}><span>Wynik</span><strong>{topResultLabel}</strong></div>
+        <div className="top-bar-center">
+          <div className="top-metric"><span>Program</span><strong>{currentProgram}</strong></div>
+          <div className="top-metric"><span>Barcode</span><strong>{lastBarcode}</strong></div>
+          <div className={`top-result ${lastResult ? getResultClass(lastResult.result) : 'status-unknown'}`}><span>Wynik</span><strong>{topResultLabel}</strong></div>
+        </div>
         <div className="top-bar-actions">
           <div className={`connection-badge ${connectionClass}`}>
             <span className="connection-dot" />
@@ -645,7 +689,11 @@ function App() {
             canManageUsers={isManager(authUser)}
             canOpenDiagnostics={showDiagnostics && isManager(authUser)}
             open={userMenuOpen}
-            onToggle={() => setUserMenuOpen((open) => !open)}
+            onToggle={() => setUserMenuOpen((open) => {
+              const nextOpen = !open;
+              if (open) focusBarcodeInput(120);
+              return nextOpen;
+            })}
             onUsers={() => {
               setUserMenuOpen(false);
               navigateTo('/admin/users', setRoute);
@@ -759,7 +807,10 @@ function App() {
           <div className="diagnostics-content">
             <header>
               <h2>Diagnostyka</h2>
-              <button type="button" onClick={() => setDiagnosticsOpen(false)}>Zamknij</button>
+              <button type="button" onClick={() => {
+                setDiagnosticsOpen(false);
+                focusBarcodeInput(120);
+              }}>Zamknij</button>
             </header>
             <div className="diagnostics-grid">
               <section>

@@ -19,6 +19,9 @@ import { createAuthRouter } from './auth/authRouter';
 import { attachAuth, requireAuth } from './auth/authMiddleware';
 import { AuthService } from './auth/authService';
 import { createDatabase } from './db/database';
+import { createTestResultsRouter } from './test-results/testResultsRouter';
+import { TestSessionManager } from './test-session/testSessionManager';
+import { createTestSessionRouter } from './test-session/testSessionRouter';
 import { createUsersRouter } from './users/usersRouter';
 
 const config = loadConfig();
@@ -30,6 +33,11 @@ const authService = new AuthService(database, config.AUTH_SESSION_SECRET);
 authService.seedDefaultAdmin(config.DEFAULT_ADMIN_LOGIN, config.DEFAULT_ADMIN_PASSWORD);
 const currentTestStore = new CurrentTestStore();
 const programMappingService = new ProgramMappingService(database);
+programMappingService.seedFromFallbackMap(config.BARCODE_PROGRAM_MAP);
+const testSessionManager = new TestSessionManager(database, io, {
+  activeTestTimeoutMs: config.ACTIVE_TEST_TIMEOUT_MS,
+  noDataWarningMs: config.ACTIVE_TEST_NO_DATA_WARNING_MS,
+});
 const programStarter = createProgramStarter({
   mode: config.PROGRAM_START_MODE,
   command: config.PROGRAM_START_COMMAND,
@@ -54,6 +62,10 @@ const lpcCurveBuffer = new LpcTestCurveBuffer({
 });
 const lastResultStore = new LastResultStore();
 const resultHistoryStore = new ResultHistoryStore(50);
+const persistedResults = database.listTestResults({ limit: 50 }).results.map((result) => ({ ...result, currentTestValid: false }));
+persistedResults.slice().reverse().forEach((result) => resultHistoryStore.add(result));
+const persistedLastResult = database.getLastTestResult();
+if (persistedLastResult) lastResultStore.set({ ...persistedLastResult, currentTestValid: false });
 const lpcLineProcessor = new LpcLineProcessor({
   io,
   tcpClient: lpcTcpClient,
@@ -66,6 +78,8 @@ const lpcLineProcessor = new LpcLineProcessor({
   currentTestMaxAgeMs: config.CURRENT_TEST_MAX_AGE_MS,
   debugLines: config.LPC_DEBUG_LINES,
   debugPipeline: config.LPC_DEBUG_PIPELINE,
+  database,
+  testSessionManager,
 });
 
 lpcTcpClient.on('status', (state) => {
@@ -101,6 +115,8 @@ app.use(express.json());
 app.use(attachAuth(authService));
 app.use('/api/auth', createAuthRouter(authService));
 app.use('/api/users', createUsersRouter(authService));
+app.use('/api/test-results', createTestResultsRouter(database));
+app.use('/api/test-session', createTestSessionRouter(testSessionManager));
 app.use('/api/backup', createBackupRouter());
 app.use('/api/programs', requireAuth, createProgramsRouter({ config, programStarter }));
 app.use('/api/program-mappings', createProgramMappingsRouter(programMappingService));
@@ -111,9 +127,10 @@ app.use('/api/lpc', createLpcRouter({
   curveBuffer: lpcCurveBuffer,
   lastResultStore,
   resultHistoryStore,
+  database,
   getSocketClientsCount: () => io.engine.clientsCount,
 }));
-app.use('/api', createScannerRouter({ config, io, programStarter, currentTestStore, programMappingService }));
+app.use('/api', createScannerRouter({ config, io, programStarter, currentTestStore, programMappingService, testSessionManager }));
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'lpc-528-app' });

@@ -83,6 +83,13 @@ function validateProgramMappingInput(input: ProgramMappingInput, partial = false
 export class ProgramMappingService {
   constructor(private readonly database: AppDatabase) {}
 
+  seedFromFallbackMap(fallbackMap: Record<string, number>): void {
+    if (this.database.countProgramMappings() > 0) return;
+    Object.entries(fallbackMap).forEach(([barcodePattern, programNumber]) => {
+      this.create({ barcodePattern, programNumber, matchType: 'exact', isActive: true }, null);
+    });
+  }
+
   list(): ProgramMappingRecord[] {
     return this.database.listProgramMappings();
   }

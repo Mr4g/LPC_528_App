@@ -3,6 +3,8 @@ import type { CurrentTest, LpcResult } from '../shared/types';
 import type { CurrentTestStore } from '../scanner/currentTestStore';
 import type { LastResultStore } from './LastResultStore';
 import type { ResultHistoryStore } from './ResultHistoryStore';
+import type { AppDatabase } from '../server/db/database';
+import type { TestSessionManager } from '../server/test-session/testSessionManager';
 import { isIgnoredLpcLine, isInterfaceSelectionPrompt } from './lpcFrameFilters';
 import { normalizeLpcLine } from './normalizeLpcLine';
 import { parseLpcResult } from './parseLpcResult';
@@ -53,6 +55,8 @@ export interface LpcLineProcessorOptions {
   debugLines: boolean;
   debugPipeline?: boolean;
   maxRawLines?: number;
+  database?: AppDatabase;
+  testSessionManager?: TestSessionManager;
 }
 
 export class LpcLineProcessor {
@@ -102,6 +106,7 @@ export class LpcLineProcessor {
       if (streamPoint) {
         const curvePoint = this.options.curveBuffer.addStreamPoint(streamPoint);
         this.lastStreamAt = receivedAt;
+        this.options.testSessionManager?.markStream();
         this.streamCount += 1;
         diagnostic.parsedAs = 'stream';
         this.storeRawLine(diagnostic);
@@ -123,8 +128,10 @@ export class LpcLineProcessor {
       const result = parseLpcResult(rawLine);
       if (result) {
         const enrichedResult = this.attachCurrentTest(result);
+        this.options.database?.insertTestResult(enrichedResult, this.options.testSessionManager?.getActiveTestId() ?? null);
         this.options.lastResultStore?.set(enrichedResult);
         this.options.resultHistoryStore?.add(enrichedResult);
+        this.options.testSessionManager?.complete();
         this.lastResultAt = receivedAt;
         this.resultCount += 1;
         diagnostic.parsedAs = 'result';

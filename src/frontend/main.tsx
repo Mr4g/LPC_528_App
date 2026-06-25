@@ -21,8 +21,10 @@ interface ScanAcceptedPayload {
 interface ScanRejectedPayload {
   ok?: false;
   barcode: string;
-  error: 'NO_MAPPING';
+  error: 'NO_MAPPING' | 'TEST_IN_PROGRESS';
+  errorCode?: 'TEST_IN_PROGRESS';
   message: string;
+  activeTest?: TestSessionState;
 }
 
 interface ScanAcceptedResponse extends ScanAcceptedPayload {
@@ -102,6 +104,7 @@ interface SocketLike {
   on(event: 'lpc:curve-completed', handler: SocketHandler<{ points: LpcCurvePoint[] }>): void;
   on(event: 'lpc:results-updated', handler: SocketHandler<{ results: EnrichedLpcResult[] }>): void;
   on(event: 'test:completed', handler: SocketHandler<EnrichedLpcResult>): void;
+  on(event: 'test-session:updated', handler: SocketHandler<TestSessionState>): void;
   off(event: string): void;
   disconnect(): void;
 }
@@ -115,6 +118,23 @@ declare global {
 type OperatorStatus = 'ready' | 'scanning' | 'program-selected' | 'no-mapping' | 'start-error';
 type UserRole = 'operator' | 'line_leader' | 'admin';
 type ChartStatus = 'waiting' | 'live' | 'completed';
+type TestSessionStatus = 'idle' | 'program_selected' | 'starting' | 'running' | 'waiting_for_result' | 'completed' | 'timeout' | 'error';
+
+interface TestSessionState {
+  ok: true;
+  status: TestSessionStatus;
+  locked: boolean;
+  activeTestId: string | null;
+  barcode: string | null;
+  programNumber: number | null;
+  programText: string | null;
+  operatorLogin: string | null;
+  startedAt: string | null;
+  lastStreamAt: string | null;
+  completedAt: string | null;
+  timeoutAt: string | null;
+  message: string | null;
+}
 
 interface FinalMarkerResult {
   result: EnrichedLpcResult;
@@ -210,6 +230,10 @@ async function fetchLpcStatus(): Promise<LpcStatusPayload | null> {
   return fetchJson<LpcStatusPayload>('/api/lpc/status');
 }
 
+async function fetchTestSessionStatus(): Promise<TestSessionState | null> {
+  return fetchJson<TestSessionState>('/api/test-session/status');
+}
+
 async function fetchLpcRuntimeState(): Promise<{
   lastResult: EnrichedLpcResult | null;
   results: EnrichedLpcResult[];
@@ -217,7 +241,7 @@ async function fetchLpcRuntimeState(): Promise<{
 }> {
   const [lastResultPayload, resultsPayload, curvePayload] = await Promise.all([
     fetchJson<{ ok: true; result: EnrichedLpcResult | null }>('/api/lpc/last-result'),
-    fetchJson<{ ok: true; results: EnrichedLpcResult[] }>('/api/lpc/results'),
+    fetchJson<{ ok: true; results: EnrichedLpcResult[]; total?: number }>('/api/test-results?limit=50'),
     fetchJson<{ ok: true; points: LpcCurvePoint[] }>('/api/lpc/curve'),
   ]);
 
@@ -522,6 +546,7 @@ function App() {
   const [status, setStatus] = useState<OperatorStatus>('ready');
   const [lastAccepted, setLastAccepted] = useState<ScanAcceptedPayload | null>(null);
   const [lastRejected, setLastRejected] = useState<ScanRejectedPayload | null>(null);
+  const [testSession, setTestSession] = useState<TestSessionState | null>(null);
   const [lpcStatus, setLpcStatus] = useState<LpcStatusPayload | null>(null);
   const [lastStream, setLastStream] = useState<LpcStreamPayload | null>(null);
   const [lastResult, setLastResult] = useState<EnrichedLpcResult | null>(null);
@@ -691,6 +716,9 @@ function App() {
 
   useEffect(() => {
     void refreshLpcStatus();
+    void fetchTestSessionStatus().then((payload) => {
+      if (payload) setTestSession(payload);
+    });
     const refreshRuntimeState = () => {
       void fetchLpcRuntimeState().then((payload) => {
         if (payload.lastResult) setLastResult(payload.lastResult);
@@ -816,6 +844,11 @@ function App() {
         setResultHistory((results) => mergeResultIntoHistory(results, payload, 50));
         focusBarcodeInput(220);
       });
+
+      socket.on('test-session:updated', (payload) => {
+        setTestSession(payload);
+        if (!payload.locked) focusBarcodeInput(180);
+      });
     });
 
     return () => {
@@ -833,6 +866,7 @@ function App() {
       activeSocket?.off('lpc:curve-updated');
       activeSocket?.off('lpc:curve-completed');
       activeSocket?.off('test:completed');
+      activeSocket?.off('test-session:updated');
       activeSocket?.disconnect();
     };
   }, []);
@@ -844,6 +878,16 @@ function App() {
       return;
     }
     const trimmedBarcode = barcode.trim();
+    if (testSession?.locked) {
+      setLastRejected({
+        barcode: trimmedBarcode,
+        error: 'TEST_IN_PROGRESS',
+        errorCode: 'TEST_IN_PROGRESS',
+        message: testSession.message ?? 'Test w toku — poczekaj na wynik',
+        activeTest: testSession,
+      });
+      return;
+    }
     if (!trimmedBarcode) {
       focusBarcodeInput(0);
       return;
@@ -869,8 +913,13 @@ function App() {
 
     if (!response.ok || !('programStart' in payload)) {
       const rejectedPayload = payload as ScanRejectedPayload;
-      setLastRejected({ barcode: rejectedPayload.barcode, error: 'NO_MAPPING', message: rejectedPayload.message });
-      setStatus('no-mapping');
+      if (rejectedPayload.errorCode === 'TEST_IN_PROGRESS') {
+        setLastRejected(rejectedPayload);
+        if (rejectedPayload.activeTest) setTestSession(rejectedPayload.activeTest);
+      } else {
+        setLastRejected({ barcode: rejectedPayload.barcode, error: 'NO_MAPPING', message: rejectedPayload.message });
+        setStatus('no-mapping');
+      }
       focusBarcodeInput(0);
       return;
     }
@@ -941,6 +990,7 @@ function App() {
   const connectionLabel = getSafeLpcConnectionLabel(lpcStatus);
   const connectionClass = lpcStatus?.lastError ? 'connection-error' : `connection-${lpcStatus?.status ?? 'idle'}`;
   const displayedCurvePoints = curvePoints.length > 0 ? curvePoints : completedCurvePoints;
+  const scanLocked = Boolean(testSession?.locked);
   const resultsTable = resultHistory.length > 0 ? (
     <table className="results-table">
       <thead>
@@ -1096,12 +1146,19 @@ function App() {
               className="scan-input"
               ref={barcodeInputRef}
               autoFocus
+              disabled={scanLocked}
               value={barcode}
               onChange={(event) => setBarcode(event.target.value)}
               placeholder="Zeskanuj barcode"
             />
-            <button type="submit" disabled={status === 'scanning'}>Wyślij skan</button>
+            <button type="submit" disabled={status === 'scanning' || scanLocked}>Wyślij skan</button>
           </form>
+          {scanLocked && (
+            <div className="scan-error">
+              <strong>Test w toku — poczekaj na wynik</strong>
+              <span>{testSession?.programText ?? '-'} / {testSession?.barcode ?? '-'}</span>
+            </div>
+          )}
 
           {lastAccepted && (
             <div className="scan-summary">
@@ -1200,6 +1257,10 @@ function App() {
                   <button type="button" onClick={() => void checkLpcPort()}>Sprawdź port LPC</button>
                   <button type="button" onClick={() => void heartbeatTest()}>Heartbeat test</button>
                   <button type="button" onClick={() => void forceRefreshStatus()}>Force refresh status</button>
+                  <button type="button" onClick={async () => {
+                    const response = await fetch('/api/test-session/unlock', { method: 'POST' });
+                    if (response.ok) setTestSession(await response.json() as TestSessionState);
+                  }}>Odblokuj test</button>
                 </div>
                 <pre>{JSON.stringify({
                   ...eventCounters,

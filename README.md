@@ -577,7 +577,7 @@ curl http://localhost:3000/health
 curl http://localhost:3000/api/auth/me
 ```
 
-Aktualny moduł użytkowników używa przenośnego lokalnego pliku pod ścieżką `SQLITE_DB_PATH` i nie wymaga natywnego modułu `better-sqlite3`. Jeśli pod tą ścieżką leży stary nieczytelny plik, backend przeniesie go do `*.invalid-<timestamp>` i utworzy nową bazę użytkowników z adminem `ADM/admin123`.
+Aktualny moduł użytkowników zapisuje konta w lokalnej bazie SQLite pod ścieżką `SQLITE_DB_PATH` i korzysta z wbudowanego modułu `node:sqlite`. Jeśli baza nie zawiera żadnego admina, backend utworzy domyślnego admina z wartości `DEFAULT_ADMIN_LOGIN` / `DEFAULT_ADMIN_PASSWORD`.
 
 ## UI operatora: menu i wykres wyniku
 
@@ -642,3 +642,28 @@ Moduł `Programy` jest dostępny dla ról `line_leader` i `admin`. Pozwala dodaw
 - `resetChartForNewTest()` nadal czyści bieżące punkty, zakończoną krzywą i finalny marker dopiero przy rozpoczęciu kolejnego testu.
 - Mała tabela wyników w prawym panelu pokazuje maksymalnie 4 ostatnie wyniki, ma własny poziomy scroll oraz podpowiedź dla operatora, że można przesunąć tabelę w bok.
 - Trzy główne panele operatora są wyrównywane przez CSS Grid do tej samej wysokości na szerokim ekranie; na małych ekranach mogą układać się jeden pod drugim.
+
+## SQLite database
+
+Aplikacja używa lokalnej bazy SQLite wskazanej przez `SQLITE_DB_PATH` (domyślnie `data/lpc_app.sqlite`). Przy starcie wykonywany jest prosty init `CREATE TABLE IF NOT EXISTS` dla tabel:
+
+- `users` — konta operatorów, line leaderów i adminów, razem z hashem hasła oraz statusem aktywności.
+- `test_results` — finalne wyniki LPC wraz z barcode, programem, operatorem, wartościami RL/Pt/EDC/PL/LLR/HLR/FPR i surową ramką.
+- `program_mappings` — trwałe mapowania `barcodePattern -> programNumber/programText` z trybem `exact` albo `contains`.
+- `test_sessions` — stan aktywnego testu i blokady skanowania.
+
+## Blokada testu
+
+Po zaakceptowanym skanie backend tworzy aktywną sesję testu i blokuje kolejne skany, dopóki test jest w stanie `starting`, `running` albo `waiting_for_result`. Próba skanu w trakcie testu zwraca `TEST_IN_PROGRESS`, a frontend blokuje input barcode oraz pokazuje komunikat `Test w toku — poczekaj na wynik`.
+
+Timeout aktywnego testu konfiguruje `ACTIVE_TEST_TIMEOUT_MS` (domyślnie `60000`). Jeśli w tym czasie nie przyjdzie finalny wynik, sesja przechodzi w `timeout` i skanowanie zostaje odblokowane. `ACTIVE_TEST_NO_DATA_WARNING_MS` pokazuje ostrzeżenie `Brak danych z LPC`, jeśli po starcie testu nie przychodzi streaming. Line leader albo admin może użyć diagnostycznego `POST /api/test-session/unlock`, żeby ręcznie odblokować test.
+
+## Program mappings w DB
+
+`BARCODE_PROGRAM_MAP` z `.env` jest używany jako seed startowy tylko wtedy, gdy tabela `program_mappings` jest pusta. Po seedzie aplikacja mapuje barcode przez aktywne rekordy z DB, bez restartu po zmianach w UI `Programy`. Dopasowanie wybiera najpierw `exact`, potem `contains`, następnie dłuższy pattern i nowszy `updatedAt`.
+
+Mapowania mogą edytować tylko role `line_leader` i `admin`; operator nie widzi ekranu `Programy` i nie ma dostępu do API mapowań.
+
+## Test results persistence
+
+Każdy finalny `lpc:result` jest zapisywany do tabeli `test_results`. Endpoint `GET /api/lpc/results` oraz pełniejszy `GET /api/test-results` czytają dane z DB, więc historia wyników i ostatni wynik są dostępne po restarcie IPC.

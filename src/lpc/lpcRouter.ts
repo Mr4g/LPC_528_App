@@ -6,6 +6,7 @@ import type { LpcLineProcessor } from './LpcLineProcessor';
 import type { ResultHistoryStore } from './ResultHistoryStore';
 import type { LpcTcpClient } from './LpcTcpClient';
 import type { LpcTestCurveBuffer } from './LpcTestCurveBuffer';
+import type { AppDatabase } from '../server/db/database';
 
 export function createLpcRouter(options: {
   config: AppConfig;
@@ -14,6 +15,7 @@ export function createLpcRouter(options: {
   curveBuffer: LpcTestCurveBuffer;
   lastResultStore: LastResultStore;
   resultHistoryStore: ResultHistoryStore;
+  database?: AppDatabase;
   getSocketClientsCount?: () => number;
 }): Router {
   const router = Router();
@@ -123,11 +125,11 @@ export function createLpcRouter(options: {
   });
 
   router.get('/last-result', (_req, res) => {
-    res.json({ ok: true, result: options.lastResultStore.get() });
+    res.json({ ok: true, result: options.lastResultStore.get() ?? options.database?.getLastTestResult() ?? null });
   });
 
   router.get('/results', (_req, res) => {
-    res.json({ ok: true, results: options.resultHistoryStore.getAll() });
+    res.json({ ok: true, results: options.database?.listTestResults({ limit: 50 }).results ?? options.resultHistoryStore.getAll() });
   });
 
   router.get('/raw-lines', (_req, res) => {

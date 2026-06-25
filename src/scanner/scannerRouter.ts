@@ -6,6 +6,7 @@ import { requireAuth, type AuthenticatedRequest } from '../server/auth/authMiddl
 import { parseBarcodeScan } from './parseBarcodeScan';
 import { mapBarcodeToProgram } from './mapBarcodeToProgram';
 import type { ProgramMappingService } from '../programs/programMappingStore';
+import type { TestSessionManager } from '../server/test-session/testSessionManager';
 import { CurrentTestStore } from './currentTestStore';
 
 export function createScannerRouter(options: {
@@ -14,6 +15,7 @@ export function createScannerRouter(options: {
   programStarter: ProgramStarter;
   currentTestStore: CurrentTestStore;
   programMappingService?: ProgramMappingService;
+  testSessionManager?: TestSessionManager;
 }): Router {
   const router = Router();
 
@@ -21,6 +23,11 @@ export function createScannerRouter(options: {
 
   router.post('/scan', async (req: AuthenticatedRequest, res) => {
     const rawBarcode = typeof req.body?.barcode === 'string' ? req.body.barcode : '';
+    const lock = options.testSessionManager?.assertCanStart();
+    if (lock && !lock.ok) {
+      return res.status(409).json({ ...(lock.response as object), barcode: rawBarcode, error: 'TEST_IN_PROGRESS' });
+    }
+
     const scan = parseBarcodeScan(rawBarcode);
 
     if (!scan) {
@@ -46,7 +53,11 @@ export function createScannerRouter(options: {
     const programStartRequest = { ...mapping.programStartRequest, ...operatorContext };
 
     options.currentTestStore.set(currentTest);
+    options.testSessionManager?.start(currentTest);
     const programStart = await options.programStarter.startProgram(programStartRequest);
+    if (!programStart.success) {
+      options.testSessionManager?.fail(programStart.message);
+    }
     const payload = {
       scan,
       currentTest,

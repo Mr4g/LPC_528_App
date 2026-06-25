@@ -36,6 +36,8 @@ const envSchema = z.object({
   LPC_DEBUG_LINES: z.coerce.boolean().default(false),
   LPC_DEBUG_PIPELINE: z.coerce.boolean().default(false),
   CURRENT_TEST_MAX_AGE_MS: z.coerce.number().int().positive().default(600000),
+  ACTIVE_TEST_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
+  ACTIVE_TEST_NO_DATA_WARNING_MS: z.coerce.number().int().positive().default(10000),
   ENABLE_MOCK_LPC_ENDPOINTS: z.coerce.boolean().default(false),
   PROGRAM_START_MODE: z.enum(['mock', 'script']).default('mock'),
   PROGRAM_START_COMMAND: z.string().min(1).default('python3'),

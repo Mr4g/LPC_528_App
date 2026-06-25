@@ -116,6 +116,16 @@ type OperatorStatus = 'ready' | 'scanning' | 'program-selected' | 'no-mapping' |
 type UserRole = 'operator' | 'line_leader' | 'admin';
 type ChartStatus = 'waiting' | 'live' | 'completed';
 
+interface FinalMarkerResult {
+  result: EnrichedLpcResult;
+  displayLabel: string;
+  leakType: string | null;
+  leakValue: number | null;
+  leakUnit: string | null;
+  point: LpcCurvePoint | null;
+  receivedAt: string;
+}
+
 interface AuthUser {
   id: string;
   login: string;
@@ -519,6 +529,7 @@ function App() {
   const [curvePoints, setCurvePoints] = useState<LpcCurvePoint[]>([]);
   const [completedCurvePoints, setCompletedCurvePoints] = useState<LpcCurvePoint[]>([]);
   const [chartFinalResult, setChartFinalResult] = useState<EnrichedLpcResult | null>(null);
+  const [finalMarkerResult, setFinalMarkerResult] = useState<FinalMarkerResult | null>(null);
   const [chartStatus, setChartStatus] = useState<ChartStatus>('waiting');
   const [ignoreCompletedCurveUntilNewStream, setIgnoreCompletedCurveUntilNewStream] = useState(false);
   const [carrierLogoAvailable, setCarrierLogoAvailable] = useState(true);
@@ -549,6 +560,25 @@ function App() {
   const hasLiveCurveRef = useRef(false);
   const ignoredCurveSignatureRef = useRef<string | null>(null);
   const chartStatusRef = useRef<ChartStatus>(chartStatus);
+  const curvePointsRef = useRef<LpcCurvePoint[]>([]);
+  const completedCurvePointsRef = useRef<LpcCurvePoint[]>([]);
+
+  function getLastKnownCurvePoint() {
+    const points = curvePointsRef.current.length > 0 ? curvePointsRef.current : completedCurvePointsRef.current;
+    return points.at(-1) ?? null;
+  }
+
+  function buildFinalMarker(result: EnrichedLpcResult, point: LpcCurvePoint | null): FinalMarkerResult {
+    return {
+      result,
+      displayLabel: formatResultLabel(result.result),
+      leakType: result.leakType,
+      leakValue: result.leakValue,
+      leakUnit: result.leakUnit,
+      point,
+      receivedAt: result.receivedAt,
+    };
+  }
 
   function focusBarcodeInput(delayMs = 0) {
     window.setTimeout(() => {
@@ -576,6 +606,7 @@ function App() {
     setCurvePoints([]);
     setCompletedCurvePoints([]);
     setChartFinalResult(null);
+    setFinalMarkerResult(null);
     setLastStream(null);
     chartStatusRef.current = 'waiting';
     setChartStatus('waiting');
@@ -636,6 +667,14 @@ function App() {
   }, [chartStatus]);
 
   useEffect(() => {
+    curvePointsRef.current = curvePoints;
+  }, [curvePoints]);
+
+  useEffect(() => {
+    completedCurvePointsRef.current = completedCurvePoints;
+  }, [completedCurvePoints]);
+
+  useEffect(() => {
     if (authUser && route === '/operator') focusBarcodeInput(120);
   }, [authUser, route]);
 
@@ -661,7 +700,6 @@ function App() {
           const nextSignature = buildCurveSignature(nextPoints);
           const shouldIgnoreOldCompletedCurve = ignoreCompletedCurveUntilNewStreamRef.current && nextSignature === ignoredCurveSignatureRef.current;
           if (!shouldIgnoreOldCompletedCurve) {
-            if (chartStatusRef.current !== 'live') setChartFinalResult(null);
             hasLiveCurveRef.current = true;
             chartStatusRef.current = 'live';
             ignoreCompletedCurveUntilNewStreamRef.current = false;
@@ -711,7 +749,6 @@ function App() {
       socket.on('lpc:stream', (payload) => {
         setEventCounters((counters) => ({ ...counters, streamEvents: counters.streamEvents + 1 }));
         setLastStream(payload);
-        if (chartStatusRef.current !== 'live') setChartFinalResult(null);
         chartStatusRef.current = 'live';
         setChartStatus('live');
         hasLiveCurveRef.current = true;
@@ -731,7 +768,6 @@ function App() {
       socket.on('lpc:curve-updated', (payload) => {
         setEventCounters((counters) => ({ ...counters, curveUpdatedEvents: counters.curveUpdatedEvents + 1 }));
         if (payload.points.length > 0) {
-          if (chartStatusRef.current !== 'live') setChartFinalResult(null);
           hasLiveCurveRef.current = true;
           ignoredCurveSignatureRef.current = null;
           chartStatusRef.current = 'live';
@@ -746,7 +782,9 @@ function App() {
       socket.on('lpc:result', (payload) => {
         setEventCounters((counters) => ({ ...counters, resultEvents: counters.resultEvents + 1 }));
         setLastResult(payload);
+        // Final result marker is intentionally kept until the next accepted scan.
         setChartFinalResult(payload);
+        setFinalMarkerResult(buildFinalMarker(payload, getLastKnownCurvePoint()));
         setResultHistory((results) => mergeResultIntoHistory(results, payload, 50));
         focusBarcodeInput(180);
       });
@@ -765,13 +803,16 @@ function App() {
         setChartStatus('completed');
         setCompletedCurvePoints(completedPoints);
         setCurvePoints(completedPoints);
+        setFinalMarkerResult((marker) => marker ? { ...marker, point: completedPoints.at(-1) ?? marker.point } : marker);
         ignoreCompletedCurveUntilNewStreamRef.current = false;
         setIgnoreCompletedCurveUntilNewStream(false);
       });
 
       socket.on('test:completed', (payload) => {
         setLastResult(payload);
+        // Final result marker is intentionally kept until the next accepted scan.
         setChartFinalResult(payload);
+        setFinalMarkerResult(buildFinalMarker(payload, getLastKnownCurvePoint()));
         setResultHistory((results) => mergeResultIntoHistory(results, payload, 50));
         focusBarcodeInput(220);
       });
@@ -1096,7 +1137,7 @@ function App() {
             <div className="metric-card emphasis"><span>Pressure [mbar]</span><strong>{formatNumber(lastStream?.pressureMbar, 2)}</strong></div>
           </div>
 
-          <PressureChart points={displayedCurvePoints} lastResult={chartFinalResult} />
+          <PressureChart points={displayedCurvePoints} lastResult={finalMarkerResult?.result ?? chartFinalResult} />
         </section>
 
         <aside className="panel result-column">
@@ -1109,6 +1150,7 @@ function App() {
                 <span>Otwórz pełną historię pomiarów</span>
               </button>
             </div>
+            <small className="results-preview-hint">Przesuń tabelę w bok, aby zobaczyć więcej.</small>
             {resultsPreview}
           </section>
         </aside>
@@ -1167,6 +1209,17 @@ function App() {
                   ignoreCompletedCurveUntilNewStream,
                   chartStatus,
                   chartFinalResult: chartFinalResult?.result ?? null,
+                  finalMarkerResult: finalMarkerResult
+                    ? {
+                        result: finalMarkerResult.result.result,
+                        displayLabel: finalMarkerResult.displayLabel,
+                        leakType: finalMarkerResult.leakType,
+                        leakValue: finalMarkerResult.leakValue,
+                        leakUnit: finalMarkerResult.leakUnit,
+                        point: finalMarkerResult.point,
+                        receivedAt: finalMarkerResult.receivedAt,
+                      }
+                    : null,
                 }, null, 2)}</pre>
                 {lpcActionMessage && <pre>{lpcActionMessage}</pre>}
                 {portCheck && <pre>{JSON.stringify(portCheck, null, 2)}</pre>}

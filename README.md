@@ -635,3 +635,10 @@ Moduł `Programy` jest dostępny dla ról `line_leader` i `admin`. Pozwala dodaw
 - Wykres ciśnienia nadal resetuje stary marker po nowym skanie, ale po finalnym wyniku rysuje etykietę przy ostatnim punkcie krzywej, np. `NOK` oraz `RL 10.79 pa/s`.
 - Prawy panel ma sekcję `Wyniki testów`: widoczny przycisk otwiera pełny modal historii, a pod nim jest kompaktowy podgląd ostatnich wyników.
 - Po zamknięciu pełnego modala wyników focus wraca do pola barcode, żeby operator mógł skanować kolejną sztukę bez klikania w ekran.
+
+### Stabilizacja końcowego markera i układu paneli
+
+- Końcowa etykieta wyniku na wykresie jest utrzymywana w stanie frontendu do następnego zaakceptowanego skanu; polling krzywej ani odświeżenie statusu LPC jej nie czyści.
+- `resetChartForNewTest()` nadal czyści bieżące punkty, zakończoną krzywą i finalny marker dopiero przy rozpoczęciu kolejnego testu.
+- Mała tabela wyników w prawym panelu ma własny poziomy scroll oraz podpowiedź dla operatora, że można przesunąć tabelę w bok.
+- Trzy główne panele operatora są wyrównywane przez CSS Grid do tej samej wysokości na szerokim ekranie; na małych ekranach mogą układać się jeden pod drugim.

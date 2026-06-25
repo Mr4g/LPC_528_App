@@ -975,7 +975,7 @@ function App() {
           <tr><th>Czas</th><th>Wynik</th><th>Program</th><th>Barcode</th><th>Pomiar</th></tr>
         </thead>
         <tbody>
-          {resultHistory.slice(0, 5).map((result) => (
+          {resultHistory.slice(0, 4).map((result) => (
             <tr key={`preview-${result.receivedAt}-${result.uniqueId}`}>
               <td title={formatDateTime(result.receivedAt)}>{formatDateTime(result.receivedAt)}</td>
               <td><span className={`result-badge ${getResultClass(result.result)}`}>{formatResultLabel(result.result)}</span></td>

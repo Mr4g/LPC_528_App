@@ -440,3 +440,26 @@ Status zawiera m.in. `lastDataReceivedAt`, `lastSuccessfulWriteAt`, `lastHeartbe
 4. Przetestuj `POST /api/programs/start` dla programu `1`.
 5. Dopiero po sukcesie wykonaj skan lub `POST /api/scan` z barcode `5901234123457`.
 6. Oczekiwane: UI pokazuje `P01`, `Program P01 wysłany do LPC`, stream LPC aktualizuje live dane i wykres, a po końcowym wyniku tabela pokazuje ACCEPT/REJECT oraz pomiary.
+
+## Ekran operatorski IPC
+
+Frontend jest przebudowany jako pełnoekranowy panel operatorski pod ekran 16:9 / IPC. Główna praca operatora odbywa się na jednym widoku:
+
+- górny pasek pokazuje status LPC, aktualny program, ostatni barcode i ostatni wynik OK/NOK/ERROR,
+- lewa kolumna służy wyłącznie do skanowania i pokazuje krótki status startu programu,
+- środkowa kolumna pokazuje live test, duże kafelki z aktualnymi wartościami oraz duży wykres ciśnienia,
+- prawa kolumna pokazuje czytelny ostatni wynik oraz historię maksymalnie 10 wyników.
+
+Na głównym ekranie nie są pokazywane techniczne szczegóły takie jak `stdout`, `stderr`, `command`, `scriptPath`, `args` ani raw line z LPC. Te dane są dostępne wyłącznie w diagnostyce.
+
+### Diagnostyka UI
+
+Diagnostyka jest domyślnie ukryta. Aby pokazać przycisk `Diagnostyka`, ustaw:
+
+```env
+VITE_SHOW_DIAGNOSTICS=true
+```
+
+Panel diagnostyczny otwiera modal, dzięki czemu nie rozciąga głównego layoutu operatora. W diagnostyce są dostępne: test portu LPC, heartbeat, force refresh status, mock line, connect/disconnect diagnostyczne oraz pełny wynik `ProgramStarter` wraz ze `stdout` i `stderr`.
+
+Operator w normalnej pracy nie używa przycisków `connect` / `disconnect`; połączenie LPC działa automatycznie przez backend i reconnect.

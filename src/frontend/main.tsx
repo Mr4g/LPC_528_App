@@ -1,6 +1,7 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import type { BarcodeScan, CurrentTest, LpcResult, LpcStreamPoint, ProgramStartRequest, ProgramStartResult } from '../shared/types';
+import { formatDateTime, formatNumber, formatResultLabel, getConnectionLabel, getResultClass } from './formatters';
 import { getProgramStartOperatorMessage } from './programStartMessages';
 import './styles.css';
 
@@ -106,11 +107,11 @@ declare global {
 type OperatorStatus = 'ready' | 'scanning' | 'program-selected' | 'no-mapping' | 'start-error';
 
 const statusLabels: Record<OperatorStatus, string> = {
-  ready: 'Zeskanuj barcode',
+  ready: 'Gotowy do skanu',
   scanning: 'Skanuję...',
-  'program-selected': 'Start testu OK',
-  'no-mapping': 'Brak mapowania dla barcode',
-  'start-error': 'Błąd startu testu',
+  'program-selected': 'Program wysłany do LPC',
+  'no-mapping': 'Brak mapowania',
+  'start-error': 'Błąd startu programu',
 };
 
 const measurementKeys = ['RL', 'Pt', 'EDC', 'PL', 'LLR', 'HLR', 'FPR'] as const;
@@ -135,6 +136,30 @@ async function fetchLpcStatus(): Promise<LpcStatusPayload | null> {
   return response.json() as Promise<LpcStatusPayload>;
 }
 
+function buildChartPolyline(points: LpcCurvePoint[]): string {
+  const validPoints = points.filter((point) => point.pressureMbar !== null);
+  if (validPoints.length < 2) return '';
+
+  const minX = Math.min(...validPoints.map((point) => point.elapsedTimeSec));
+  const maxX = Math.max(...validPoints.map((point) => point.elapsedTimeSec));
+  const minY = Math.min(...validPoints.map((point) => point.pressureMbar ?? 0));
+  const maxY = Math.max(...validPoints.map((point) => point.pressureMbar ?? 0));
+  const xRange = maxX - minX || 1;
+  const yRange = maxY - minY || 1;
+
+  return validPoints.map((point) => {
+    const x = 52 + ((point.elapsedTimeSec - minX) / xRange) * 820;
+    const y = 330 - (((point.pressureMbar ?? 0) - minY) / yRange) * 280;
+    return `${x},${y}`;
+  }).join(' ');
+}
+
+function getSafeLpcConnectionLabel(status: LpcStatusPayload | null): string {
+  if (!status) return getConnectionLabel(null, false);
+  const safeConnected = status.connected && !status.lastError && status.socketDestroyed !== true && status.socketWritable !== false;
+  return getConnectionLabel(status.status, safeConnected);
+}
+
 function App() {
   const [barcode, setBarcode] = useState('');
   const [status, setStatus] = useState<OperatorStatus>('ready');
@@ -153,6 +178,7 @@ function App() {
   const [forceRefreshResponse, setForceRefreshResponse] = useState<string | null>(null);
   const [diagnosticProgram, setDiagnosticProgram] = useState('1');
   const [programStartTestResponse, setProgramStartTestResponse] = useState<string | null>(null);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const barcodeInputRef = useRef<HTMLInputElement | null>(null);
 
   async function refreshLpcStatus() {
@@ -183,21 +209,10 @@ function App() {
         setStatus('no-mapping');
       });
 
-      socket.on('lpc:status', (payload) => {
-        setLpcStatus(payload);
-      });
-
-      socket.on('lpc:connected', (payload) => {
-        setLpcStatus(payload);
-      });
-
-      socket.on('lpc:disconnected', (payload) => {
-        setLpcStatus(payload);
-      });
-
-      socket.on('lpc:reconnecting', (payload) => {
-        setLpcStatus(payload);
-      });
+      socket.on('lpc:status', setLpcStatus);
+      socket.on('lpc:connected', setLpcStatus);
+      socket.on('lpc:disconnected', setLpcStatus);
+      socket.on('lpc:reconnecting', setLpcStatus);
 
       socket.on('lpc:error', (payload) => {
         setLpcActionMessage(payload.message);
@@ -207,7 +222,7 @@ function App() {
 
       socket.on('lpc:stream', (payload) => {
         setLastStream(payload);
-        setCurvePoints((points) => [...points.slice(-19), {
+        setCurvePoints((points) => [...points.slice(-149), {
           elapsedTimeSec: payload.elapsedTimeSec ?? 0,
           remainingTimeSec: payload.remainingTimeSec,
           pressureBar: payload.pressureValue,
@@ -222,7 +237,7 @@ function App() {
       });
 
       socket.on('lpc:curve-completed', (payload) => {
-        setCurvePoints(payload.points.slice(-20));
+        setCurvePoints(payload.points.slice(-150));
       });
 
       socket.on('test:completed', (payload) => {
@@ -268,6 +283,7 @@ function App() {
       const rejectedPayload = payload as ScanRejectedPayload;
       setLastRejected({ barcode: rejectedPayload.barcode, error: 'NO_MAPPING', message: rejectedPayload.message });
       setStatus('no-mapping');
+      window.setTimeout(() => barcodeInputRef.current?.focus(), 0);
       return;
     }
 
@@ -290,20 +306,18 @@ function App() {
   async function checkLpcPort() {
     setPortCheck(null);
     const response = await fetch('/api/lpc/check-port', { method: 'POST' });
-    if (response.ok) {
-      setPortCheck((await response.json()) as LpcPortCheckPayload);
-    }
+    if (response.ok) setPortCheck((await response.json()) as LpcPortCheckPayload);
   }
 
   async function heartbeatTest() {
     const response = await fetch('/api/lpc/heartbeat-test', { method: 'POST' });
-    setHeartbeatResponse(JSON.stringify(await response.json()));
+    setHeartbeatResponse(JSON.stringify(await response.json(), null, 2));
     await refreshLpcStatus();
   }
 
   async function forceRefreshStatus() {
     const response = await fetch('/api/lpc/force-refresh-status', { method: 'POST' });
-    setForceRefreshResponse(JSON.stringify(await response.json()));
+    setForceRefreshResponse(JSON.stringify(await response.json(), null, 2));
     await refreshLpcStatus();
   }
 
@@ -313,7 +327,7 @@ function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ program: Number(diagnosticProgram), barcode: 'diagnostic_program_start' }),
     });
-    setProgramStartTestResponse(JSON.stringify(await response.json()));
+    setProgramStartTestResponse(JSON.stringify(await response.json(), null, 2));
   }
 
   async function sendMockLine() {
@@ -322,207 +336,200 @@ function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ line: mockLine }),
     });
-    setMockLineResponse(JSON.stringify(await response.json()));
+    setMockLineResponse(JSON.stringify(await response.json(), null, 2));
   }
 
-  const chartPoints = useMemo(() => {
-    const validPoints = curvePoints.filter((point) => point.pressureMbar !== null);
-    if (validPoints.length < 2) return '';
-    const minX = Math.min(...validPoints.map((point) => point.elapsedTimeSec));
-    const maxX = Math.max(...validPoints.map((point) => point.elapsedTimeSec));
-    const minY = Math.min(...validPoints.map((point) => point.pressureMbar ?? 0));
-    const maxY = Math.max(...validPoints.map((point) => point.pressureMbar ?? 0));
-    const xRange = maxX - minX || 1;
-    const yRange = maxY - minY || 1;
-    return validPoints.map((point) => {
-      const x = 30 + ((point.elapsedTimeSec - minX) / xRange) * 520;
-      const y = 190 - (((point.pressureMbar ?? 0) - minY) / yRange) * 160;
-      return `${x},${y}`;
-    }).join(' ');
-  }, [curvePoints]);
-
-  const lpcConnectionLabel = (() => {
-    if (!lpcStatus) return 'Niepołączony';
-    if (lpcStatus.status === 'idle') return 'Niepołączony';
-    if (lpcStatus.status === 'connecting') return 'Łączenie...';
-    if (lpcStatus.status === 'connected' && lpcStatus.connected && !lpcStatus.lastError && lpcStatus.socketDestroyed !== true && lpcStatus.socketWritable !== false) return 'Połączony';
-    if (lpcStatus.status === 'reconnecting') return 'Ponawianie połączenia...';
-    if (lpcStatus.status === 'error') return 'Błąd połączenia';
-    if (lpcStatus.status === 'disconnecting') return 'Rozłączanie...';
-    return 'Rozłączony';
-  })();
+  const chartPoints = useMemo(() => buildChartPolyline(curvePoints), [curvePoints]);
+  const lastBarcode = lastAccepted?.currentTest.barcode ?? lastResult?.barcode ?? '-';
+  const currentProgram = lastAccepted?.currentTest.programText ?? lastResult?.programText ?? '-';
+  const topResultLabel = lastResult ? formatResultLabel(lastResult.result) : '-';
+  const startMessage = lastAccepted ? getProgramStartOperatorMessage(lastAccepted.programStart, lastAccepted.currentTest.programText) : statusLabels[status];
+  const startOk = lastAccepted?.programStart.success ?? false;
+  const connectionLabel = getSafeLpcConnectionLabel(lpcStatus);
+  const connectionClass = lpcStatus?.lastError ? 'connection-error' : `connection-${lpcStatus?.status ?? 'idle'}`;
 
   return (
-    <main className="operator-panel">
-      <section className={`card status-${status}`}>
-        <p className="eyebrow">LPC-528 Operator Panel</p>
-        <h1>{status === 'program-selected' && lastAccepted ? `${lastAccepted.currentTest.programText} wybrany` : statusLabels[status]}</h1>
-
-        <section className={`lpc-status-panel lpc-status-${lpcStatus?.status ?? 'idle'}`} aria-label="Status LPC">
+    <main className="app-shell">
+      <header className="top-bar">
+        <div className="brand-block">
+          <span className="eyebrow">LPC-528</span>
+          <strong>Panel operatorski</strong>
+        </div>
+        <div className="top-metric"><span>Program</span><strong>{currentProgram}</strong></div>
+        <div className="top-metric"><span>Barcode</span><strong>{lastBarcode}</strong></div>
+        <div className={`top-result ${lastResult ? getResultClass(lastResult.result) : 'status-unknown'}`}><span>Wynik</span><strong>{topResultLabel}</strong></div>
+        <div className={`connection-badge ${connectionClass}`}>
+          <span className="connection-dot" />
           <div>
-            <span className="label">LPC</span>
-            <strong>{lpcConnectionLabel}</strong>
-            <small>{lpcStatus ? `${lpcStatus.host}:${lpcStatus.port}` : 'status...'}</small>
-            {lpcStatus?.lastError && <p className="lpc-error">{lpcStatus.lastError}</p>}
-            {lpcStatus?.nextReconnectAt && <p className="lpc-meta">Ponowna próba: {lpcStatus.nextReconnectAt}</p>}
-            {lpcStatus?.lastDataReceivedAt && <p className="lpc-meta">Dane: {lpcStatus.lastDataReceivedAt}</p>}
-            {lpcStatus?.lastHeartbeatAt && <p className="lpc-meta">Heartbeat: {lpcStatus.lastHeartbeatAt}</p>}
-            {lpcStatus && <p className="lpc-meta">Reconnect: {lpcStatus.reconnectAttemptCount}</p>}
+            <strong>{connectionLabel}</strong>
+            <small>{lpcStatus ? `${lpcStatus.host}:${lpcStatus.port}` : 'LPC status...'}</small>
+            {lpcStatus?.nextReconnectAt && <small>Ponowna próba: {formatDateTime(lpcStatus.nextReconnectAt)}</small>}
+            {lpcStatus?.lastError && <small className="connection-error-text">{lpcStatus.lastError}</small>}
           </div>
-        </section>
+        </div>
+        {showDiagnostics && <button className="diagnostics-button" type="button" onClick={() => setDiagnosticsOpen(true)}>Diagnostyka</button>}
+      </header>
 
-        <form className="scan-form" onSubmit={submitScan}>
-          <label htmlFor="barcode-input">Barcode</label>
-          <input
-            id="barcode-input"
-            ref={barcodeInputRef}
-            autoFocus
-            value={barcode}
-            onChange={(event) => setBarcode(event.target.value)}
-            placeholder="Zeskanuj lub wpisz barcode"
-          />
-          <button type="submit" disabled={status === 'scanning'}>
-            Wyślij skan
-          </button>
-        </form>
-
-        {lastAccepted && (
-          <section className="details success-details" aria-label="Ostatni zaakceptowany skan">
-            <h2>Ostatni skan</h2>
-            <dl>
-              <div><dt>Barcode</dt><dd>{lastAccepted.currentTest.barcode}</dd></div>
-              <div><dt>Matched key</dt><dd>{lastAccepted.currentTest.matchedKey}</dd></div>
-              <div><dt>Program</dt><dd>{lastAccepted.currentTest.programText}</dd></div>
-              <div><dt>Selected at</dt><dd>{lastAccepted.currentTest.selectedAt}</dd></div>
-              <div><dt>Status LPC start</dt><dd>{getProgramStartOperatorMessage(lastAccepted.programStart, lastAccepted.currentTest.programText)}</dd></div>
-              <div><dt>Mode</dt><dd>{lastAccepted.programStart.mode}</dd></div>
-              <div><dt>Command</dt><dd>{lastAccepted.programStart.command ?? '-'}</dd></div>
-              <div><dt>Script path</dt><dd>{lastAccepted.programStart.scriptPath ?? '-'}</dd></div>
-              <div><dt>Args</dt><dd>{lastAccepted.programStart.args?.join(' ') ?? '-'}</dd></div>
-              <div><dt>Exit code</dt><dd>{lastAccepted.programStart.exitCode ?? '-'}</dd></div>
-              <div><dt>Success</dt><dd>{lastAccepted.programStart.success ? 'OK' : 'FAIL'}</dd></div>
-              <div><dt>Message</dt><dd>{lastAccepted.programStart.message}</dd></div>
-              {lastAccepted.programStart.errorMessage && <div><dt>Error</dt><dd>{lastAccepted.programStart.errorMessage}</dd></div>}
-              {lastAccepted.programStart.stdout && <div><dt>stdout</dt><dd><pre>{lastAccepted.programStart.stdout}</pre></dd></div>}
-              {lastAccepted.programStart.stderr && <div><dt>stderr</dt><dd><pre>{lastAccepted.programStart.stderr}</pre></dd></div>}
-            </dl>
-          </section>
-        )}
-
-        {lastRejected && (
-          <section className="details error-details" aria-label="Błąd skanu">
-            <h2>{lastRejected.error}</h2>
-            <p>{lastRejected.message}: {lastRejected.barcode}</p>
-          </section>
-        )}
-
-
-        {showDiagnostics && (
-        <section className="details diagnostics-details" aria-label="Diagnostyka LPC">
-          <h2>Diagnostyka</h2>
-          <div className="lpc-actions">
-            <button type="button" onClick={() => void lpcAction('connect')}>Połącz</button>
-            <button type="button" onClick={() => void lpcAction('disconnect')}>Rozłącz</button>
-            <button type="button" onClick={() => void checkLpcPort()}>Sprawdź port LPC</button>
-            <button type="button" onClick={() => void heartbeatTest()}>Heartbeat test</button>
-            <button type="button" onClick={() => void forceRefreshStatus()}>Force refresh status</button>
+      <section className="operator-grid">
+        <aside className={`panel scan-panel status-${status}`}>
+          <div className="panel-header">
+            <span>Skanowanie</span>
+            <strong>{status === 'program-selected' && lastAccepted ? `${lastAccepted.currentTest.programText} wybrany` : statusLabels[status]}</strong>
           </div>
-          {lpcActionMessage && <p>{lpcActionMessage}</p>}
-          {portCheck && (
-            <p className={portCheck.reachable ? 'port-ok' : 'port-error'}>
-              {portCheck.reachable ? 'Port dostępny' : 'Port niedostępny'} ({portCheck.latencyMs} ms) {portCheck.error ?? ''}
-            </p>
+          <form className="scan-form" onSubmit={submitScan}>
+            <label htmlFor="barcode-input">Barcode</label>
+            <input
+              id="barcode-input"
+              ref={barcodeInputRef}
+              autoFocus
+              value={barcode}
+              onChange={(event) => setBarcode(event.target.value)}
+              placeholder="Zeskanuj barcode"
+            />
+            <button type="submit" disabled={status === 'scanning'}>Wyślij skan</button>
+          </form>
+
+          {lastAccepted && (
+            <div className="scan-summary">
+              <div><span>Barcode</span><strong>{lastAccepted.currentTest.barcode}</strong></div>
+              <div><span>Matched key</span><strong>{lastAccepted.currentTest.matchedKey}</strong></div>
+              <div><span>Program</span><strong>{lastAccepted.currentTest.programText}</strong></div>
+              <div><span>Start LPC</span><strong className={startOk ? 'ok-text' : 'error-text'}>{startOk ? 'OK' : 'FAIL'}</strong></div>
+              <p className={startOk ? 'operator-message ok-text' : 'operator-message error-text'}>{startMessage}</p>
+              <span className="mode-badge">{lastAccepted.programStart.mode}</span>
+            </div>
           )}
-          {heartbeatResponse && <p>{heartbeatResponse}</p>}
-          {forceRefreshResponse && <p>{forceRefreshResponse}</p>}
-          <div className="program-start-test">
-            <h3>Test startu programu</h3>
-            <input value={diagnosticProgram} onChange={(event) => setDiagnosticProgram(event.target.value)} inputMode="numeric" />
-            <button type="button" onClick={() => void testProgramStart()}>Start P{String(Number(diagnosticProgram) || 0).padStart(2, '0')}</button>
-            {programStartTestResponse && <pre>{programStartTestResponse}</pre>}
+
+          {lastRejected && (
+            <div className="scan-error">
+              <strong>{lastRejected.error}</strong>
+              <span>{lastRejected.message}: {lastRejected.barcode}</span>
+            </div>
+          )}
+        </aside>
+
+        <section className="panel live-panel">
+          <div className="panel-header">
+            <span>Live test</span>
+            <strong>{lastStream ? lastStream.segment : 'Oczekiwanie na dane LPC'}</strong>
           </div>
-          <textarea
-            value={mockLine}
-            onChange={(event) => setMockLine(event.target.value)}
-            placeholder="Wklej raw LPC line do testu UI bez realnego LPC"
-          />
-          <button type="button" onClick={() => void sendMockLine()}>Wyślij mock line</button>
-          {mockLineResponse && <p>{mockLineResponse}</p>}
-        </section>
-        )}
+          <div className="metrics-grid">
+            <div className="metric-card"><span>Program</span><strong>{currentProgram}</strong></div>
+            <div className="metric-card"><span>Barcode</span><strong>{lastBarcode}</strong></div>
+            <div className="metric-card"><span>Segment</span><strong>{lastStream?.segment ?? '-'}</strong></div>
+            <div className="metric-card"><span>Elapsed</span><strong>{formatNumber(lastStream?.elapsedTimeSec, 2)} s</strong></div>
+            <div className="metric-card"><span>Remaining</span><strong>{formatNumber(lastStream?.remainingTimeSec, 2)} s</strong></div>
+            <div className="metric-card"><span>Pressure [bar]</span><strong>{formatNumber(lastStream?.pressureValue, 5)}</strong></div>
+            <div className="metric-card emphasis"><span>Pressure [mbar]</span><strong>{formatNumber(lastStream?.pressureMbar, 2)}</strong></div>
+          </div>
 
-        {lastStream && (
-          <section className="details live-details" aria-label="Live streaming LPC">
-            <h2>Live test</h2>
-            <dl>
-              <div><dt>Program</dt><dd>{lastAccepted?.currentTest.programText ?? lastStream.program}</dd></div>
-              <div><dt>Barcode</dt><dd>{lastAccepted?.currentTest.barcode ?? '-'}</dd></div>
-              <div><dt>Elapsed</dt><dd>{lastStream.elapsedTimeSec?.toFixed(2)} s</dd></div>
-              <div><dt>Remaining</dt><dd>{lastStream.remainingTimeSec?.toFixed(2)} s</dd></div>
-              <div><dt>Pressure bar</dt><dd>{lastStream.pressureValue} {lastStream.pressureUnit}</dd></div>
-              <div><dt>Pressure mbar</dt><dd>{lastStream.pressureMbar?.toFixed(3)} mbar</dd></div>
-              <div><dt>Segment</dt><dd>{lastStream.segment}</dd></div>
-            </dl>
-          </section>
-        )}
-
-        {lastResult && (
-          <section className={`details result-details result-${lastResult.result.toLowerCase()}`} aria-label="Ostatni wynik LPC">
-            <h2>{lastResult.result === 'ACCEPT' ? 'OK' : lastResult.result === 'REJECT' ? 'NOK' : lastResult.result}</h2>
-            <dl>
-              <div><dt>Barcode</dt><dd>{lastResult.barcode}</dd></div>
-              <div><dt>Program</dt><dd>{lastResult.programText}</dd></div>
-              <div><dt>Current test</dt><dd>{lastResult.currentTestValid ? 'valid' : 'not linked'}</dd></div>
-              <div><dt>TotalAbs / UID</dt><dd>{lastResult.totalAbs} / {lastResult.uniqueId}</dd></div>
-              <div><dt>Date / Time</dt><dd>{lastResult.testerDate} {lastResult.testerTime}</dd></div>
-              <div><dt>Main leak</dt><dd>{lastResult.leakType} {lastResult.leakValue} {lastResult.leakUnit}</dd></div>
-              {measurementKeys.map((key) => {
-                const value = lastResult[key];
-                const unit = lastResult[`${key}_unit` as keyof EnrichedLpcResult];
-                return value === null || value === undefined ? null : (
-                  <div key={key}><dt>{key}</dt><dd>{String(value)} {String(unit ?? '')}</dd></div>
-                );
-              })}
-            </dl>
-          </section>
-        )}
-
-        <section className="details curve-details" aria-label="Wykres ciśnienia">
-          <h2>Wykres ciśnienia</h2>
-          <svg className="pressure-chart" viewBox="0 0 600 230" role="img" aria-label="Ciśnienie w czasie">
-            <line x1="30" y1="195" x2="570" y2="195" />
-            <line x1="30" y1="20" x2="30" y2="195" />
-            {chartPoints && <polyline points={chartPoints} />}
-            <text x="250" y="225">Czas [s]</text>
-            <text x="40" y="18">Ciśnienie [mbar]</text>
-          </svg>
-          <div className="curve-list">
-            {curvePoints.slice(-6).map((point) => (
-              <span key={`${point.elapsedTimeSec}-${point.segment}`}>{point.elapsedTimeSec.toFixed(2)}s / {point.pressureMbar?.toFixed(2)} mbar</span>
-            ))}
+          <div className="chart-wrap">
+            <svg className="pressure-chart" viewBox="0 0 930 380" role="img" aria-label="Ciśnienie w czasie">
+              <line x1="52" y1="330" x2="890" y2="330" />
+              <line x1="52" y1="40" x2="52" y2="330" />
+              {chartPoints && <polyline points={chartPoints} />}
+              <text x="415" y="366">Czas [s]</text>
+              <text x="70" y="30">Ciśnienie [mbar]</text>
+            </svg>
+            {!chartPoints && <div className="chart-empty">Brak danych z testu</div>}
           </div>
         </section>
 
-        {resultHistory.length > 0 && (
-          <section className="details history-details" aria-label="Ostatnie wyniki">
+        <aside className="panel result-column">
+          <section className="last-result-panel">
+            <div className={`result-status ${lastResult ? getResultClass(lastResult.result) : 'status-unknown'}`}>
+              <span>Ostatni wynik</span>
+              <strong>{lastResult ? formatResultLabel(lastResult.result) : '-'}</strong>
+            </div>
+            {lastResult ? (
+              <div className="result-data-grid">
+                <div><span>Barcode</span><strong>{lastResult.barcode}</strong></div>
+                <div><span>Program</span><strong>{lastResult.programText}</strong></div>
+                <div><span>TotalAbs / ID</span><strong>{lastResult.totalAbs} / {lastResult.uniqueId}</strong></div>
+                <div><span>Data / czas</span><strong>{lastResult.testerDate} {lastResult.testerTime}</strong></div>
+                <div><span>Leak</span><strong>{lastResult.leakType} {formatNumber(lastResult.leakValue, 6)} {lastResult.leakUnit}</strong></div>
+                {measurementKeys.map((key) => {
+                  const value = lastResult[key];
+                  const unit = lastResult[`${key}_unit` as keyof EnrichedLpcResult];
+                  return value === null || value === undefined ? null : (
+                    <div key={key}><span>{key}</span><strong>{formatNumber(Number(value), 6)} {String(unit ?? '')}</strong></div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="empty-state">Brak końcowego wyniku testu</p>
+            )}
+          </section>
+
+          <section className="history-panel">
             <h2>Ostatnie wyniki</h2>
-            <table>
-              <tbody>
-                {resultHistory.slice(0, 10).map((result) => (
-                  <tr key={`${result.receivedAt}-${result.uniqueId}`}>
-                    <td>{result.receivedAt}</td>
-                    <td>{result.barcode}</td>
-                    <td>{result.programText}</td>
-                    <td>{result.result}</td>
-                    <td>{result.leakValue} {result.leakUnit}</td>
-                    <td>{result.totalAbs}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {resultHistory.length > 0 ? (
+              <table>
+                <thead>
+                  <tr><th>Czas</th><th>Program</th><th>Barcode</th><th>Wynik</th><th>Pomiar</th><th>ID</th></tr>
+                </thead>
+                <tbody>
+                  {resultHistory.slice(0, 10).map((result) => (
+                    <tr key={`${result.receivedAt}-${result.uniqueId}`}>
+                      <td>{formatDateTime(result.receivedAt)}</td>
+                      <td>{result.programText}</td>
+                      <td>{result.barcode}</td>
+                      <td><span className={`result-badge ${getResultClass(result.result)}`}>{formatResultLabel(result.result)}</span></td>
+                      <td>{formatNumber(result.leakValue, 4)} {result.leakUnit}</td>
+                      <td>{result.totalAbs}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : <p className="empty-state">Brak historii</p>}
           </section>
-        )}
+        </aside>
       </section>
+
+      {showDiagnostics && diagnosticsOpen && (
+        <div className="diagnostics-modal" role="dialog" aria-modal="true" aria-label="Diagnostyka">
+          <div className="diagnostics-content">
+            <header>
+              <h2>Diagnostyka</h2>
+              <button type="button" onClick={() => setDiagnosticsOpen(false)}>Zamknij</button>
+            </header>
+            <div className="diagnostics-grid">
+              <section>
+                <h3>LPC</h3>
+                <div className="lpc-actions">
+                  <button type="button" onClick={() => void lpcAction('connect')}>Połącz</button>
+                  <button type="button" onClick={() => void lpcAction('disconnect')}>Rozłącz</button>
+                  <button type="button" onClick={() => void checkLpcPort()}>Sprawdź port LPC</button>
+                  <button type="button" onClick={() => void heartbeatTest()}>Heartbeat test</button>
+                  <button type="button" onClick={() => void forceRefreshStatus()}>Force refresh status</button>
+                </div>
+                {lpcActionMessage && <pre>{lpcActionMessage}</pre>}
+                {portCheck && <pre>{JSON.stringify(portCheck, null, 2)}</pre>}
+                {heartbeatResponse && <pre>{heartbeatResponse}</pre>}
+                {forceRefreshResponse && <pre>{forceRefreshResponse}</pre>}
+                <textarea value={mockLine} onChange={(event) => setMockLine(event.target.value)} placeholder="Raw LPC line do testu UI" />
+                <button type="button" onClick={() => void sendMockLine()}>Wyślij mock line</button>
+                {mockLineResponse && <pre>{mockLineResponse}</pre>}
+              </section>
+
+              <section>
+                <h3>ProgramStarter</h3>
+                <div className="program-start-test">
+                  <input value={diagnosticProgram} onChange={(event) => setDiagnosticProgram(event.target.value)} inputMode="numeric" />
+                  <button type="button" onClick={() => void testProgramStart()}>Start P{String(Number(diagnosticProgram) || 0).padStart(2, '0')}</button>
+                </div>
+                {lastAccepted?.programStart && <pre>{JSON.stringify(lastAccepted.programStart, null, 2)}</pre>}
+                {programStartTestResponse && <pre>{programStartTestResponse}</pre>}
+              </section>
+
+              <section>
+                <h3>Ostatnie punkty krzywej</h3>
+                <pre>{JSON.stringify(curvePoints.slice(-20), null, 2)}</pre>
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

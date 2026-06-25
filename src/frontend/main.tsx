@@ -1,8 +1,9 @@
 import React, { FormEvent, useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import type { BarcodeScan, CurrentTest, LpcResult, LpcStreamPoint, ProgramStartRequest, ProgramStartResult } from '../shared/types';
-import { formatDateTime, formatNumber, formatResultLabel, getConnectionLabel, getResultClass } from './formatters';
+import { formatDateTime, formatMeasurement, formatNumber, formatResultLabel, getConnectionLabel, getResultClass } from './formatters';
 import { LastResultPanel } from './components/LastResultPanel';
+import carrierLogo from './assets/carrier-logo.svg';
 import { PressureChart } from './components/PressureChart';
 import { UserMenu } from './components/UserMenu';
 import { getProgramStartOperatorMessage } from './programStartMessages';
@@ -234,9 +235,9 @@ function LoginPage(props: { onLoggedIn: (user: AuthUser) => void }) {
         <span className="eyebrow">LPC-528</span>
         <h1>Logowanie operatora</h1>
         <label>Login / skrót osobowy</label>
-        <input autoFocus value={login} onChange={(event) => setLogin(event.target.value.toUpperCase())} placeholder="ABC" />
+        <input className="auth-input" autoFocus value={login} onChange={(event) => setLogin(event.target.value.toUpperCase())} placeholder="Login" />
         <label>Hasło</label>
-        <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Hasło" />
+        <input className="auth-input" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Hasło" />
         {error && <p className="login-error">{error}</p>}
         <button type="submit">Zaloguj</button>
       </form>
@@ -314,7 +315,7 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
       </header>
       <form className="user-form" onSubmit={createUser}>
         <input value={login} onChange={(event) => setLogin(event.target.value.toUpperCase())} placeholder="Login ABC" />
-        <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Hasło tymczasowe" />
+        <input className="auth-input" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Hasło tymczasowe" />
         <select value={role} onChange={(event) => setRole(event.target.value as UserRole)} disabled={props.user.role !== 'admin'}>
           <option value="operator">operator</option>
           <option value="line_leader">line_leader</option>
@@ -360,6 +361,10 @@ function App() {
   const [lastResult, setLastResult] = useState<EnrichedLpcResult | null>(null);
   const [resultHistory, setResultHistory] = useState<EnrichedLpcResult[]>([]);
   const [curvePoints, setCurvePoints] = useState<LpcCurvePoint[]>([]);
+  const [completedCurvePoints, setCompletedCurvePoints] = useState<LpcCurvePoint[]>([]);
+  const [chartFinalResult, setChartFinalResult] = useState<EnrichedLpcResult | null>(null);
+  const [ignoreCompletedCurveUntilNewStream, setIgnoreCompletedCurveUntilNewStream] = useState(false);
+  const [carrierLogoAvailable, setCarrierLogoAvailable] = useState(true);
   const [lpcActionMessage, setLpcActionMessage] = useState<string | null>(null);
   const [portCheck, setPortCheck] = useState<LpcPortCheckPayload | null>(null);
   const [mockLine, setMockLine] = useState('');
@@ -381,6 +386,7 @@ function App() {
   const routeRef = useRef(route);
   const diagnosticsOpenRef = useRef(diagnosticsOpen);
   const userMenuOpenRef = useRef(userMenuOpen);
+  const ignoreCompletedCurveUntilNewStreamRef = useRef(ignoreCompletedCurveUntilNewStream);
 
   function focusBarcodeInput(delayMs = 0) {
     window.setTimeout(() => {
@@ -398,6 +404,16 @@ function App() {
 
       input.focus({ preventScroll: true });
     }, delayMs);
+  }
+
+
+  function resetChartForNewTest() {
+    setCurvePoints([]);
+    setCompletedCurvePoints([]);
+    setChartFinalResult(null);
+    setLastStream(null);
+    ignoreCompletedCurveUntilNewStreamRef.current = true;
+    setIgnoreCompletedCurveUntilNewStream(true);
   }
 
   async function refreshMe() {
@@ -435,6 +451,10 @@ function App() {
   }, [userMenuOpen]);
 
   useEffect(() => {
+    ignoreCompletedCurveUntilNewStreamRef.current = ignoreCompletedCurveUntilNewStream;
+  }, [ignoreCompletedCurveUntilNewStream]);
+
+  useEffect(() => {
     if (authUser && route === '/operator') focusBarcodeInput(120);
   }, [authUser, route]);
 
@@ -444,7 +464,7 @@ function App() {
       void fetchLpcRuntimeState().then((payload) => {
         if (payload.lastResult) setLastResult(payload.lastResult);
         if (payload.results.length > 0) setResultHistory(replaceHistoryFromResultsUpdated(payload.results, 10));
-        if (payload.points.length > 0) setCurvePoints(payload.points.slice(-150));
+        if (payload.points.length > 0 && !ignoreCompletedCurveUntilNewStreamRef.current) setCurvePoints(payload.points.slice(-150));
       });
     };
     refreshRuntimeState();
@@ -464,6 +484,7 @@ function App() {
         setLastAccepted(payload);
         setLastRejected(null);
         setStatus(payload.programStart.success ? 'program-selected' : 'start-error');
+        if (payload.programStart.success) resetChartForNewTest();
       });
 
       socket.on('scan:rejected', (payload: ScanRejectedPayload) => {
@@ -485,6 +506,9 @@ function App() {
       socket.on('lpc:stream', (payload) => {
         setEventCounters((counters) => ({ ...counters, streamEvents: counters.streamEvents + 1 }));
         setLastStream(payload);
+        ignoreCompletedCurveUntilNewStreamRef.current = false;
+        setIgnoreCompletedCurveUntilNewStream(false);
+        setCompletedCurvePoints([]);
         setCurvePoints((points) => [...points.slice(-149), {
           elapsedTimeSec: payload.elapsedTimeSec ?? 0,
           remainingTimeSec: payload.remainingTimeSec,
@@ -496,12 +520,16 @@ function App() {
 
       socket.on('lpc:curve-updated', (payload) => {
         setEventCounters((counters) => ({ ...counters, curveUpdatedEvents: counters.curveUpdatedEvents + 1 }));
+        ignoreCompletedCurveUntilNewStreamRef.current = false;
+        setIgnoreCompletedCurveUntilNewStream(false);
+        setCompletedCurvePoints([]);
         setCurvePoints(payload.points.slice(-150));
       });
 
       socket.on('lpc:result', (payload) => {
         setEventCounters((counters) => ({ ...counters, resultEvents: counters.resultEvents + 1 }));
         setLastResult(payload);
+        setChartFinalResult(payload);
         setResultHistory((results) => mergeResultIntoHistory(results, payload, 10));
         focusBarcodeInput(180);
       });
@@ -512,12 +540,17 @@ function App() {
       });
 
       socket.on('lpc:curve-completed', (payload) => {
+        const completedPoints = payload.points.slice(-150);
         setEventCounters((counters) => ({ ...counters, curveCompletedEvents: counters.curveCompletedEvents + 1 }));
-        setCurvePoints(payload.points.slice(-150));
+        setCompletedCurvePoints(completedPoints);
+        setCurvePoints(completedPoints);
+        ignoreCompletedCurveUntilNewStreamRef.current = false;
+        setIgnoreCompletedCurveUntilNewStream(false);
       });
 
       socket.on('test:completed', (payload) => {
         setLastResult(payload);
+        setChartFinalResult(payload);
         setResultHistory((results) => mergeResultIntoHistory(results, payload, 10));
         focusBarcodeInput(220);
       });
@@ -583,6 +616,7 @@ function App() {
     setLastRejected(null);
     setBarcode('');
     setStatus(payload.programStart.success ? 'program-selected' : 'start-error');
+    if (payload.programStart.success) resetChartForNewTest();
     focusBarcodeInput(0);
   }
 
@@ -644,6 +678,7 @@ function App() {
   const startOk = lastAccepted?.programStart.success ?? false;
   const connectionLabel = getSafeLpcConnectionLabel(lpcStatus);
   const connectionClass = lpcStatus?.lastError ? 'connection-error' : `connection-${lpcStatus?.status ?? 'idle'}`;
+  const displayedCurvePoints = curvePoints.length > 0 ? curvePoints : completedCurvePoints;
 
   if (authLoading) {
     return <main className="login-shell"><div className="login-card"><h1>Ładowanie...</h1></div></main>;
@@ -665,8 +700,15 @@ function App() {
     <main className="app-shell">
       <header className="top-bar">
         <div className="brand-block">
-          <span className="eyebrow">LPC-528</span>
-          <strong>Panel operatorski</strong>
+          {carrierLogoAvailable ? (
+            <img className="carrier-logo" src={carrierLogo} alt="Carrier" onError={() => setCarrierLogoAvailable(false)} />
+          ) : (
+            <span className="carrier-logo-fallback">Carrier</span>
+          )}
+          <div>
+            <span className="eyebrow">LPC-528</span>
+            <strong>Panel operatorski</strong>
+          </div>
         </div>
         <div className="top-bar-center">
           <div className="top-metric"><span>Program</span><strong>{currentProgram}</strong></div>
@@ -720,6 +762,7 @@ function App() {
             <label htmlFor="barcode-input">Barcode</label>
             <input
               id="barcode-input"
+              className="scan-input"
               ref={barcodeInputRef}
               autoFocus
               value={barcode}
@@ -763,43 +806,43 @@ function App() {
             <div className="metric-card emphasis"><span>Pressure [mbar]</span><strong>{formatNumber(lastStream?.pressureMbar, 2)}</strong></div>
           </div>
 
-          <PressureChart points={curvePoints} lastResult={lastResult} />
+          <PressureChart points={displayedCurvePoints} lastResult={chartFinalResult} />
         </section>
 
         <aside className="panel result-column">
           <LastResultPanel result={lastResult} />
+        </aside>
 
-          <section className="history-panel">
-            <h2>Ostatnie wyniki</h2>
+        <section className="history-panel results-section">
+            <h2>Wyniki testów</h2>
             {resultHistory.length > 0 ? (
-              <table>
+              <table className="results-table">
                 <thead>
-                  <tr><th>Czas</th><th>Operator</th><th>Wynik</th><th>Program</th><th>Barcode</th><th>ID</th><th>Pomiar</th><th>RL</th><th>Pt</th><th>EDC</th><th>PL</th><th>LLR</th><th>HLR</th><th>FPR</th></tr>
+                  <tr><th>Czas</th><th>Wynik</th><th>Operator</th><th>Program</th><th>Barcode</th><th>ID</th><th>Pomiar</th><th>RL</th><th>Pt</th><th>EDC</th><th>PL</th><th className="hide-on-medium">LLR</th><th className="hide-on-medium">HLR</th><th className="hide-on-medium">FPR</th></tr>
                 </thead>
                 <tbody>
                   {resultHistory.slice(0, 10).map((result) => (
                     <tr key={`${result.receivedAt}-${result.uniqueId}`}>
-                      <td>{formatDateTime(result.receivedAt)}</td>
-                      <td>{result.operatorLogin ?? '-'}</td>
+                      <td title={formatDateTime(result.receivedAt)}>{formatDateTime(result.receivedAt)}</td>
                       <td><span className={`result-badge ${getResultClass(result.result)}`}>{formatResultLabel(result.result)}</span></td>
-                      <td>{result.programText}</td>
-                      <td>{result.barcode}</td>
-                      <td>{result.uniqueId ?? result.totalAbs}</td>
-                      <td>{formatNumber(result.leakValue, 4)} {result.leakUnit}</td>
-                      <td>{formatNumber(result.RL, 3)}</td>
-                      <td>{formatNumber(result.Pt, 3)}</td>
-                      <td>{formatNumber(result.EDC, 3)}</td>
-                      <td>{formatNumber(result.PL, 3)}</td>
-                      <td>{formatNumber(result.LLR, 3)}</td>
-                      <td>{formatNumber(result.HLR, 3)}</td>
-                      <td>{formatNumber(result.FPR, 3)}</td>
+                      <td title={result.operatorLogin ?? '-'}>{result.operatorLogin ?? '-'}</td>
+                      <td title={result.programText}>{result.programText}</td>
+                      <td title={result.barcode}>{result.barcode}</td>
+                      <td title={String(result.uniqueId ?? result.totalAbs)}>{result.uniqueId ?? result.totalAbs}</td>
+                      <td title={`${result.leakType} ${formatMeasurement(result.leakValue, result.leakUnit)}`}>{result.leakType} {formatMeasurement(result.leakValue, result.leakUnit)}</td>
+                      <td>{formatNumber(result.RL, 2)}</td>
+                      <td>{formatNumber(result.Pt, 2)}</td>
+                      <td>{formatNumber(result.EDC, 2)}</td>
+                      <td>{formatNumber(result.PL, 2)}</td>
+                      <td className="hide-on-medium">{formatNumber(result.LLR, 2)}</td>
+                      <td className="hide-on-medium">{formatNumber(result.HLR, 2)}</td>
+                      <td className="hide-on-medium">{formatNumber(result.FPR, 2)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             ) : <p className="empty-state">Brak historii</p>}
-          </section>
-        </aside>
+        </section>
       </section>
 
       {showDiagnostics && diagnosticsOpen && (

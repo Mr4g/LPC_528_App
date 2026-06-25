@@ -593,3 +593,11 @@ Aktualny moduł użytkowników używa przenośnego lokalnego pliku pod ścieżk�
 - Po odebraniu końcowego wyniku LPC (`lpc:result` / `test:completed`) aplikacja ponownie ustawia fokus na polu barcode z krótkim opóźnieniem po renderze.
 - Naciśnięcie `Enter` w polu barcode wysyła skan, co obsługuje typowy skaner HID kończący odczyt Enterem.
 - Menu operatora znajduje się w prawym górnym rogu, jest pozycjonowane względem karty operatora i nie powinno przykrywać kafla `Wynik` / `NOK`.
+
+## Carrier branding i układ wyników
+
+- Logo Carrier jest ładowane z lokalnego pliku `src/frontend/assets/carrier-logo.svg` i wyświetlane w lewym obszarze top bara obok tytułu `LPC-528 Panel operatorski`.
+- UI używa jaśniejszego, korporacyjnego stylu Carrier: jasne tło, białe karty, granatowe nagłówki, jasnoniebieskie obramowania i statusowe kolory OK/NOK/ERROR.
+- Placeholder pola skanowania jest mniejszy i czytelny; placeholdery logowania to `Login` oraz `Hasło`.
+- Tabela `Wyniki testów` jest przeniesiona do pełnej szerokości pod głównymi panelami. Mniej krytyczne kolumny mogą ukrywać się na średnich ekranach, a poziomy scroll zostaje tylko jako awaryjne zachowanie dla małych ekranów.
+- Po zaakceptowaniu nowego skanu wykres live test resetuje aktualne punkty oraz marker końcowy wyniku, ale historia wyników i panel ostatniego zakończonego wyniku zostają widoczne.

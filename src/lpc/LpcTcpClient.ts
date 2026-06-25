@@ -53,6 +53,7 @@ export class LpcTcpClient extends EventEmitter {
   private receiveBuffer = '';
   private reconnectTimer: NodeJS.Timeout | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
+  private residualLineTimer: NodeJS.Timeout | null = null;
   private manuallyDisconnected = false;
   private connecting = false;
 
@@ -156,6 +157,7 @@ export class LpcTcpClient extends EventEmitter {
     this.manuallyDisconnected = true;
     this.clearReconnectTimer();
     this.stopHeartbeat();
+    this.clearResidualLineTimer();
     this.state.setDisconnecting();
     this.emitStatus();
     this.destroySocket();
@@ -195,6 +197,10 @@ export class LpcTcpClient extends EventEmitter {
 
   receiveTextForTest(text: string): void {
     this.processIncomingText(text);
+  }
+
+  flushBufferedLineForTest(): void {
+    this.flushResidualLineIfComplete();
   }
 
   forceRefreshStatus(): LpcConnectionStateSnapshot {
@@ -259,6 +265,7 @@ export class LpcTcpClient extends EventEmitter {
 
   private processIncomingText(text: string): void {
     this.receiveBuffer += text;
+    this.clearResidualLineTimer();
 
     let delimiter = this.findLineDelimiterIndex();
     while (delimiter >= 0) {
@@ -270,6 +277,10 @@ export class LpcTcpClient extends EventEmitter {
       }
       delimiter = this.findLineDelimiterIndex();
     }
+
+    if (this.receiveBuffer && this.looksLikeCompleteLpcFrame(this.receiveBuffer)) {
+      this.residualLineTimer = setTimeout(() => this.flushResidualLineIfComplete(), 25);
+    }
   }
 
   private findLineDelimiterIndex(): number {
@@ -278,6 +289,28 @@ export class LpcTcpClient extends EventEmitter {
     if (newlineIndex < 0) return carriageReturnIndex;
     if (carriageReturnIndex < 0) return newlineIndex;
     return Math.min(newlineIndex, carriageReturnIndex);
+  }
+
+  private looksLikeCompleteLpcFrame(text: string): boolean {
+    const normalized = text.replace(/\t/g, ' ').replace(/→/g, ' ').replace(/ +/g, ' ').trim();
+    const streamFrame = /^\S+\s+S\s+C\d{2},P\d{2},[^,]+,ET\s+[-+]?\d+(?:[.,]\d+)?\s+sec,T\s+[-+]?\d+(?:[.,]\d+)?\s+sec,P\s+[-+]?\d+(?:[.,]\d+)?\s+\S+$/;
+    const resultFrame = /^(?:(\S+)\s+([A-Z])\s+)?C\d{2}\s+N\d+\s+P\d{2}\s+\S+\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+\d{2}\/\d{2}\/\d{2}\s+\d+/;
+    return streamFrame.test(normalized) || resultFrame.test(normalized);
+  }
+
+  private flushResidualLineIfComplete(): void {
+    this.clearResidualLineTimer();
+    if (!this.receiveBuffer || !this.looksLikeCompleteLpcFrame(this.receiveBuffer)) return;
+
+    const line = this.receiveBuffer;
+    this.receiveBuffer = '';
+    this.emit('line', line);
+  }
+
+  private clearResidualLineTimer(): void {
+    if (!this.residualLineTimer) return;
+    clearTimeout(this.residualLineTimer);
+    this.residualLineTimer = null;
   }
 
   private startHeartbeat(): void {
@@ -305,6 +338,7 @@ export class LpcTcpClient extends EventEmitter {
   }
 
   private destroySocket(): void {
+    this.clearResidualLineTimer();
     if (!this.socket) return;
     this.socket.destroy();
     this.socket = null;

@@ -500,3 +500,8 @@ LPC_DEBUG_PIPELINE=true
 ```
 
 Wtedy backend loguje `RAW LPC LINE`, `PARSED STREAM`, `PARSED RESULT`, `IGNORED LINE reason` i `SOCKET EMIT event name`.
+
+
+Jeżeli `/api/lpc/raw-lines` pokazuje odebrane ramki, ale wykres w przeglądarce nadal stoi, frontend odświeża awaryjnie `/api/lpc/curve`, `/api/lpc/last-result` i `/api/lpc/results` co 1 sekundę. Dzięki temu można rozróżnić problem Socket.IO od problemu parsera/TCP: jeśli endpointy mają dane, ale liczniki eventów w diagnostyce nie rosną, problem jest w kanale Socket.IO; jeśli endpointy też są puste, problem jest po stronie odbioru TCP lub parsera.
+
+Niektóre urządzenia LPC/Telnet potrafią wysłać kompletną ramkę stream/result bez końcowego `\n`. Klient TCP buforuje takie dane i po krótkim czasie flushuje kompletną ramkę do tego samego pipeline, żeby wykres i tabela wyników nie czekały w nieskończoność na znak nowej linii.

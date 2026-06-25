@@ -113,4 +113,26 @@ describe('LpcTcpClient line splitting', () => {
 
     expect(lines).toEqual(['first', 'second']);
   });
+
+  it('flushes a complete stream frame even when LPC does not send a line delimiter', () => {
+    const client = new LpcTcpClient(options(23));
+    const lines: string[] = [];
+    client.on('line', (line) => lines.push(line));
+
+    client.receiveTextForTest('9369034 S C01,P01,PRF,ET 5.20 sec,T 19.80 sec,P -0.00011 bar');
+    client.flushBufferedLineForTest();
+
+    expect(lines).toEqual(['9369034 S C01,P01,PRF,ET 5.20 sec,T 19.80 sec,P -0.00011 bar']);
+  });
+
+  it('does not flush incomplete buffered text as an LPC frame', () => {
+    const client = new LpcTcpClient(options(23));
+    const lines: string[] = [];
+    client.on('line', (line) => lines.push(line));
+
+    client.receiveTextForTest('9369034 S C01,P01,PRF,ET');
+    client.flushBufferedLineForTest();
+
+    expect(lines).toEqual([]);
+  });
 });

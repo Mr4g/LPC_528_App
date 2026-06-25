@@ -143,6 +143,24 @@ async function fetchLpcStatus(): Promise<LpcStatusPayload | null> {
   return fetchJson<LpcStatusPayload>('/api/lpc/status');
 }
 
+async function fetchLpcRuntimeState(): Promise<{
+  lastResult: EnrichedLpcResult | null;
+  results: EnrichedLpcResult[];
+  points: LpcCurvePoint[];
+}> {
+  const [lastResultPayload, resultsPayload, curvePayload] = await Promise.all([
+    fetchJson<{ ok: true; result: EnrichedLpcResult | null }>('/api/lpc/last-result'),
+    fetchJson<{ ok: true; results: EnrichedLpcResult[] }>('/api/lpc/results'),
+    fetchJson<{ ok: true; points: LpcCurvePoint[] }>('/api/lpc/curve'),
+  ]);
+
+  return {
+    lastResult: lastResultPayload?.result ?? null,
+    results: resultsPayload?.results ?? [],
+    points: curvePayload?.points ?? [],
+  };
+}
+
 function buildChartPolyline(points: LpcCurvePoint[]): string {
   const validPoints = points.filter((point) => point.pressureMbar !== null);
   if (validPoints.length < 2) return '';
@@ -202,15 +220,16 @@ function App() {
 
   useEffect(() => {
     void refreshLpcStatus();
-    void fetchJson<{ ok: true; result: EnrichedLpcResult | null }>('/api/lpc/last-result').then((payload) => {
-      if (payload?.result) setLastResult(payload.result);
-    });
-    void fetchJson<{ ok: true; results: EnrichedLpcResult[] }>('/api/lpc/results').then((payload) => {
-      if (payload?.results) setResultHistory(replaceHistoryFromResultsUpdated(payload.results, 10));
-    });
-    void fetchJson<{ ok: true; points: LpcCurvePoint[] }>('/api/lpc/curve').then((payload) => {
-      if (payload?.points) setCurvePoints(payload.points.slice(-150));
-    });
+    const refreshRuntimeState = () => {
+      void fetchLpcRuntimeState().then((payload) => {
+        if (payload.lastResult) setLastResult(payload.lastResult);
+        if (payload.results.length > 0) setResultHistory(replaceHistoryFromResultsUpdated(payload.results, 10));
+        if (payload.points.length > 0) setCurvePoints(payload.points.slice(-150));
+      });
+    };
+    refreshRuntimeState();
+    const runtimePoll = window.setInterval(refreshRuntimeState, 1000);
+    return () => window.clearInterval(runtimePoll);
   }, []);
 
   useEffect(() => {

@@ -9,6 +9,7 @@ declare module 'better-sqlite3' {
     prepare(sql: string): Statement;
     exec(sql: string): void;
     pragma(source: string): unknown;
+    close(): void;
   }
 
   export default class BetterSqlite3Database implements Database {
@@ -16,5 +17,6 @@ declare module 'better-sqlite3' {
     prepare(sql: string): Statement;
     exec(sql: string): void;
     pragma(source: string): unknown;
+    close(): void;
   }
 }

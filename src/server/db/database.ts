@@ -35,6 +35,14 @@ function boolToInt(value: boolean | number): number {
   return typeof value === 'number' ? value : value ? 1 : 0;
 }
 
+function isSqliteNotDatabaseError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'SQLITE_NOTADB';
+}
+
+function invalidDatabaseBackupPath(dbPath: string): string {
+  return `${dbPath}.invalid-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+}
+
 function rowToUser(row: Record<string, unknown>): UserRecord {
   return {
     id: String(row.id),
@@ -135,10 +143,31 @@ export class AppDatabase {
 
   constructor(private readonly dbPath: string) {
     if (dbPath !== ':memory:') fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-    this.db = new Database(dbPath);
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('foreign_keys = ON');
+    this.db = this.openDatabase(dbPath);
     this.migrate();
+  }
+
+  private openDatabase(dbPath: string): BetterSqliteDatabase {
+    let db = new Database(dbPath);
+    try {
+      this.configureDatabase(db);
+      return db;
+    } catch (error) {
+      try { db.close(); } catch { /* ignore close errors before recreating invalid DB */ }
+      if (dbPath === ':memory:' || !isSqliteNotDatabaseError(error)) throw error;
+
+      const backupPath = invalidDatabaseBackupPath(dbPath);
+      fs.renameSync(dbPath, backupPath);
+      console.warn(`[DB] Existing SQLite file was invalid and has been moved to: ${backupPath}`);
+      db = new Database(dbPath);
+      this.configureDatabase(db);
+      return db;
+    }
+  }
+
+  private configureDatabase(db: BetterSqliteDatabase): void {
+    db.pragma('journal_mode = WAL');
+    db.pragma('foreign_keys = ON');
   }
 
   getPath(): string { return this.dbPath; }

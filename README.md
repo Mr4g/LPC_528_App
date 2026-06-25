@@ -577,7 +577,7 @@ curl http://localhost:3000/health
 curl http://localhost:3000/api/auth/me
 ```
 
-Aktualny moduł użytkowników zapisuje konta w lokalnej bazie SQLite pod ścieżką `SQLITE_DB_PATH` i korzysta z biblioteki `better-sqlite3`, dzięki czemu backend działa na Node.js 20.x. Jeśli baza nie zawiera żadnego aktywnego admina, backend utworzy albo naprawi domyślnego admina z wartości `DEFAULT_ADMIN_LOGIN` / `DEFAULT_ADMIN_PASSWORD`.
+Aktualny moduł użytkowników zapisuje konta w lokalnej bazie SQLite pod ścieżką `SQLITE_DB_PATH` i korzysta z biblioteki `better-sqlite3`, dzięki czemu backend działa na Node.js 20.x. Jeśli pod tą ścieżką znajduje się stary plik JSON albo uszkodzony plik niebędący bazą SQLite, backend przeniesie go do `*.invalid-<timestamp>` i utworzy nową bazę. Jeśli baza nie zawiera żadnego aktywnego admina, backend utworzy albo naprawi domyślnego admina z wartości `DEFAULT_ADMIN_LOGIN` / `DEFAULT_ADMIN_PASSWORD`.
 
 ## UI operatora: menu i wykres wyniku
 
@@ -677,7 +677,7 @@ Endpoint zwraca m.in. `dbPath`, `dbExists`, `usersTableExists`, `usersCount`, `a
 
 ## SQLite database
 
-Aplikacja używa lokalnej bazy SQLite wskazanej przez `SQLITE_DB_PATH` (domyślnie `data/lpc_app.sqlite`) przez `better-sqlite3` zamiast `node:sqlite`, więc backend jest zgodny z Node.js 20.x. Przy starcie wykonywany jest prosty init `CREATE TABLE IF NOT EXISTS` dla tabel:
+Aplikacja używa lokalnej bazy SQLite wskazanej przez `SQLITE_DB_PATH` (domyślnie `data/lpc_app.sqlite`) przez `better-sqlite3` zamiast `node:sqlite`, więc backend jest zgodny z Node.js 20.x. Jeśli istniejący plik nie jest poprawną bazą SQLite, zostanie zachowany jako `*.invalid-<timestamp>`, a aplikacja utworzy świeżą bazę. Przy starcie wykonywany jest prosty init `CREATE TABLE IF NOT EXISTS` dla tabel:
 
 - `users` — konta operatorów, line leaderów i adminów, razem z hashem hasła oraz statusem aktywności.
 - `test_results` — finalne wyniki LPC wraz z barcode, programem, operatorem, wartościami RL/Pt/EDC/PL/LLR/HLR/FPR i surową ramką.

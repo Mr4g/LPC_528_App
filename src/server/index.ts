@@ -16,7 +16,7 @@ import { createProgramMappingsRouter } from '../programs/programMappingsRouter';
 import { CurrentTestStore } from '../scanner/currentTestStore';
 import { createScannerRouter } from '../scanner/scannerRouter';
 import { createAuthRouter } from './auth/authRouter';
-import { attachAuth, requireAuth } from './auth/authMiddleware';
+import { attachAuth, configureAuthCookies, requireAuth } from './auth/authMiddleware';
 import { AuthService } from './auth/authService';
 import { createDatabase } from './db/database';
 import { createTestResultsRouter } from './test-results/testResultsRouter';
@@ -29,8 +29,24 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: '*' } });
 const database = createDatabase(config.SQLITE_DB_PATH);
-const authService = new AuthService(database, config.AUTH_SESSION_SECRET);
-authService.seedDefaultAdmin(config.DEFAULT_ADMIN_LOGIN, config.DEFAULT_ADMIN_PASSWORD);
+const authCookieMaxAgeMs = config.AUTH_COOKIE_MAX_AGE_HOURS * 60 * 60 * 1000;
+configureAuthCookies({
+  name: config.AUTH_COOKIE_NAME,
+  maxAgeMs: authCookieMaxAgeMs,
+  secure: config.AUTH_COOKIE_SECURE,
+  sameSite: config.AUTH_COOKIE_SAME_SITE,
+});
+const authService = new AuthService(database, config.AUTH_SESSION_SECRET, authCookieMaxAgeMs);
+const adminSeed = config.AUTH_RESET_DEFAULT_ADMIN && config.NODE_ENV !== 'production'
+  ? authService.resetDefaultAdminFromEnv(config.DEFAULT_ADMIN_LOGIN, config.DEFAULT_ADMIN_PASSWORD)
+  : authService.seedDefaultAdmin(config.DEFAULT_ADMIN_LOGIN, config.DEFAULT_ADMIN_PASSWORD);
+console.info(`Auth DB: ${adminSeed.after.dbPath}`);
+console.info(`Users count: ${adminSeed.before.usersCount}`);
+console.info(`Active admins: ${adminSeed.before.activeAdminUsersCount}`);
+if (adminSeed.action === 'created') console.info(`Created default admin: ${adminSeed.login}`);
+if (adminSeed.action === 'repaired') console.info(`Repaired default admin: ${adminSeed.login}`);
+if (adminSeed.action === 'reset') console.warn(`DEV ONLY: default admin was reset from env: ${adminSeed.login}`);
+if (config.AUTH_RESET_DEFAULT_ADMIN && config.NODE_ENV === 'production') console.warn('AUTH_RESET_DEFAULT_ADMIN is ignored in production.');
 const currentTestStore = new CurrentTestStore();
 const programMappingService = new ProgramMappingService(database);
 programMappingService.seedFromFallbackMap(config.BARCODE_PROGRAM_MAP);
@@ -113,7 +129,12 @@ app.use((_req, res, next) => {
 });
 app.use(express.json());
 app.use(attachAuth(authService));
-app.use('/api/auth', createAuthRouter(authService));
+app.use('/api/auth', createAuthRouter(authService, {
+  dbPath: config.SQLITE_DB_PATH,
+  defaultAdminLogin: config.DEFAULT_ADMIN_LOGIN,
+  nodeEnv: config.NODE_ENV,
+  authDebug: config.AUTH_DEBUG,
+}));
 app.use('/api/users', createUsersRouter(authService));
 app.use('/api/test-results', createTestResultsRouter(database));
 app.use('/api/test-session', createTestSessionRouter(testSessionManager));

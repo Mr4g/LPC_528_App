@@ -221,7 +221,7 @@ function loadSocketIoClient(): Promise<SocketLike | null> {
 }
 
 async function fetchJson<T>(url: string): Promise<T | null> {
-  const response = await fetch(url);
+  const response = await fetch(url, { credentials: 'include' });
   if (!response.ok) return null;
   return response.json() as Promise<T>;
 }
@@ -284,6 +284,7 @@ function LoginPage(props: { onLoggedIn: (user: AuthUser) => void }) {
 
     const response = await fetch('/api/auth/login', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ login: normalizedLogin, password }),
     });
@@ -342,6 +343,7 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
 
     const response = await fetch('/api/users', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ login: normalizedLogin, password, role }),
     });
@@ -356,7 +358,7 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
   }
 
   async function userAction(id: string, action: 'enable' | 'disable') {
-    await fetch(`/api/users/${id}/${action}`, { method: 'PATCH' });
+    await fetch(`/api/users/${id}/${action}`, { method: 'PATCH', credentials: 'include' });
     await loadUsers();
   }
 
@@ -365,6 +367,7 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
     if (!newPassword) return;
     await fetch(`/api/users/${id}/reset-password`, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: newPassword }),
     });
@@ -470,6 +473,7 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
 
     const response = await fetch(editingId ? `/api/program-mappings/${editingId}` : '/api/program-mappings', {
       method: editingId ? 'PATCH' : 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ barcodePattern: trimmedPattern, matchType, programNumber, description, isActive }),
     });
@@ -483,7 +487,7 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
 
   async function toggleMapping(mapping: ProgramMappingRecord) {
     if (mapping.isActive && !window.confirm('Czy dezaktywować to mapowanie?')) return;
-    await fetch(`/api/program-mappings/${mapping.id}/${mapping.isActive ? 'disable' : 'enable'}`, { method: 'PATCH' });
+    await fetch(`/api/program-mappings/${mapping.id}/${mapping.isActive ? 'disable' : 'enable'}`, { method: 'PATCH', credentials: 'include' });
     await loadMappings();
   }
 
@@ -899,6 +903,7 @@ function App() {
 
     const response = await fetch('/api/scan', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ barcode: trimmedBarcode }),
     });
@@ -933,7 +938,7 @@ function App() {
 
   async function lpcAction(action: 'connect' | 'disconnect') {
     setLpcActionMessage(null);
-    const response = await fetch(`/api/lpc/${action}`, { method: 'POST' });
+    const response = await fetch(`/api/lpc/${action}`, { method: 'POST', credentials: 'include' });
     const payload = (await response.json()) as { message?: string; state?: LpcStatusPayload };
     setLpcActionMessage(payload.message ?? (response.ok ? `LPC ${action} wysłane` : `LPC ${action} błąd`));
     if (payload.state) setLpcStatus(payload.state);
@@ -942,18 +947,18 @@ function App() {
 
   async function checkLpcPort() {
     setPortCheck(null);
-    const response = await fetch('/api/lpc/check-port', { method: 'POST' });
+    const response = await fetch('/api/lpc/check-port', { method: 'POST', credentials: 'include' });
     if (response.ok) setPortCheck((await response.json()) as LpcPortCheckPayload);
   }
 
   async function heartbeatTest() {
-    const response = await fetch('/api/lpc/heartbeat-test', { method: 'POST' });
+    const response = await fetch('/api/lpc/heartbeat-test', { method: 'POST', credentials: 'include' });
     setHeartbeatResponse(JSON.stringify(await response.json(), null, 2));
     await refreshLpcStatus();
   }
 
   async function forceRefreshStatus() {
-    const response = await fetch('/api/lpc/force-refresh-status', { method: 'POST' });
+    const response = await fetch('/api/lpc/force-refresh-status', { method: 'POST', credentials: 'include' });
     setForceRefreshResponse(JSON.stringify(await response.json(), null, 2));
     await refreshLpcStatus();
   }
@@ -961,6 +966,7 @@ function App() {
   async function testProgramStart() {
     const response = await fetch('/api/programs/start', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ program: Number(diagnosticProgram), barcode: 'diagnostic_program_start' }),
     });
@@ -968,7 +974,7 @@ function App() {
   }
 
   async function logout() {
-    await fetch('/api/auth/logout', { method: 'POST' });
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
     setAuthUser(null);
     navigateTo('/login', setRoute);
   }
@@ -976,6 +982,7 @@ function App() {
   async function sendMockLine() {
     const response = await fetch('/api/lpc/mock-line', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ line: mockLine }),
     });
@@ -1258,7 +1265,7 @@ function App() {
                   <button type="button" onClick={() => void heartbeatTest()}>Heartbeat test</button>
                   <button type="button" onClick={() => void forceRefreshStatus()}>Force refresh status</button>
                   <button type="button" onClick={async () => {
-                    const response = await fetch('/api/test-session/unlock', { method: 'POST' });
+                    const response = await fetch('/api/test-session/unlock', { method: 'POST', credentials: 'include' });
                     if (response.ok) setTestSession(await response.json() as TestSessionState);
                   }}>Odblokuj test</button>
                 </div>

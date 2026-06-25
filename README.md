@@ -643,6 +643,38 @@ Moduł `Programy` jest dostępny dla ról `line_leader` i `admin`. Pozwala dodaw
 - Mała tabela wyników w prawym panelu pokazuje maksymalnie 4 ostatnie wyniki, ma własny poziomy scroll oraz podpowiedź dla operatora, że można przesunąć tabelę w bok.
 - Trzy główne panele operatora są wyrównywane przez CSS Grid do tej samej wysokości na szerokim ekranie; na małych ekranach mogą układać się jeden pod drugim.
 
+
+## Pierwsze logowanie / pusta baza
+
+Przy starcie backend tworzy tabelę `users`, sprawdza liczbę użytkowników i aktywnych adminów, a następnie automatycznie tworzy domyślnego admina z `.env`, jeśli baza jest pusta albo nie ma aktywnego admina. Login jest normalizowany do uppercase, a hasło nie jest wypisywane w logach.
+
+Dla pierwszego uruchomienia lub naprawy developerskiej ustaw w `.env`:
+
+```env
+DEFAULT_ADMIN_LOGIN=ADM
+DEFAULT_ADMIN_PASSWORD=admin123
+AUTH_RESET_DEFAULT_ADMIN=true
+```
+
+Następnie uruchom aplikację i zaloguj się:
+
+```bash
+npm run dev
+```
+
+- Login: `ADM`
+- Hasło: `admin123`
+
+Po udanym logowaniu ustaw `AUTH_RESET_DEFAULT_ADMIN=false` i zrestartuj aplikację, żeby nie resetować hasła admina przy kolejnych startach. Mechanizm `AUTH_RESET_DEFAULT_ADMIN=true` działa tylko poza `production`.
+
+Diagnostyka developerska bez `passwordHash`:
+
+```bash
+curl http://localhost:3000/api/auth/debug
+```
+
+Endpoint zwraca m.in. `dbPath`, `usersCount`, `activeUsersCount`, `adminUsersCount`, `activeAdminUsersCount`, `defaultAdminLogin`, nazwę cookie i ustawienia `sameSite` / `secure`.
+
 ## SQLite database
 
 Aplikacja używa lokalnej bazy SQLite wskazanej przez `SQLITE_DB_PATH` (domyślnie `data/lpc_app.sqlite`). Przy starcie wykonywany jest prosty init `CREATE TABLE IF NOT EXISTS` dla tabel:

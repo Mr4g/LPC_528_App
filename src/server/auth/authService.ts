@@ -25,25 +25,70 @@ export interface SessionPayload extends AuthUser {
   exp: number;
 }
 
-export class AuthService {
-  constructor(private readonly db: AppDatabase, private readonly sessionSecret: string) {}
+export interface AuthDbStats {
+  dbPath: string;
+  usersCount: number;
+  activeUsersCount: number;
+  adminUsersCount: number;
+  activeAdminUsersCount: number;
+}
 
-  seedDefaultAdmin(login: string, password: string): void {
-    const count = this.db.countUsers();
-    const adminCount = this.db.countAdmins();
-    if (count > 0 && adminCount > 0) return;
+export type DefaultAdminSeedResult =
+  | { action: 'none'; login: string; before: AuthDbStats; after: AuthDbStats }
+  | { action: 'created' | 'repaired' | 'reset'; login: string; before: AuthDbStats; after: AuthDbStats };
+
+export type LoginResult =
+  | { ok: true; user: AuthUser }
+  | { ok: false; reason: 'INVALID_CREDENTIALS' | 'INACTIVE' };
+
+export class AuthService {
+  constructor(private readonly db: AppDatabase, private readonly sessionSecret: string, private readonly sessionMaxAgeMs = SESSION_MAX_AGE_MS) {}
+
+  seedDefaultAdmin(loginInput: string, password: string): DefaultAdminSeedResult {
+    const login = normalizeOperatorLogin(loginInput);
+    const before = this.getDbStats();
+    if (before.usersCount > 0 && before.activeAdminUsersCount > 0) {
+      return { action: 'none', login, before, after: before };
+    }
 
     const existingDefaultUser = this.findUserByLogin(login);
     if (existingDefaultUser) {
       this.setRole(existingDefaultUser.id, 'admin');
       this.setActive(existingDefaultUser.id, true);
       this.resetPassword(existingDefaultUser.id, password);
-      console.warn('Default admin user was repaired. Change DEFAULT_ADMIN_PASSWORD after deployment.');
-      return;
+      return { action: 'repaired', login, before, after: this.getDbStats() };
     }
 
     this.createUser({ login, password, role: 'admin', createdBy: null });
-    console.warn('Default admin user was created. Change DEFAULT_ADMIN_PASSWORD after deployment.');
+    return { action: 'created', login, before, after: this.getDbStats() };
+  }
+
+  resetDefaultAdminFromEnv(loginInput: string, password: string): DefaultAdminSeedResult {
+    const login = normalizeOperatorLogin(loginInput);
+    const before = this.getDbStats();
+    const existingDefaultUser = this.findUserByLogin(login);
+    if (existingDefaultUser) {
+      this.db.updateUser(existingDefaultUser.id, {
+        passwordHash: hashPassword(password),
+        role: 'admin',
+        isActive: 1,
+        updatedAt: new Date().toISOString(),
+      });
+      return { action: 'reset', login, before, after: this.getDbStats() };
+    }
+
+    this.createUser({ login, password, role: 'admin', createdBy: null });
+    return { action: 'reset', login, before, after: this.getDbStats() };
+  }
+
+  getDbStats(): AuthDbStats {
+    return {
+      dbPath: this.db.getPath(),
+      usersCount: this.db.countUsers(),
+      activeUsersCount: this.db.countActiveUsers(),
+      adminUsersCount: this.db.countAdminUsers(),
+      activeAdminUsersCount: this.db.countActiveAdminUsers(),
+    };
   }
 
   createUser(input: { login: string; password: string; role: UserRole; createdBy: string | null }): PublicUser {
@@ -71,16 +116,22 @@ export class AuthService {
   }
 
   login(loginInput: string, password: string): AuthUser | null {
+    const result = this.loginDetailed(loginInput, password);
+    return result.ok ? result.user : null;
+  }
+
+  loginDetailed(loginInput: string, password: string): LoginResult {
     const login = normalizeOperatorLogin(loginInput);
-    if (!validateOperatorLogin(login) || password.length < 4) return null;
+    if (!validateOperatorLogin(login) || password.length < 4) return { ok: false, reason: 'INVALID_CREDENTIALS' };
 
     const user = this.findUserByLogin(login);
-    if (!user || !user.isActive) return null;
-    if (!verifyPassword(password, user.passwordHash)) return null;
+    if (!user) return { ok: false, reason: 'INVALID_CREDENTIALS' };
+    if (!user.isActive) return { ok: false, reason: 'INACTIVE' };
+    if (!verifyPassword(password, user.passwordHash)) return { ok: false, reason: 'INVALID_CREDENTIALS' };
 
     const lastLoginAt = new Date().toISOString();
     this.db.updateUser(user.id, { lastLoginAt, updatedAt: lastLoginAt });
-    return { id: user.id, login: user.login, role: user.role };
+    return { ok: true, user: { id: user.id, login: user.login, role: user.role } };
   }
 
   listUsers(): PublicUser[] {
@@ -118,7 +169,7 @@ export class AuthService {
   }
 
   createSession(user: AuthUser): string {
-    const payload: SessionPayload = { ...user, exp: Date.now() + SESSION_MAX_AGE_MS };
+    const payload: SessionPayload = { ...user, exp: Date.now() + this.sessionMaxAgeMs };
     const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
     const signature = crypto.createHmac('sha256', this.sessionSecret).update(body).digest('base64url');
     return `${body}.${signature}`;

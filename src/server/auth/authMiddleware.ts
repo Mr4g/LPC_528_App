@@ -6,10 +6,30 @@ export interface AuthenticatedRequest extends Request {
   user?: AuthUser;
 }
 
-const COOKIE_NAME = 'lpc_session';
+export interface AuthCookieOptions {
+  name: string;
+  maxAgeMs: number;
+  secure: boolean;
+  sameSite: 'lax' | 'strict' | 'none';
+}
+
+let cookieOptions: AuthCookieOptions = {
+  name: 'lpc_auth',
+  maxAgeMs: 12 * 60 * 60 * 1000,
+  secure: false,
+  sameSite: 'lax',
+};
+
+export function configureAuthCookies(options: AuthCookieOptions): void {
+  cookieOptions = options;
+}
+
+export function getAuthCookieOptions(): AuthCookieOptions {
+  return { ...cookieOptions };
+}
 
 export function getSessionCookieName(): string {
-  return COOKIE_NAME;
+  return cookieOptions.name;
 }
 
 export function parseCookie(header: string | undefined, name: string): string | undefined {
@@ -18,22 +38,22 @@ export function parseCookie(header: string | undefined, name: string): string | 
 }
 
 export function setSessionCookie(res: Response, token: string): void {
-  res.cookie(COOKIE_NAME, token, {
+  res.cookie(cookieOptions.name, token, {
     httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: 12 * 60 * 60 * 1000,
+    sameSite: cookieOptions.sameSite,
+    secure: cookieOptions.secure,
+    maxAge: cookieOptions.maxAgeMs,
     path: '/',
   });
 }
 
 export function clearSessionCookie(res: Response): void {
-  res.clearCookie(COOKIE_NAME, { path: '/' });
+  res.clearCookie(cookieOptions.name, { path: '/', sameSite: cookieOptions.sameSite, secure: cookieOptions.secure });
 }
 
 export function attachAuth(authService: AuthService) {
   return (req: AuthenticatedRequest, _res: Response, next: NextFunction) => {
-    const token = parseCookie(req.headers.cookie, COOKIE_NAME);
+    const token = parseCookie(req.headers.cookie, cookieOptions.name);
     const user = authService.verifySession(token);
     if (user) req.user = user;
     next();

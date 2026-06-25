@@ -140,8 +140,12 @@ export class AppDatabase {
     this.migrate();
   }
 
+  getPath(): string { return this.dbPath; }
   countUsers(): number { return Number(this.db.prepare('SELECT COUNT(*) AS count FROM users').get()?.count ?? 0); }
-  countAdmins(): number { return Number(this.db.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'admin'").get()?.count ?? 0); }
+  countActiveUsers(): number { return Number(this.db.prepare('SELECT COUNT(*) AS count FROM users WHERE isActive = 1').get()?.count ?? 0); }
+  countAdmins(): number { return this.countAdminUsers(); }
+  countAdminUsers(): number { return Number(this.db.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'admin'").get()?.count ?? 0); }
+  countActiveAdminUsers(): number { return Number(this.db.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND isActive = 1").get()?.count ?? 0); }
   listUsers(): UserRecord[] { return this.db.prepare('SELECT * FROM users ORDER BY login ASC').all().map((row: Record<string, unknown>) => rowToUser(row)); }
   findByLogin(login: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE login = ?').get(login); return row ? rowToUser(row) : null; }
   findById(id: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE id = ?').get(id); return row ? rowToUser(row) : null; }

@@ -23,6 +23,25 @@ describe('AuthService', () => {
     expect(auth.login('ADM', 'admin123')).toMatchObject({ login: 'ADM', role: 'admin' });
   });
 
+
+
+  it('creates default admin when there is no active admin', () => {
+    const auth = service();
+    const admin = auth.createUser({ login: 'ADM', password: 'oldpass', role: 'admin', createdBy: null });
+    auth.setActive(admin.id, false);
+    const seed = auth.seedDefaultAdmin('ADM', 'admin123');
+    expect(seed.action).toBe('repaired');
+    expect(auth.login('adm', 'admin123')).toMatchObject({ login: 'ADM', role: 'admin' });
+  });
+
+  it('resets default admin password in development helper', () => {
+    const auth = service();
+    auth.seedDefaultAdmin('ADM', 'oldpass');
+    const reset = auth.resetDefaultAdminFromEnv('adm', 'admin123');
+    expect(reset.action).toBe('reset');
+    expect(auth.login('ADM', 'admin123')).toMatchObject({ login: 'ADM', role: 'admin' });
+  });
+
   it('logs in valid user and rejects bad password or inactive user', () => {
     const auth = service();
     const user = auth.createUser({ login: 'abc', password: 'test123', role: 'operator', createdBy: null });

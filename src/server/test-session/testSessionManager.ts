@@ -31,7 +31,7 @@ export class TestSessionManager {
   constructor(
     private readonly database: AppDatabase,
     private readonly io: Server,
-    private readonly options: { activeTestTimeoutMs: number; noDataWarningMs: number },
+    private readonly options: { activeTestTimeoutMs: number; noDataWarningMs: number; onEnded?: (state: TestSessionState, reason: string) => void },
   ) {
     this.state = this.restoreInitialState();
     if (this.state.locked) {
@@ -107,6 +107,7 @@ export class TestSessionManager {
     this.clearNoDataWarning();
     this.state = { ...this.state, status: 'error', locked: false, completedAt: new Date().toISOString(), message };
     this.persistAndEmit();
+    this.options.onEnded?.(this.getStatus(), reason);
   }
 
   unlock(actorLogin: string | null): TestSessionState {
@@ -114,6 +115,7 @@ export class TestSessionManager {
     this.clearNoDataWarning();
     this.state = { ...this.state, status: 'error', locked: false, timeoutAt: new Date().toISOString(), message: `Test odblokowany ręcznie${actorLogin ? ` przez ${actorLogin}` : ''}` };
     this.persistAndEmit();
+    this.options.onEnded?.(this.getStatus(), 'MANUAL_UNLOCK');
     return this.getStatus();
   }
 
@@ -126,6 +128,7 @@ export class TestSessionManager {
     console.log('[ACTIVE_TEST] ended reason=ACTIVE_TEST_TIMEOUT');
     this.state = { ...this.state, status: 'timeout', locked: false, timeoutAt: new Date().toISOString(), message: 'Test przekroczył czas oczekiwania na wynik' };
     this.persistAndEmit();
+    this.options.onEnded?.(this.getStatus(), 'TIMEOUT');
   }
 
   private scheduleTimeout(): void {
@@ -141,6 +144,7 @@ export class TestSessionManager {
       this.state = { ...this.state, status: 'error', locked: false, completedAt: new Date().toISOString(), message: 'Program został wysłany do LPC, ale aplikacja nie otrzymała danych ze streamingu. Sprawdź połączenie Telnet/Interface Connection.' };
       this.clearTimeout();
       this.persistAndEmit();
+      this.options.onEnded?.(this.getStatus(), 'NO_STREAM_TIMEOUT');
     }, this.options.noDataWarningMs);
   }
 

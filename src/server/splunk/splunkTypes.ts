@@ -1,0 +1,67 @@
+import type { AppConfig } from '../../config';
+import type { EnrichedLpcResult } from '../../lpc/LpcLineProcessor';
+import type { LpcCurvePoint } from '../../lpc/LpcTestCurveBuffer';
+import type { TestSessionState } from '../test-session/testSessionManager';
+
+export type SplunkBufferStatus = 'pending' | 'sending' | 'sent' | 'failed';
+
+export interface SplunkEventBufferRecord {
+  id: number;
+  createdAt: string;
+  updatedAt: string;
+  nextAttemptAt: string | null;
+  sentAt: string | null;
+  attempts: number;
+  lastError: string | null;
+  status: SplunkBufferStatus;
+  eventType: string;
+  testId: string | null;
+  payloadJson: string;
+}
+
+export interface SplunkHecEnvelope {
+  time: number;
+  index: string;
+  source: string;
+  sourcetype: string;
+  event: Record<string, unknown>;
+}
+
+export interface SplunkSendResult {
+  ok: boolean;
+  status?: number;
+  durationMs?: number;
+  error?: string;
+  skipped?: boolean;
+}
+
+export interface SplunkRuntimeConfig {
+  enabled: boolean;
+  url: string;
+  token: string;
+  index: string;
+  source: string;
+  sourcetype: string;
+  timeoutMs: number;
+  verifyTls: boolean;
+  sendResult: boolean;
+  sendCurve: boolean;
+  bufferEnabled: boolean;
+  bufferRetryIntervalMs: number;
+  bufferMaxAttempts: number;
+}
+
+export interface SplunkResultContext {
+  result: EnrichedLpcResult;
+  session: TestSessionState | null;
+  curvePoints: LpcCurvePoint[];
+  config: Pick<AppConfig, 'LPC_HOST' | 'LPC_PORT' | 'LPC_INTERFACE_SELECTION'>;
+}
+
+export interface SplunkErrorContext {
+  session: TestSessionState;
+  reason: string;
+  message: string | null;
+  curvePoints: LpcCurvePoint[];
+  config: Pick<AppConfig, 'LPC_HOST' | 'LPC_PORT' | 'LPC_INTERFACE_SELECTION'>;
+}

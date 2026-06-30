@@ -5,6 +5,7 @@ import Database, { type Database as BetterSqliteDatabase } from 'better-sqlite3'
 import type { UserRecord } from '../auth/types';
 import type { ProgramMappingRecord } from '../../programs/programMappingStore';
 import type { LpcResult } from '../../shared/types';
+import type { SplunkBufferStatus, SplunkEventBufferRecord } from '../splunk/splunkTypes';
 
 export interface TestResultQuery {
   limit?: number;
@@ -87,6 +88,23 @@ function rowToSession(row: Record<string, unknown>): StoredTestSession {
     lastStreamAt: row.lastStreamAt === null ? null : String(row.lastStreamAt),
     timeoutAt: row.timeoutAt === null ? null : String(row.timeoutAt),
     message: row.message === null ? null : String(row.message),
+  };
+}
+
+
+function rowToSplunkBuffer(row: Record<string, unknown>): SplunkEventBufferRecord {
+  return {
+    id: Number(row.id),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    nextAttemptAt: row.next_attempt_at === null ? null : String(row.next_attempt_at),
+    sentAt: row.sent_at === null ? null : String(row.sent_at),
+    attempts: Number(row.attempts),
+    lastError: row.last_error === null ? null : String(row.last_error),
+    status: row.status as SplunkBufferStatus,
+    eventType: String(row.event_type),
+    testId: row.test_id === null ? null : String(row.test_id),
+    payloadJson: String(row.payload_json),
   };
 }
 
@@ -279,6 +297,50 @@ export class AppDatabase {
     return row ? rowToSession(row) : null;
   }
 
+
+  enqueueSplunkEvent(input: { eventType: string; testId: string | null; payloadJson: string; lastError?: string | null; nextAttemptAt?: string | null }): number {
+    const now = new Date().toISOString();
+    const info = this.db.prepare(`INSERT INTO splunk_event_buffer (created_at, updated_at, next_attempt_at, sent_at, attempts, last_error, status, event_type, test_id, payload_json)
+      VALUES (?, ?, ?, NULL, 0, ?, 'pending', ?, ?, ?)`)
+      .run(now, now, input.nextAttemptAt ?? null, input.lastError ?? null, input.eventType, input.testId, input.payloadJson);
+    return Number(info.lastInsertRowid);
+  }
+
+  listPendingSplunkEvents(limit = 25): SplunkEventBufferRecord[] {
+    const now = new Date().toISOString();
+    const rows = this.db.prepare(`SELECT * FROM splunk_event_buffer
+      WHERE status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+      ORDER BY created_at ASC LIMIT ?`).all(now, limit) as Record<string, unknown>[];
+    return rows.map(rowToSplunkBuffer);
+  }
+
+  markSplunkEventSending(id: number): boolean {
+    const info = this.db.prepare("UPDATE splunk_event_buffer SET status = 'sending', updated_at = ? WHERE id = ? AND status = 'pending'")
+      .run(new Date().toISOString(), id);
+    return info.changes > 0;
+  }
+
+  markSplunkEventSent(id: number): void {
+    const now = new Date().toISOString();
+    this.db.prepare("UPDATE splunk_event_buffer SET status = 'sent', sent_at = ?, updated_at = ?, last_error = NULL WHERE id = ?")
+      .run(now, now, id);
+  }
+
+  markSplunkEventFailed(id: number, error: string, nextAttemptAt: string | null, maxAttempts: number): void {
+    const row = this.db.prepare('SELECT attempts FROM splunk_event_buffer WHERE id = ?').get(id) as { attempts?: number } | undefined;
+    const attempts = Number(row?.attempts ?? 0) + 1;
+    const status = maxAttempts > 0 && attempts >= maxAttempts ? 'failed' : 'pending';
+    this.db.prepare('UPDATE splunk_event_buffer SET status = ?, attempts = ?, last_error = ?, next_attempt_at = ?, updated_at = ? WHERE id = ?')
+      .run(status, attempts, error, nextAttemptAt, new Date().toISOString(), id);
+  }
+
+  getSplunkBufferStats(): { pending: number; sent: number; lastError: string | null } {
+    const pending = this.count("SELECT COUNT(*) AS count FROM splunk_event_buffer WHERE status = 'pending'");
+    const sent = this.count("SELECT COUNT(*) AS count FROM splunk_event_buffer WHERE status = 'sent'");
+    const row = this.db.prepare("SELECT last_error FROM splunk_event_buffer WHERE last_error IS NOT NULL ORDER BY updated_at DESC LIMIT 1").get() as { last_error?: string } | undefined;
+    return { pending, sent, lastError: row?.last_error ?? null };
+  }
+
   private migrate(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, login TEXT UNIQUE NOT NULL, passwordHash TEXT NOT NULL, role TEXT NOT NULL, isActive INTEGER NOT NULL DEFAULT 1, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, lastLoginAt TEXT NULL, createdBy TEXT NULL);
@@ -292,6 +354,9 @@ export class AppDatabase {
       CREATE INDEX IF NOT EXISTS idx_test_results_programText ON test_results(programText);
       CREATE TABLE IF NOT EXISTS test_sessions (id TEXT PRIMARY KEY, status TEXT NOT NULL, barcode TEXT, programNumber INTEGER, programText TEXT, operatorLogin TEXT, startedAt TEXT, completedAt TEXT, lastStreamAt TEXT, timeoutAt TEXT, message TEXT);
       CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT NULL);
+      CREATE TABLE IF NOT EXISTS splunk_event_buffer (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, next_attempt_at TEXT, sent_at TEXT, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, status TEXT NOT NULL DEFAULT 'pending', event_type TEXT NOT NULL, test_id TEXT, payload_json TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS idx_splunk_event_buffer_status_next ON splunk_event_buffer(status, next_attempt_at);
+      CREATE INDEX IF NOT EXISTS idx_splunk_event_buffer_test_id ON splunk_event_buffer(test_id);
     `);
     const programColumns = this.db.prepare('PRAGMA table_info(program_mappings)').all() as Array<{ name: string }>;
     if (!programColumns.some((column) => column.name === 'labelPrintMode')) {

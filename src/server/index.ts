@@ -25,6 +25,11 @@ import { createTestSessionRouter } from './test-session/testSessionRouter';
 import { createUsersRouter } from './users/usersRouter';
 import { ZebraPrinter } from '../zebra/ZebraPrinter';
 import { createZebraRouter } from '../zebra/zebraRouter';
+import { getSplunkConfig } from './splunk/splunkConfig';
+import { SplunkClient } from './splunk/splunkClient';
+import { SplunkBuffer } from './splunk/splunkBuffer';
+import { buildSplunkErrorEnvelope } from './splunk/splunkPayload';
+import { createSplunkRouter } from './splunk/splunkRouter';
 
 const config = loadConfig();
 const app = express();
@@ -55,9 +60,26 @@ if (config.AUTH_RESET_DEFAULT_ADMIN && config.NODE_ENV === 'production') console
 const currentTestStore = new CurrentTestStore();
 const programMappingService = new ProgramMappingService(database);
 programMappingService.seedFromFallbackMap(config.BARCODE_PROGRAM_MAP);
+const splunkConfig = getSplunkConfig(config);
+const splunkClient = new SplunkClient(splunkConfig);
+const splunkBuffer = new SplunkBuffer(database, splunkClient, splunkConfig);
+const lpcCurveBuffer = new LpcTestCurveBuffer({
+  maxPoints: config.LPC_STREAM_BUFFER_LIMIT,
+  minElapsedStepSec: config.LPC_MIN_ELAPSED_STEP_SEC,
+});
 const testSessionManager = new TestSessionManager(database, io, {
   activeTestTimeoutMs: config.ACTIVE_TEST_TIMEOUT_MS,
   noDataWarningMs: config.ACTIVE_TEST_NO_DATA_WARNING_MS,
+  onEnded: (session, reason) => {
+    const envelope = buildSplunkErrorEnvelope(splunkConfig, {
+      session,
+      reason,
+      message: session.message,
+      curvePoints: lpcCurveBuffer.getPoints(),
+      config,
+    });
+    void splunkBuffer.sendOrQueue(envelope);
+  },
 });
 const programStarter = createProgramStarter({
   mode: config.PROGRAM_START_MODE,
@@ -78,10 +100,6 @@ const lpcTcpClient = new LpcTcpClient({
   heartbeatPayload: config.LPC_HEARTBEAT_PAYLOAD,
 });
 const zebraPrinter = new ZebraPrinter(config);
-const lpcCurveBuffer = new LpcTestCurveBuffer({
-  maxPoints: config.LPC_STREAM_BUFFER_LIMIT,
-  minElapsedStepSec: config.LPC_MIN_ELAPSED_STEP_SEC,
-});
 const lastResultStore = new LastResultStore();
 const resultHistoryStore = new ResultHistoryStore(50);
 const persistedResults = database.listTestResults({ limit: 50 }).results.map((result) => ({ ...result, currentTestValid: false }));
@@ -105,6 +123,9 @@ const lpcLineProcessor = new LpcLineProcessor({
   zebraPrinter,
   zebraEnabled: config.ZEBRA_ENABLED,
   zebraPrintOnResult: config.ZEBRA_PRINT_ON_RESULT,
+  splunkBuffer,
+  splunkConfig,
+  config,
 });
 
 lpcTcpClient.on('status', (state) => {
@@ -151,6 +172,7 @@ app.use('/api/test-results', createTestResultsRouter(database));
 app.use('/api/test-session', createTestSessionRouter(testSessionManager));
 app.use('/api/backup', createBackupRouter());
 app.use('/api/zebra', createZebraRouter(database, zebraPrinter));
+app.use('/api/splunk', createSplunkRouter(splunkClient, splunkBuffer));
 app.use('/api/programs', requireAuth, createProgramsRouter({ config, programStarter }));
 app.use('/api/program-mappings', createProgramMappingsRouter(programMappingService));
 app.use('/api/lpc', createLpcRouter({
@@ -179,6 +201,7 @@ io.on('connection', (socket) => {
 
 httpServer.listen(config.APP_PORT, () => {
   console.log(`LPC-528 backend listening on port ${config.APP_PORT}`);
+  splunkBuffer.start();
   if (config.LPC_AUTO_CONNECT) {
     lpcTcpClient.connect();
   }

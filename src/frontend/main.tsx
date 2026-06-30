@@ -61,6 +61,20 @@ interface LpcStatusPayload {
   socketWritable?: boolean;
 }
 
+interface SplunkStatusPayload {
+  ok: true;
+  enabled: boolean;
+  configured: boolean;
+  urlConfigured: boolean;
+  tokenConfigured: boolean;
+  index: string;
+  source: string;
+  sourcetype: string;
+  pending: number;
+  sent: number;
+  lastError: string | null;
+}
+
 interface LpcPortCheckPayload {
   ok: true;
   host: string;
@@ -432,6 +446,8 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
   const [labelPrintMode, setLabelPrintMode] = useState<'ok_only' | 'ok_and_nok'>('ok_only');
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(true);
   const [zebraSaveStatus, setZebraSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [splunkStatus, setSplunkStatus] = useState<SplunkStatusPayload | null>(null);
+  const [splunkRetrying, setSplunkRetrying] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   async function loadMappings() {
@@ -444,9 +460,15 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
     if (payload) setAutoPrintEnabled(payload.autoPrintEnabled);
   }
 
+  async function loadSplunkStatus() {
+    const payload = await fetchJson<SplunkStatusPayload>('/api/splunk/status');
+    if (payload) setSplunkStatus(payload);
+  }
+
   useEffect(() => {
     void loadMappings();
     void loadZebraSettings();
+    void loadSplunkStatus();
   }, []);
 
   function resetForm() {
@@ -512,6 +534,16 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
     }
   }
 
+  async function retrySplunkBuffer() {
+    setSplunkRetrying(true);
+    try {
+      await fetch('/api/splunk/retry-buffer', { method: 'POST', credentials: 'include' });
+      await loadSplunkStatus();
+    } finally {
+      setSplunkRetrying(false);
+    }
+  }
+
   async function toggleMapping(mapping: ProgramMappingRecord) {
     if (mapping.isActive && !window.confirm('Czy dezaktywować to mapowanie?')) return;
     await fetch(`/api/program-mappings/${mapping.id}/${mapping.isActive ? 'disable' : 'enable'}`, { method: 'PATCH', credentials: 'include' });
@@ -570,6 +602,17 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
         {zebraSaveStatus === 'saving' && <p className="settings-save-status">Zapisywanie...</p>}
         {zebraSaveStatus === 'saved' && <p className="settings-save-status ok-text">Zapisano</p>}
         {zebraSaveStatus === 'error' && <p className="settings-save-status error-text">Nie udało się zmienić ustawienia</p>}
+      </section>
+      <section className="settings-card">
+        <div className="settings-row">
+          <div>
+            <div className="settings-row-title">Splunk</div>
+            <div className="settings-row-subtitle">Status: {splunkStatus?.enabled ? 'Włączony' : 'Wyłączony'} · Konfiguracja: {splunkStatus?.configured ? 'OK' : splunkStatus?.urlConfigured ? 'Brak tokena' : 'Brak URL'} · Bufor: {splunkStatus?.pending ?? 0} oczekujących</div>
+            <small>Index: {splunkStatus?.index ?? '-'} · Source: {splunkStatus?.source ?? '-'} · Sourcetype: {splunkStatus?.sourcetype ?? '-'}</small>
+            {splunkStatus?.lastError && <p className="settings-save-status error-text">Ostatni błąd: {splunkStatus.lastError}</p>}
+          </div>
+          <button type="button" disabled={splunkRetrying} onClick={() => void retrySplunkBuffer()}>{splunkRetrying ? 'Wysyłanie...' : 'Wyślij bufor ponownie'}</button>
+        </div>
       </section>
       <section className="users-table-wrap">
         <table>

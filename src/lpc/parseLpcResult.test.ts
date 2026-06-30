@@ -30,7 +30,7 @@ describe('parseLpcResult', () => {
     expect(result?.testType).toBe('DPT');
     expect(result?.testEvaluation).toBe('P');
     expect(result?.RL).toBe(10.787688);
-    expect(result?.RL_unit).toBe('pa/s');
+    expect(result?.RL_unit).toBe('Pa/s');
     expect(result?.Pt).toBe(2.072516);
     expect(result?.Pt_unit).toBe('bar');
     expect(result?.FPR).toBe(2.083796);

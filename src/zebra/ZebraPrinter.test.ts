@@ -11,6 +11,7 @@ describe('ZebraPrinter', () => {
     expect(zpl).toContain('^LL220');
     expect(zpl).toContain('^FO0,40^A0N,24,24');
     expect(zpl).toContain('^FO0,75^A0N,24,24');
+    expect(zpl).toContain('^FD7,253 Pa/s^FS');
     expect(zpl).toContain('^FO0,110^A0N,20,20');
     expect(zpl).not.toContain('^GB');
   });

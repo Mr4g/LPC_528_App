@@ -33,6 +33,10 @@ function parseNumber(value: string): number {
   return Number(value.replace(',', '.'));
 }
 
+function normalizeMeasurementUnit(unit: string): string {
+  return unit.toLowerCase() === 'pa/s' ? 'Pa/s' : unit;
+}
+
 function emptyDetails(): ParsedResultDetails {
   return {
     barcodeFromResult: null,
@@ -76,7 +80,7 @@ export function parseResultDetails(rawDetails: string | null | undefined): Parse
     if (!MEASUREMENT_KEY_SET.has(key)) continue;
 
     const value = parseNumber(tokens[index + 1]);
-    const unit = tokens[index + 2];
+    const unit = normalizeMeasurementUnit(tokens[index + 2]);
     if (!Number.isFinite(value) || !unit) continue;
 
     details.measurements[key] = { value, unit };

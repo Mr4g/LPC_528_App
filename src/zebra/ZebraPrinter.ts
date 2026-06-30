@@ -8,10 +8,16 @@ export function shouldPrintForResult(result: LpcResult['result'], mode: LabelPri
   return false;
 }
 
+function normalizeMeasurementUnit(unit: string | null): string | null {
+  if (!unit) return null;
+  return unit.toLowerCase() === 'pa/s' ? 'Pa/s' : unit;
+}
+
 function formatLeak(value: number | null, unit: string | null): string {
   if (value === null || !Number.isFinite(value)) return '-';
   const text = value.toLocaleString('pl-PL', { maximumFractionDigits: 3 });
-  return unit ? `${text} ${unit}` : text;
+  const normalizedUnit = normalizeMeasurementUnit(unit);
+  return normalizedUnit ? `${text} ${normalizedUnit}` : text;
 }
 
 function formatDate(date = new Date()): string {

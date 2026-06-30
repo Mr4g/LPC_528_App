@@ -1,0 +1,53 @@
+import { describe, expect, it } from 'vitest';
+import { createDatabase } from '../db/database';
+import { AuthService } from './authService';
+
+function service() {
+  return new AuthService(createDatabase(':memory:'), 'test-secret-with-at-least-16-chars');
+}
+
+describe('AuthService', () => {
+  it('creates default admin for empty database and does not expose passwordHash', () => {
+    const auth = service();
+    auth.seedDefaultAdmin('ADM', 'admin123');
+    const users = auth.listUsers();
+    expect(users).toHaveLength(1);
+    expect(users[0]).toMatchObject({ login: 'ADM', role: 'admin', isActive: true });
+    expect(users[0]).not.toHaveProperty('passwordHash');
+  });
+
+  it('repairs missing admin when a database has users but no admin', () => {
+    const auth = service();
+    auth.createUser({ login: 'OPR', password: 'test123', role: 'operator', createdBy: null });
+    auth.seedDefaultAdmin('ADM', 'admin123');
+    expect(auth.login('ADM', 'admin123')).toMatchObject({ login: 'ADM', role: 'admin' });
+  });
+
+
+
+  it('creates default admin when there is no active admin', () => {
+    const auth = service();
+    const admin = auth.createUser({ login: 'ADM', password: 'oldpass', role: 'admin', createdBy: null });
+    auth.setActive(admin.id, false);
+    const seed = auth.seedDefaultAdmin('ADM', 'admin123');
+    expect(seed.action).toBe('repaired');
+    expect(auth.login('adm', 'admin123')).toMatchObject({ login: 'ADM', role: 'admin' });
+  });
+
+  it('resets default admin password in development helper', () => {
+    const auth = service();
+    auth.seedDefaultAdmin('ADM', 'oldpass');
+    const reset = auth.resetDefaultAdminFromEnv('adm', 'admin123');
+    expect(reset.action).toBe('reset');
+    expect(auth.login('ADM', 'admin123')).toMatchObject({ login: 'ADM', role: 'admin' });
+  });
+
+  it('logs in valid user and rejects bad password or inactive user', () => {
+    const auth = service();
+    const user = auth.createUser({ login: 'abc', password: 'test123', role: 'operator', createdBy: null });
+    expect(auth.login('ABC', 'test123')).toMatchObject({ login: 'ABC', role: 'operator' });
+    expect(auth.login('ABC', 'bad-password')).toBeNull();
+    auth.setActive(user.id, false);
+    expect(auth.login('ABC', 'test123')).toBeNull();
+  });
+});

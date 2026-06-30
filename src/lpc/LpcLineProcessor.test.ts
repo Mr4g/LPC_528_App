@@ -1,0 +1,109 @@
+import { describe, expect, it, vi } from 'vitest';
+import type { CurrentTest } from '../shared/types';
+import { CurrentTestStore } from '../scanner/currentTestStore';
+import { LastResultStore } from './LastResultStore';
+import { LpcLineProcessor } from './LpcLineProcessor';
+import { ResultHistoryStore } from './ResultHistoryStore';
+import { LpcTestCurveBuffer } from './LpcTestCurveBuffer';
+
+const streamLine = '9369034 S C01,P01,PRF,ET 5.20 sec,T 19.80 sec,P -0.00011 bar';
+const resultLine = 'F54D060 R C01 N1 P05 R-- 06:40:13.630 06/23/26 0000020041 SL - No_barcode DPT P RL 10.787688 pa/s Pt 2.072516 bar';
+
+function currentTest(): CurrentTest {
+  return {
+    type: 'current_test',
+    barcode: '7472475',
+    matchedKey: '7472475',
+    program: 1,
+    programText: 'P01',
+    selectedAt: new Date().toISOString(),
+    operatorLogin: 'ABC',
+    operatorRole: 'operator',
+  };
+}
+
+function createProcessor() {
+  const emitted: Array<{ event: string; payload: unknown }> = [];
+  const io = { emit: vi.fn((event: string, payload: unknown) => emitted.push({ event, payload })) };
+  const tcpClient = { send: vi.fn() };
+  const currentTestStore = new CurrentTestStore();
+  const curveBuffer = new LpcTestCurveBuffer();
+  const lastResultStore = new LastResultStore();
+  const resultHistoryStore = new ResultHistoryStore(50);
+  const processor = new LpcLineProcessor({
+    io: io as never,
+    tcpClient: tcpClient as never,
+    currentTestStore,
+    curveBuffer,
+    lastResultStore,
+    resultHistoryStore,
+    autoSelectInterface: true,
+    interfaceSelection: '1',
+    currentTestMaxAgeMs: 600000,
+    debugLines: false,
+  });
+
+  return { processor, emitted, tcpClient, currentTestStore, curveBuffer, lastResultStore, resultHistoryStore };
+}
+
+describe('LpcLineProcessor', () => {
+  it('recognizes stream and updates the curve buffer', () => {
+    const { processor, emitted, curveBuffer } = createProcessor();
+
+    processor.processLine(streamLine);
+
+    expect(curveBuffer.getPoints()).toHaveLength(1);
+    expect(emitted.some((item) => item.event === 'lpc:stream')).toBe(true);
+    expect(emitted.some((item) => item.event === 'lpc:curve-updated')).toBe(true);
+    expect(processor.getPipelineStatus()).toMatchObject({ streamCount: 1 });
+  });
+
+  it('recognizes result, stores it and emits completion events', () => {
+    const { processor, emitted, lastResultStore, resultHistoryStore } = createProcessor();
+
+    processor.processLine(resultLine);
+
+    expect(emitted.some((item) => item.event === 'lpc:result')).toBe(true);
+    expect(emitted.some((item) => item.event === 'test:completed')).toBe(true);
+    expect(emitted.some((item) => item.event === 'lpc:curve-completed')).toBe(true);
+    expect(emitted.some((item) => item.event === 'lpc:results-updated')).toBe(true);
+    expect(lastResultStore.get()?.result).toBe('REJECT');
+    expect(resultHistoryStore.getAll()).toHaveLength(1);
+    expect(processor.getPipelineStatus()).toMatchObject({ resultCount: 1 });
+  });
+
+  it('ignores menu after sending interface selection', () => {
+    const { processor, emitted, tcpClient } = createProcessor();
+
+    processor.processLine('* 1 Interface Connection1 *');
+
+    expect(tcpClient.send).toHaveBeenCalledWith('1\r\n');
+    expect(emitted.some((item) => item.event === 'lpc:interface-selected')).toBe(true);
+    expect(emitted.some((item) => item.event === 'lpc:result')).toBe(false);
+  });
+
+  it('uses currentTest barcode and programText for No_barcode result', () => {
+    const { processor, emitted, currentTestStore } = createProcessor();
+    currentTestStore.set(currentTest());
+
+    processor.processLine(resultLine);
+
+    const resultEvent = emitted.find((item) => item.event === 'lpc:result');
+    expect(resultEvent?.payload).toMatchObject({
+      barcode: '7472475',
+      program: 'P01',
+      programText: 'P01',
+      currentTestValid: true,
+      currentTestProgramText: 'P01',
+      operatorLogin: 'ABC',
+      operatorRole: 'operator',
+    });
+  });
+
+  it('does not throw for garbage lines', () => {
+    const { processor } = createProcessor();
+
+    expect(() => processor.processLine('garbage telnet noise')).not.toThrow();
+    expect(processor.getRawLines().at(-1)).toMatchObject({ parsedAs: 'ignored' });
+  });
+});

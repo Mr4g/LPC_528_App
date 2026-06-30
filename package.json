@@ -1,0 +1,39 @@
+{
+  "name": "lpc-528-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm:dev:backend\" \"npm:dev:frontend:force\"",
+    "dev:backend": "tsx watch src/server/index.ts",
+    "dev:frontend": "vite --host 0.0.0.0",
+    "dev:frontend:force": "vite --host 0.0.0.0 --force",
+    "build": "tsc -p tsconfig.json && vite build",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "bcryptjs": "latest",
+    "better-sqlite3": "^11.0.0",
+    "cookie-parser": "latest",
+    "dotenv": "latest",
+    "express": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/express": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "concurrently": "latest",
+    "tsx": "latest",
+    "typescript": "latest",
+    "vite": "latest",
+    "vitest": "latest"
+  }
+}

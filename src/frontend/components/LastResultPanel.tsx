@@ -3,7 +3,7 @@ import { formatMeasurement, formatNumber, getResultClass, getResultDisplayLabel 
 
 const measurementKeys = ['RL', 'Pt', 'EDC', 'PL', 'LLR', 'HLR', 'FPR'] as const;
 
-export function LastResultPanel({ result }: { result: LpcResult | null }) {
+export function LastResultPanel({ result, onPrintLabel, printStatus }: { result: LpcResult | null; onPrintLabel?: () => void; printStatus?: string | null }) {
   return (
     <section className="last-result-panel">
       <div className={`result-status ${result ? getResultClass(result.result) : 'status-unknown'}`}>
@@ -11,6 +11,11 @@ export function LastResultPanel({ result }: { result: LpcResult | null }) {
         <strong>{result ? getResultDisplayLabel(result.result) : '-'}</strong>
       </div>
       {result ? (
+        <>
+        <div className="label-print-actions">
+          <button type="button" onClick={onPrintLabel} disabled={!onPrintLabel}>Drukuj etykietę</button>
+          {printStatus && <span>{printStatus}</span>}
+        </div>
         <div className="result-data-grid">
           <div className="main-measurement"><span>Główny pomiar</span><strong>{result.leakType} {formatMeasurement(result.leakValue, result.leakUnit)}</strong></div>
           <div><span>Barcode</span><strong>{result.barcode}</strong></div>
@@ -25,6 +30,7 @@ export function LastResultPanel({ result }: { result: LpcResult | null }) {
             );
           })}
         </div>
+        </>
       ) : (
         <p className="empty-state">Brak końcowego wyniku testu</p>
       )}

@@ -9,7 +9,7 @@ const barcodeProgramMapSchema = z.preprocess((value: unknown) => {
   } catch {
     return value;
   }
-}, z.record(z.coerce.number().int().min(1).max(31))).default({});
+}, z.record(z.string(), z.coerce.number().int().min(1).max(31))).default({});
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -54,8 +54,26 @@ const envSchema = z.object({
   SPLUNK_INDEX: z.string().min(1).default('lpc528'),
   SPLUNK_SOURCE: z.string().min(1).default('lpc-528-app'),
   SPLUNK_SOURCETYPE: z.string().min(1).default('lpc:result'),
-  ZEBRA_HOST: z.string().min(1),
+  ZEBRA_ENABLED: z.coerce.boolean().default(false),
+  ZEBRA_HOST: z.string().min(1).default('127.0.0.1'),
   ZEBRA_PORT: z.coerce.number().int().positive().default(9100),
+  ZEBRA_PRINT_ON_RESULT: z.coerce.boolean().default(false),
+  ZEBRA_LABEL_WIDTH_MM: z.coerce.number().positive().default(30),
+  ZEBRA_LABEL_HEIGHT_MM: z.coerce.number().positive().default(8),
+  ZEBRA_DPI: z.coerce.number().int().positive().default(203),
+  ZEBRA_ORIENTATION: z.enum(['landscape', 'portrait']).default('landscape'),
+  ZEBRA_TEST_PRESSURE_LABEL: z.string().min(1).default('6 Bar'),
+  ZEBRA_COPIES: z.coerce.number().int().positive().default(1),
+  ZEBRA_CONNECT_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  ZEBRA_FONT_LINE1: z.coerce.number().int().positive().default(16),
+  ZEBRA_FONT_LINE2: z.coerce.number().int().positive().default(16),
+  ZEBRA_FONT_LINE3: z.coerce.number().int().positive().default(13),
+  ZEBRA_LINE1_Y: z.coerce.number().int().nonnegative().default(7),
+  ZEBRA_LINE2_Y: z.coerce.number().int().nonnegative().default(25),
+  ZEBRA_LINE3_Y: z.coerce.number().int().nonnegative().default(43),
+  ZEBRA_OFFSET_X: z.coerce.number().int().nonnegative().default(0),
+  ZEBRA_OFFSET_Y: z.coerce.number().int().nonnegative().default(0),
+  ZEBRA_FRAME_THICKNESS: z.coerce.number().int().positive().default(2),
   BACKUP_COMMAND: z.string().min(1),
   BACKUP_SCRIPT: z.string().min(1),
   BACKUP_REPORT: z.string().min(1).default('Chan Last 100'),

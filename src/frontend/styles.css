@@ -1615,3 +1615,18 @@ body.theme-dark .results-preview {
     height: auto;
   }
 }
+
+.label-print-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0;
+}
+.label-print-actions button {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.label-print-actions span { font-size: 0.85rem; opacity: 0.85; }

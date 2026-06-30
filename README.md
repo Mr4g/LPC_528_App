@@ -699,3 +699,60 @@ Mapowania mogą edytować tylko role `line_leader` i `admin`; operator nie widzi
 ## Test results persistence
 
 Każdy finalny `lpc:result` jest zapisywany do tabeli `test_results`. Endpoint `GET /api/lpc/results` oraz pełniejszy `GET /api/test-results` czytają dane z DB, więc historia wyników i ostatni wynik są dostępne po restarcie IPC.
+
+## Drukowanie etykiet Zebra
+
+Aplikacja może wysyłać minimalistyczną etykietę ZPL po raw TCP do drukarki Zebra ZT231. Wydruk automatyczny uruchamia się po finalnym wyniku testu LPC, po zapisaniu `lastResult` i historii wyników. Backend przechowuje w pamięci identyfikatory automatycznie wydrukowanych wyników, więc ten sam `uniqueId` (albo klucz z czasu, barcode, programu i wyniku) nie jest drukowany drugi raz przez automatyczny mechanizm.
+
+### Konfiguracja
+
+```env
+ZEBRA_ENABLED=true
+ZEBRA_HOST=192.168.200.60
+ZEBRA_PORT=9100
+ZEBRA_PRINT_ON_RESULT=true
+ZEBRA_LABEL_WIDTH_MM=30
+ZEBRA_LABEL_HEIGHT_MM=8
+ZEBRA_DPI=203
+ZEBRA_ORIENTATION=landscape
+ZEBRA_TEST_PRESSURE_LABEL=6 Bar
+ZEBRA_COPIES=1
+```
+
+Dodatkowe strojenie bardzo małej etykiety jest dostępne przez `ZEBRA_FONT_LINE1`, `ZEBRA_FONT_LINE2`, `ZEBRA_FONT_LINE3`, `ZEBRA_LINE1_Y`, `ZEBRA_LINE2_Y`, `ZEBRA_LINE3_Y`, `ZEBRA_OFFSET_X`, `ZEBRA_OFFSET_Y` i `ZEBRA_FRAME_THICKNESS`.
+
+### Opis etykiety
+
+- Linia 1: `TEST OK/NOK - 6 Bar`
+- Linia 2: wyciek, np. `7,253 pa/s`
+- Linia 3: operator i data, np. `GAZD 24.06.2026`
+
+Przykładowy ZPL:
+
+```zpl
+^XA
+^CI28
+^PW240
+^LL64
+^LH0,0
+^PQ1
+^FO2,2^GB236,60,2^FS
+^FO6,7^A0N,16,16^FB232,1,0,C,0^FDTEST OK - 6 Bar^FS
+^FO6,25^A0N,16,16^FB232,1,0,C,0^FD7,253 pa/s^FS
+^FO6,43^A0N,13,13^FB232,1,0,C,0^FDTEST 24.06.2026^FS
+^XZ
+```
+
+### Test ręczny
+
+```bash
+curl -X POST http://localhost:3000/api/zebra/test-print
+```
+
+### Druk ostatniego wyniku
+
+```bash
+curl -X POST http://localhost:3000/api/zebra/print-last-result
+```
+
+Jeśli drukarka nie drukuje, sprawdź czy `ZEBRA_ENABLED=true`, czy IP drukarki Zebra ZT231 jest zgodne z `ZEBRA_HOST`, czy port `9100` jest osiągalny z backendu oraz czy drukarka przyjmuje raw TCP/ZPL.

@@ -570,6 +570,8 @@ function App() {
   const [forceRefreshResponse, setForceRefreshResponse] = useState<string | null>(null);
   const [diagnosticProgram, setDiagnosticProgram] = useState('1');
   const [programStartTestResponse, setProgramStartTestResponse] = useState<string | null>(null);
+  const [labelPrintStatus, setLabelPrintStatus] = useState<string | null>(null);
+  const [zebraStatusResponse, setZebraStatusResponse] = useState<string | null>(null);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [resultsOpen, setResultsOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -963,6 +965,24 @@ function App() {
     await refreshLpcStatus();
   }
 
+  async function printLastResultLabel() {
+    if (!lastResult) return;
+    setLabelPrintStatus('Drukowanie...');
+    const response = await fetch('/api/zebra/print-last-result', { method: 'POST', credentials: 'include' });
+    const payload = await response.json() as { message?: string };
+    setLabelPrintStatus(response.ok ? 'Wydrukowano' : (payload.message ?? 'Błąd drukarki'));
+  }
+
+  async function refreshZebraStatus() {
+    const response = await fetch('/api/zebra/status', { credentials: 'include' });
+    setZebraStatusResponse(JSON.stringify(await response.json(), null, 2));
+  }
+
+  async function testZebraPrint() {
+    const response = await fetch('/api/zebra/test-print', { method: 'POST', credentials: 'include' });
+    setZebraStatusResponse(JSON.stringify(await response.json(), null, 2));
+  }
+
   async function testProgramStart() {
     const response = await fetch('/api/programs/start', {
       method: 'POST',
@@ -1011,7 +1031,7 @@ function App() {
             <td title={formatDateTime(result.receivedAt)}>{formatDateTime(result.receivedAt)}</td>
             <td><span className={`result-badge ${getResultClass(result.result)}`}>{formatResultLabel(result.result)}</span></td>
             <td title={result.operatorLogin ?? '-'}>{result.operatorLogin ?? '-'}</td>
-            <td title={result.programText}>{result.programText}</td>
+            <td title={result.programText ?? '-'}>{result.programText}</td>
             <td title={result.barcode}>{result.barcode}</td>
             <td title={String(result.uniqueId ?? result.totalAbs)}>{result.uniqueId ?? result.totalAbs}</td>
             <td title={`${result.leakType} ${formatMeasurement(result.leakValue, result.leakUnit)}`}>{result.leakType} {formatMeasurement(result.leakValue, result.leakUnit)}</td>
@@ -1038,7 +1058,7 @@ function App() {
             <tr key={`preview-${result.receivedAt}-${result.uniqueId}`}>
               <td title={formatDateTime(result.receivedAt)}>{formatDateTime(result.receivedAt)}</td>
               <td><span className={`result-badge ${getResultClass(result.result)}`}>{formatResultLabel(result.result)}</span></td>
-              <td title={result.programText}>{result.programText}</td>
+              <td title={result.programText ?? '-'}>{result.programText}</td>
               <td title={result.barcode}>{result.barcode}</td>
               <td title={`${result.leakType} ${formatMeasurement(result.leakValue, result.leakUnit)}`}>
                 {result.leakType} {formatMeasurement(result.leakValue, result.leakUnit)}
@@ -1206,7 +1226,7 @@ function App() {
         </section>
 
         <aside className="panel result-column">
-          <LastResultPanel result={lastResult} />
+          <LastResultPanel result={lastResult} onPrintLabel={() => void printLastResultLabel()} printStatus={labelPrintStatus} />
           <section className="results-preview" aria-label="Wyniki testów">
             <div className="results-preview-header">
               <span>Wyniki testów</span>
@@ -1297,6 +1317,15 @@ function App() {
                 <textarea value={mockLine} onChange={(event) => setMockLine(event.target.value)} placeholder="Raw LPC line do testu UI" />
                 <button type="button" onClick={() => void sendMockLine()}>Wyślij mock line</button>
                 {mockLineResponse && <pre>{mockLineResponse}</pre>}
+              </section>
+
+              <section>
+                <h3>Zebra</h3>
+                <div className="lpc-actions">
+                  <button type="button" onClick={() => void refreshZebraStatus()}>Status Zebra</button>
+                  <button type="button" onClick={() => void testZebraPrint()}>Test print</button>
+                </div>
+                {zebraStatusResponse && <pre>{zebraStatusResponse}</pre>}
               </section>
 
               <section>

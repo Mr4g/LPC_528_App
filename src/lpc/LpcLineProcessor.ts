@@ -20,6 +20,7 @@ export interface EnrichedLpcResult extends LpcResult {
   currentTestProgram?: number;
   currentTestProgramText?: string;
   currentTestSelectedAt?: string;
+  labelPrintMode?: import('../shared/types').LabelPrintMode;
   operatorLogin?: string | null;
   operatorRole?: string | null;
 }
@@ -210,6 +211,7 @@ export class LpcLineProcessor {
       currentTestSelectedAt: currentTest.selectedAt,
       operatorLogin: currentTest.operatorLogin ?? null,
       operatorRole: currentTest.operatorRole ?? null,
+      labelPrintMode: currentTest.labelPrintMode ?? 'ok_only',
       barcode: this.resolveBarcode(result, currentTest),
       program: currentTest.programText,
       programText: currentTest.programText,

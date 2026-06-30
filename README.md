@@ -702,7 +702,21 @@ Każdy finalny `lpc:result` jest zapisywany do tabeli `test_results`. Endpoint `
 
 ## Drukowanie etykiet Zebra
 
-Aplikacja może wysyłać minimalistyczną etykietę ZPL po raw TCP do drukarki Zebra ZT231. Wydruk automatyczny uruchamia się po finalnym wyniku testu LPC, po zapisaniu `lastResult` i historii wyników. Backend przechowuje w pamięci identyfikatory automatycznie wydrukowanych wyników, więc ten sam `uniqueId` (albo klucz z czasu, barcode, programu i wyniku) nie jest drukowany drugi raz przez automatyczny mechanizm.
+Etykieta Zebra jest drukowana bez ramki, bez `^GB`, bez linii poziomych i bez ozdobników. ZPL zawiera wyłącznie trzy wycentrowane linie tekstu:
+
+```text
+TEST OK/NOK - 6 Bar
+wyciek pa/s
+operator data
+```
+
+Przykład:
+
+```text
+TEST OK - 6 Bar
+7,253 pa/s
+GAZD 30.06.2026
+```
 
 ### Konfiguracja
 
@@ -711,48 +725,60 @@ ZEBRA_ENABLED=true
 ZEBRA_HOST=192.168.200.60
 ZEBRA_PORT=9100
 ZEBRA_PRINT_ON_RESULT=true
-ZEBRA_LABEL_WIDTH_MM=30
-ZEBRA_LABEL_HEIGHT_MM=8
 ZEBRA_DPI=203
-ZEBRA_ORIENTATION=landscape
+ZEBRA_LABEL_WIDTH_DOTS=240
+ZEBRA_LABEL_HEIGHT_DOTS=96
+ZEBRA_LABEL_OFFSET_X=0
+ZEBRA_LABEL_OFFSET_Y=0
+ZEBRA_TEXT_X=0
+ZEBRA_TEXT_WIDTH_DOTS=240
+ZEBRA_FONT_LINE1_HEIGHT=14
+ZEBRA_FONT_LINE1_WIDTH=14
+ZEBRA_FONT_LINE2_HEIGHT=14
+ZEBRA_FONT_LINE2_WIDTH=14
+ZEBRA_FONT_LINE3_HEIGHT=12
+ZEBRA_FONT_LINE3_WIDTH=12
+ZEBRA_LINE1_Y=4
+ZEBRA_LINE2_Y=30
+ZEBRA_LINE3_Y=56
 ZEBRA_TEST_PRESSURE_LABEL=6 Bar
 ZEBRA_COPIES=1
 ```
 
-Dodatkowe strojenie bardzo małej etykiety jest dostępne przez `ZEBRA_FONT_LINE1`, `ZEBRA_FONT_LINE2`, `ZEBRA_FONT_LINE3`, `ZEBRA_LINE1_Y`, `ZEBRA_LINE2_Y`, `ZEBRA_LINE3_Y`, `ZEBRA_OFFSET_X`, `ZEBRA_OFFSET_Y` i `ZEBRA_FRAME_THICKNESS`.
+### Polityka drukowania per barcode
 
-### Opis etykiety
+Każde mapowanie barcode/program ma `labelPrintMode`:
 
-- Linia 1: `TEST OK/NOK - 6 Bar`
-- Linia 2: wyciek, np. `7,253 pa/s`
-- Linia 3: operator i data, np. `GAZD 24.06.2026`
+- `disabled` — nie drukuj automatycznie,
+- `ok_only` — drukuj tylko wynik OK / ACCEPT,
+- `ok_and_nok` — drukuj wynik OK / ACCEPT i NOK / REJECT.
 
-Przykładowy ZPL:
+Nowe i migrowane mapowania mają domyślnie `ok_only`. Tryb ustawisz w ekranie `Programy / Mapowanie barcode` w polu `Druk etykiety`.
 
-```zpl
-^XA
-^CI28
-^PW240
-^LL64
-^LH0,0
-^PQ1
-^FO2,2^GB236,60,2^FS
-^FO6,7^A0N,16,16^FB232,1,0,C,0^FDTEST OK - 6 Bar^FS
-^FO6,25^A0N,16,16^FB232,1,0,C,0^FD7,253 pa/s^FS
-^FO6,43^A0N,13,13^FB232,1,0,C,0^FDTEST 24.06.2026^FS
-^XZ
+### Kalibracja
+
+Endpoint kalibracji drukuje bez ramki tekst testowy `TEST OK - 6 Bar`, `7,253 pa/s`, `GAZD 30.06.2026`. Dostępne presety: `tiny`, `small`, `medium`, `wide`, `custom`.
+
+```bash
+curl -X POST http://localhost:3000/api/zebra/test-print-calibration \
+  -H "Content-Type: application/json" \
+  -d '{"preset":"tiny"}'
+```
+
+### Preview ZPL
+
+Preview zwraca dokładnie ZPL i layout, które zostałyby użyte do wydruku, ale nie drukuje fizycznie.
+
+```bash
+curl -X POST http://localhost:3000/api/zebra/preview-zpl
 ```
 
 ### Test ręczny
 
 ```bash
-curl -X POST http://localhost:3000/api/zebra/test-print
-```
-
-### Druk ostatniego wyniku
-
-```bash
-curl -X POST http://localhost:3000/api/zebra/print-last-result
+curl -X POST http://localhost:3000/api/zebra/test-print \
+  -H "Content-Type: application/json" \
+  -d '{"status":"OK","pressure":"6 Bar","leak":"7,253 pa/s","operator":"GAZD","date":"30.06.2026"}'
 ```
 
 Jeśli drukarka nie drukuje, sprawdź czy `ZEBRA_ENABLED=true`, czy IP drukarki Zebra ZT231 jest zgodne z `ZEBRA_HOST`, czy port `9100` jest osiągalny z backendu oraz czy drukarka przyjmuje raw TCP/ZPL.

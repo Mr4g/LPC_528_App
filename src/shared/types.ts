@@ -1,5 +1,6 @@
 export type MeasurementValue = number | null;
 export type LpcResultValue = 'ACCEPT' | 'REJECT' | 'ERROR' | 'UNKNOWN';
+export type LabelPrintMode = 'ok_only' | 'ok_and_nok' | 'disabled';
 
 export interface LpcMeasurementMap {
   [key: string]: {
@@ -87,6 +88,7 @@ export interface CurrentTest {
   programText: string;
   mappingId?: string | null;
   matchType?: 'exact' | 'contains' | null;
+  labelPrintMode?: LabelPrintMode;
   selectedAt: string;
   operatorLogin?: string;
   operatorRole?: string;
@@ -114,6 +116,7 @@ export interface ProgramStartRequest {
   programText: string;
   mappingId?: string | null;
   matchType?: 'exact' | 'contains' | null;
+  labelPrintMode?: LabelPrintMode;
   selectedAt: string;
   operatorLogin?: string;
   operatorRole?: string;

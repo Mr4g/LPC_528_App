@@ -117,6 +117,7 @@ declare global {
 
 type OperatorStatus = 'ready' | 'scanning' | 'program-selected' | 'no-mapping' | 'start-error';
 type UserRole = 'operator' | 'line_leader' | 'admin';
+type LabelPrintMode = 'ok_only' | 'ok_and_nok' | 'disabled';
 type ChartStatus = 'waiting' | 'live' | 'completed';
 type TestSessionStatus = 'idle' | 'program_selected' | 'starting' | 'running' | 'waiting_for_result' | 'completed' | 'timeout' | 'error';
 
@@ -161,6 +162,7 @@ interface ProgramMappingRecord {
   description: string | null;
   isActive: boolean;
   matchType: 'exact' | 'contains';
+  labelPrintMode: LabelPrintMode;
   createdAt: string;
   updatedAt: string;
   createdBy: string | null;
@@ -426,6 +428,7 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
   const [programNumber, setProgramNumber] = useState(1);
   const [description, setDescription] = useState('');
   const [isActive, setIsActive] = useState(true);
+  const [labelPrintMode, setLabelPrintMode] = useState<LabelPrintMode>('ok_only');
   const [message, setMessage] = useState<string | null>(null);
 
   async function loadMappings() {
@@ -444,6 +447,7 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
     setProgramNumber(1);
     setDescription('');
     setIsActive(true);
+    setLabelPrintMode('ok_only');
   }
 
   function editMapping(mapping: ProgramMappingRecord) {
@@ -453,6 +457,7 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
     setProgramNumber(mapping.programNumber);
     setDescription(mapping.description ?? '');
     setIsActive(mapping.isActive);
+    setLabelPrintMode(mapping.labelPrintMode ?? 'ok_only');
   }
 
   async function saveMapping(event: FormEvent<HTMLFormElement>) {
@@ -475,7 +480,7 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
       method: editingId ? 'PATCH' : 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ barcodePattern: trimmedPattern, matchType, programNumber, description, isActive }),
+      body: JSON.stringify({ barcodePattern: trimmedPattern, matchType, programNumber, description, isActive, labelPrintMode }),
     });
     const payload = (await response.json()) as { ok: boolean; message?: string };
     setMessage(response.ok ? 'Mapowanie zapisane' : payload.message ?? 'Nie udało się zapisać mapowania');
@@ -511,6 +516,11 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
           {Array.from({ length: 31 }, (_, index) => index + 1).map((program) => <option key={program} value={program}>P{String(program).padStart(2, '0')}</option>)}
         </select>
         <input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Opis" />
+        <select value={labelPrintMode} onChange={(event) => setLabelPrintMode(event.target.value as LabelPrintMode)} aria-label="Tryb drukowania etykiety">
+          <option value="disabled">Nie drukuj</option>
+          <option value="ok_only">Tylko OK</option>
+          <option value="ok_and_nok">OK i NOK</option>
+        </select>
         <label className="inline-check"><input type="checkbox" checked={isActive} onChange={(event) => setIsActive(event.target.checked)} /> Aktywny</label>
         <button type="submit">{editingId ? 'Zapisz zmiany' : 'Dodaj mapowanie'}</button>
         {editingId && <button type="button" onClick={resetForm}>Anuluj</button>}
@@ -518,13 +528,14 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
       {message && <p className="login-error">{message}</p>}
       <section className="users-table-wrap">
         <table>
-          <thead><tr><th>Barcode / pattern</th><th>Typ</th><th>Program</th><th>Opis</th><th>Status</th><th>UpdatedAt</th><th>Akcje</th></tr></thead>
+          <thead><tr><th>Barcode / pattern</th><th>Typ</th><th>Program</th><th>Druk etykiety</th><th>Opis</th><th>Status</th><th>UpdatedAt</th><th>Akcje</th></tr></thead>
           <tbody>
             {mappings.map((mapping) => (
               <tr key={mapping.id}>
                 <td title={mapping.barcodePattern}>{mapping.barcodePattern}</td>
                 <td>{mapping.matchType === 'exact' ? 'Dokładne' : 'Zawiera'}</td>
                 <td>{mapping.programText}</td>
+                <td>{mapping.labelPrintMode === 'disabled' ? 'Nie drukuj' : mapping.labelPrintMode === 'ok_and_nok' ? 'OK i NOK' : 'Tylko OK'}</td>
                 <td title={mapping.description ?? ''}>{mapping.description ?? '-'}</td>
                 <td>{mapping.isActive ? 'aktywny' : 'nieaktywny'}</td>
                 <td>{formatDateTime(mapping.updatedAt)}</td>
@@ -570,7 +581,6 @@ function App() {
   const [forceRefreshResponse, setForceRefreshResponse] = useState<string | null>(null);
   const [diagnosticProgram, setDiagnosticProgram] = useState('1');
   const [programStartTestResponse, setProgramStartTestResponse] = useState<string | null>(null);
-  const [labelPrintStatus, setLabelPrintStatus] = useState<string | null>(null);
   const [zebraStatusResponse, setZebraStatusResponse] = useState<string | null>(null);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [resultsOpen, setResultsOpen] = useState(false);
@@ -965,14 +975,6 @@ function App() {
     await refreshLpcStatus();
   }
 
-  async function printLastResultLabel() {
-    if (!lastResult) return;
-    setLabelPrintStatus('Drukowanie...');
-    const response = await fetch('/api/zebra/print-last-result', { method: 'POST', credentials: 'include' });
-    const payload = await response.json() as { message?: string };
-    setLabelPrintStatus(response.ok ? 'Wydrukowano' : (payload.message ?? 'Błąd drukarki'));
-  }
-
   async function refreshZebraStatus() {
     const response = await fetch('/api/zebra/status', { credentials: 'include' });
     setZebraStatusResponse(JSON.stringify(await response.json(), null, 2));
@@ -1226,7 +1228,7 @@ function App() {
         </section>
 
         <aside className="panel result-column">
-          <LastResultPanel result={lastResult} onPrintLabel={() => void printLastResultLabel()} printStatus={labelPrintStatus} />
+          <LastResultPanel result={lastResult} />
           <section className="results-preview" aria-label="Wyniki testów">
             <div className="results-preview-header">
               <span>Wyniki testów</span>

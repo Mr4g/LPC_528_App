@@ -1,5 +1,5 @@
 import type { AppConfig } from '../config';
-import type { ZebraLayoutConfig } from './zebraTypes';
+import type { ZebraCalibrationPreset, ZebraLayoutConfig } from './zebraTypes';
 
 export interface ZebraConfig extends ZebraLayoutConfig {
   enabled: boolean;
@@ -10,27 +10,42 @@ export interface ZebraConfig extends ZebraLayoutConfig {
   connectTimeoutMs: number;
 }
 
+export const calibrationPresets: Record<ZebraCalibrationPreset, Partial<ZebraLayoutConfig>> = {
+  tiny: { widthDots: 240, heightDots: 64, line1Y: 2, line2Y: 22, line3Y: 42, fontLine1Height: 11, fontLine1Width: 11, fontLine2Height: 11, fontLine2Width: 11, fontLine3Height: 10, fontLine3Width: 10, textX: 0, textWidthDots: 240 },
+  small: { widthDots: 240, heightDots: 80, line1Y: 3, line2Y: 26, line3Y: 49, fontLine1Height: 12, fontLine1Width: 12, fontLine2Height: 12, fontLine2Width: 12, fontLine3Height: 11, fontLine3Width: 11, textX: 0, textWidthDots: 240 },
+  medium: { widthDots: 240, heightDots: 96, line1Y: 4, line2Y: 30, line3Y: 56, fontLine1Height: 14, fontLine1Width: 14, fontLine2Height: 14, fontLine2Width: 14, fontLine3Height: 12, fontLine3Width: 12, textX: 0, textWidthDots: 240 },
+  wide: { widthDots: 320, heightDots: 96, line1Y: 4, line2Y: 30, line3Y: 56, fontLine1Height: 14, fontLine1Width: 14, fontLine2Height: 14, fontLine2Width: 14, fontLine3Height: 12, fontLine3Width: 12, textX: 0, textWidthDots: 320 },
+  custom: {},
+};
+
+export function mergeZebraLayout(base: ZebraLayoutConfig, override: Partial<ZebraLayoutConfig> = {}): ZebraLayoutConfig {
+  return { ...base, ...override };
+}
+
 export function createZebraConfig(config: AppConfig): ZebraConfig {
   return {
     enabled: config.ZEBRA_ENABLED,
     host: config.ZEBRA_HOST,
     port: config.ZEBRA_PORT,
     printOnResult: config.ZEBRA_PRINT_ON_RESULT,
-    labelWidthMm: config.ZEBRA_LABEL_WIDTH_MM,
-    labelHeightMm: config.ZEBRA_LABEL_HEIGHT_MM,
+    widthDots: config.ZEBRA_LABEL_WIDTH_DOTS,
+    heightDots: config.ZEBRA_LABEL_HEIGHT_DOTS,
     dpi: config.ZEBRA_DPI,
-    orientation: config.ZEBRA_ORIENTATION,
+    labelOffsetX: config.ZEBRA_LABEL_OFFSET_X,
+    labelOffsetY: config.ZEBRA_LABEL_OFFSET_Y,
+    textX: config.ZEBRA_TEXT_X,
+    textWidthDots: config.ZEBRA_TEXT_WIDTH_DOTS,
     copies: config.ZEBRA_COPIES,
     testPressureLabel: config.ZEBRA_TEST_PRESSURE_LABEL,
     connectTimeoutMs: config.ZEBRA_CONNECT_TIMEOUT_MS,
-    fontLine1: config.ZEBRA_FONT_LINE1,
-    fontLine2: config.ZEBRA_FONT_LINE2,
-    fontLine3: config.ZEBRA_FONT_LINE3,
+    fontLine1Height: config.ZEBRA_FONT_LINE1_HEIGHT,
+    fontLine1Width: config.ZEBRA_FONT_LINE1_WIDTH,
+    fontLine2Height: config.ZEBRA_FONT_LINE2_HEIGHT,
+    fontLine2Width: config.ZEBRA_FONT_LINE2_WIDTH,
+    fontLine3Height: config.ZEBRA_FONT_LINE3_HEIGHT,
+    fontLine3Width: config.ZEBRA_FONT_LINE3_WIDTH,
     line1Y: config.ZEBRA_LINE1_Y,
     line2Y: config.ZEBRA_LINE2_Y,
     line3Y: config.ZEBRA_LINE3_Y,
-    offsetX: config.ZEBRA_OFFSET_X,
-    offsetY: config.ZEBRA_OFFSET_Y,
-    frameThickness: config.ZEBRA_FRAME_THICKNESS,
   };
 }

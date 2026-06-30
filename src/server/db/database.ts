@@ -66,6 +66,7 @@ function rowToProgramMapping(row: Record<string, unknown>): ProgramMappingRecord
     description: row.description === null ? null : String(row.description),
     isActive: Boolean(row.isActive),
     matchType: row.matchType as ProgramMappingRecord['matchType'],
+    labelPrintMode: row.labelPrintMode === 'disabled' || row.labelPrintMode === 'ok_and_nok' ? row.labelPrintMode : 'ok_only',
     createdAt: String(row.createdAt),
     updatedAt: String(row.updatedAt),
     createdBy: row.createdBy === null ? null : String(row.createdBy),
@@ -208,16 +209,16 @@ export class AppDatabase {
   findProgramMappingById(id: string): ProgramMappingRecord | null { const row = this.db.prepare('SELECT * FROM program_mappings WHERE id = ?').get(id) as Record<string, unknown> | undefined; return row ? rowToProgramMapping(row) : null; }
 
   insertProgramMapping(mapping: ProgramMappingRecord): void {
-    this.db.prepare(`INSERT INTO program_mappings (id, barcodePattern, programNumber, programText, description, isActive, matchType, createdAt, updatedAt, createdBy, updatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(mapping.id, mapping.barcodePattern, mapping.programNumber, mapping.programText, mapping.description, boolToInt(mapping.isActive), mapping.matchType, mapping.createdAt, mapping.updatedAt, mapping.createdBy, mapping.updatedBy);
+    this.db.prepare(`INSERT INTO program_mappings (id, barcodePattern, programNumber, programText, description, isActive, matchType, labelPrintMode, createdAt, updatedAt, createdBy, updatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(mapping.id, mapping.barcodePattern, mapping.programNumber, mapping.programText, mapping.description, boolToInt(mapping.isActive), mapping.matchType, mapping.labelPrintMode, mapping.createdAt, mapping.updatedAt, mapping.createdBy, mapping.updatedBy);
   }
 
   updateProgramMapping(id: string, patch: Partial<ProgramMappingRecord>): ProgramMappingRecord | null {
     const existing = this.findProgramMappingById(id);
     if (!existing) return null;
     const next = { ...existing, ...patch };
-    this.db.prepare(`UPDATE program_mappings SET barcodePattern = ?, programNumber = ?, programText = ?, description = ?, isActive = ?, matchType = ?, createdAt = ?, updatedAt = ?, createdBy = ?, updatedBy = ? WHERE id = ?`)
-      .run(next.barcodePattern, next.programNumber, next.programText, next.description, boolToInt(next.isActive), next.matchType, next.createdAt, next.updatedAt, next.createdBy, next.updatedBy, id);
+    this.db.prepare(`UPDATE program_mappings SET barcodePattern = ?, programNumber = ?, programText = ?, description = ?, isActive = ?, matchType = ?, labelPrintMode = ?, createdAt = ?, updatedAt = ?, createdBy = ?, updatedBy = ? WHERE id = ?`)
+      .run(next.barcodePattern, next.programNumber, next.programText, next.description, boolToInt(next.isActive), next.matchType, next.labelPrintMode, next.createdAt, next.updatedAt, next.createdBy, next.updatedBy, id);
     return this.findProgramMappingById(id);
   }
 
@@ -281,7 +282,7 @@ export class AppDatabase {
   private migrate(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, login TEXT UNIQUE NOT NULL, passwordHash TEXT NOT NULL, role TEXT NOT NULL, isActive INTEGER NOT NULL DEFAULT 1, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, lastLoginAt TEXT NULL, createdBy TEXT NULL);
-      CREATE TABLE IF NOT EXISTS program_mappings (id TEXT PRIMARY KEY, barcodePattern TEXT NOT NULL, programNumber INTEGER NOT NULL, programText TEXT NOT NULL, description TEXT NULL, isActive INTEGER NOT NULL DEFAULT 1, matchType TEXT NOT NULL DEFAULT 'exact', createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, createdBy TEXT NULL, updatedBy TEXT NULL);
+      CREATE TABLE IF NOT EXISTS program_mappings (id TEXT PRIMARY KEY, barcodePattern TEXT NOT NULL, programNumber INTEGER NOT NULL, programText TEXT NOT NULL, description TEXT NULL, isActive INTEGER NOT NULL DEFAULT 1, matchType TEXT NOT NULL DEFAULT 'exact', labelPrintMode TEXT NOT NULL DEFAULT 'ok_only', createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, createdBy TEXT NULL, updatedBy TEXT NULL);
       CREATE TABLE IF NOT EXISTS test_results (id TEXT PRIMARY KEY, receivedAt TEXT NOT NULL, source TEXT, messageId TEXT, messageType TEXT, channel TEXT, port TEXT, program TEXT, programText TEXT, programNumber INTEGER, linkInfo TEXT, result TEXT, testerTime TEXT, testerDate TEXT, uniqueId TEXT, totalAbs TEXT, programEvaluation TEXT, spcFlag TEXT, barcode TEXT, barcodeFromResult TEXT, operatorLogin TEXT, operatorRole TEXT, testType TEXT, testEvaluation TEXT, leakType TEXT, leakValue REAL, leakUnit TEXT, RL REAL, RL_unit TEXT, Pt REAL, Pt_unit TEXT, EDC REAL, EDC_unit TEXT, PL REAL, PL_unit TEXT, LLR REAL, LLR_unit TEXT, HLR REAL, HLR_unit TEXT, FPR REAL, FPR_unit TEXT, measurementsJson TEXT, raw TEXT, normalized TEXT, currentTestId TEXT NULL, createdAt TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS idx_test_results_receivedAt ON test_results(receivedAt DESC);
       CREATE INDEX IF NOT EXISTS idx_test_results_barcode ON test_results(barcode);
@@ -291,6 +292,14 @@ export class AppDatabase {
       CREATE INDEX IF NOT EXISTS idx_test_results_programText ON test_results(programText);
       CREATE TABLE IF NOT EXISTS test_sessions (id TEXT PRIMARY KEY, status TEXT NOT NULL, barcode TEXT, programNumber INTEGER, programText TEXT, operatorLogin TEXT, startedAt TEXT, completedAt TEXT, lastStreamAt TEXT, timeoutAt TEXT, message TEXT);
     `);
+    this.ensureColumn('program_mappings', 'labelPrintMode', "TEXT NOT NULL DEFAULT 'ok_only'");
+  }
+
+  private ensureColumn(tableName: string, columnName: string, definition: string): void {
+    const columns = this.db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === columnName)) {
+      this.db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+    }
   }
 }
 

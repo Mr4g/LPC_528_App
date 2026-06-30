@@ -24,6 +24,13 @@ describe('ProgramMappingService', () => {
     if (result.ok) expect(result.currentTest.programText).toBe('P01');
   });
 
+  it('creates mappings with ok_only label printing by default', () => {
+    const service = new ProgramMappingService(createDatabase(':memory:'));
+    const mapping = service.create({ barcodePattern: 'XYZ123', programNumber: 1 }, 'ADM');
+
+    expect(mapping.labelPrintMode).toBe('ok_only');
+  });
+
   it('does not fall back to env mapping when the table only has inactive records', () => {
     const service = new ProgramMappingService(createDatabase(':memory:'));
     const inactive = service.create({ barcodePattern: 'ABC123', programNumber: 1, matchType: 'exact' }, 'ADM');

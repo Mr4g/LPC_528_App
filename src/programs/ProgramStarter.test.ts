@@ -46,6 +46,15 @@ describe('ScriptProgramStarter', () => {
     expect(result.exitCode).toBe(0);
   });
 
+  it('returns dry-run failure when stdout contains DRY_RUN', async () => {
+    const scriptPath = tempScript("process.stdout.write('DRY_RUN: Program P01 validated, not sent to LPC');");
+    const result = await new ScriptProgramStarter({ command: process.execPath, scriptPath }).startProgram(request);
+
+    expect(result.success).toBe(false);
+    expect(result.dryRun).toBe(true);
+    expect(result.message).toBe('Skrypt startu LPC działa w trybie suchy test. Program nie został wysłany do testera.');
+  });
+
   it('returns readable error when scriptPath is missing', async () => {
     const result = await new ScriptProgramStarter({ command: process.execPath, scriptPath: '/definitely/missing/eip_start_program.py' }).startProgram(request);
 

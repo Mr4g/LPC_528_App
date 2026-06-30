@@ -60,6 +60,9 @@ export class ScriptProgramStarter implements ProgramStarter {
       console.log(`[PROGRAM_START] stdout=${stdout}`);
       console.log(`[PROGRAM_START] stderr=${stderr}`);
       console.log(`[PROGRAM_START] durationMs=${durationMs}`);
+      if (stdout.includes('DRY_RUN')) {
+        return this.failure(command, scriptPath, args, 'Skrypt startu LPC działa w trybie suchy test. Program nie został wysłany do testera.', stdout, stderr, 0, true);
+      }
       return {
         attempted: true,
         success: true,
@@ -81,6 +84,9 @@ export class ScriptProgramStarter implements ProgramStarter {
       console.log(`[PROGRAM_START] stdout=${processError.stdout ?? ''}`);
       console.log(`[PROGRAM_START] stderr=${processError.stderr ?? ''}`);
       console.log(`[PROGRAM_START] durationMs=${durationMs}`);
+      if ((processError.stdout ?? '').includes('DRY_RUN')) {
+        return this.failure(command, scriptPath, args, 'Skrypt startu LPC działa w trybie suchy test. Program nie został wysłany do testera.', processError.stdout, processError.stderr, exitCode, true);
+      }
       if (processError.message.includes('ETIMEDOUT') || processError.killed || processError.signal === 'SIGTERM') {
         return this.failure(command, scriptPath, args, 'Timeout uruchamiania programu LPC.', processError.stdout, processError.stderr, exitCode);
       }
@@ -99,6 +105,7 @@ export class ScriptProgramStarter implements ProgramStarter {
     stdout?: string,
     stderr?: string,
     exitCode: number | null = null,
+    dryRun = false,
   ): ProgramStartResult {
     return {
       attempted: true,
@@ -111,6 +118,7 @@ export class ScriptProgramStarter implements ProgramStarter {
       stderr,
       exitCode,
       errorMessage,
+      dryRun,
       message: errorMessage,
     };
   }

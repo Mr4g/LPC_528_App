@@ -708,3 +708,39 @@ Każdy finalny `lpc:result` jest zapisywany do tabeli `test_results`. Endpoint `
 - After a program is sent to LPC, if no real stream point or final result arrives within `ACTIVE_TEST_NO_DATA_WARNING_MS` / `ACTIVE_TEST_TIMEOUT_MS` (default 5000 ms), the active test is ended with an error and barcode input is unlocked.
 - Final Zebra ZPL layout uses `^PW240`, `^LL220`, Y positions `40/75/110`, fonts `24/24/20`, centered text, and no frame/`^GB`.
 - Label printing is configured per barcode/program mapping with `Tylko OK` (`ok_only`, default) or `OK i NOK` (`ok_and_nok`). Line leader/admin can globally enable or disable automatic label printing in Programy / Mapowanie barcode.
+
+## Start programu LPC — Telnet vs EtherNet/IP
+
+- `LPC_HOST` / `LPC_PORT=23` służy wyłącznie do Telnet/streamingu: odbioru danych do wykresu i finalnych wyników.
+- `LPC_EIP_HOST` / `LPC_EIP_PORT=44818` służy do realnego wysłania startu programu `P01` / `P02` / ... do LPC przez EtherNet/IP.
+- Samo ustawienie `LPC_HOST` nie wystarcza do startu programu; jeśli brakuje `LPC_EIP_HOST`, skrypt startu nie może zgłaszać sukcesu realnego startu.
+- `EIP_DRY_RUN=true` oznacza suchy test: skrypt waliduje numer programu, ale nie wysyła programu do testera, a aplikacja pokazuje status suchego testu zamiast zielonego OK.
+
+Manual check — realny start:
+
+```powershell
+py "C:\Projekty\LPC528_App\LPC_528_App\scripts\eip_start_program.py" 1
+```
+
+Poprawny realny wynik powinien zawierać:
+
+```text
+Connecting to LPC EIP 192.168.200.50:44818
+REGISTER SESSION OK
+OK: Program P01 sent to LPC
+```
+
+Jeśli wynik pokazuje tylko `OK: Program P01 sent to LPC` bez informacji o połączeniu z LPC EIP, to jest podejrzenie dry-run/fałszywego sukcesu.
+
+Manual check — dry-run:
+
+```powershell
+$env:EIP_DRY_RUN="true"
+py "C:\Projekty\LPC528_App\LPC_528_App\scripts\eip_start_program.py" 1
+```
+
+Wtedy skrypt wypisuje:
+
+```text
+DRY_RUN: Program P01 validated, not sent to LPC
+```

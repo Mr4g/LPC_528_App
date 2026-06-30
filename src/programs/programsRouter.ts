@@ -12,6 +12,19 @@ function formatProgramText(program: number): string {
 export function createProgramsRouter(options: { config: AppConfig; programStarter: ProgramStarter }): Router {
   const router = Router();
 
+  router.get('/debug', (_req, res) => {
+    const scriptPath = options.config.PROGRAM_START_SCRIPT_PATH;
+    res.json({
+      ok: true,
+      mode: options.config.PROGRAM_START_MODE,
+      command: options.config.PROGRAM_START_COMMAND,
+      scriptPath,
+      scriptExists: scriptPath ? existsSync(scriptPath) : false,
+      dryRunEnabled: options.config.EIP_DRY_RUN,
+      dryRunSource: options.config.EIP_DRY_RUN ? 'EIP_DRY_RUN' : 'none',
+    });
+  });
+
   router.get('/config', (_req, res) => {
     const scriptPath = options.config.PROGRAM_START_SCRIPT_PATH;
     res.json({

@@ -106,6 +106,7 @@ export interface ProgramStartResult {
   stderr?: string;
   exitCode?: number | null;
   errorMessage?: string;
+  dryRun?: boolean;
   message: string;
 }
 

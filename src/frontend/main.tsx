@@ -429,7 +429,7 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
   const [isActive, setIsActive] = useState(true);
   const [labelPrintMode, setLabelPrintMode] = useState<'ok_only' | 'ok_and_nok'>('ok_only');
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(true);
-  const [zebraSaved, setZebraSaved] = useState(false);
+  const [zebraSaveStatus, setZebraSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [message, setMessage] = useState<string | null>(null);
 
   async function loadMappings() {
@@ -498,10 +498,16 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
   }
 
   async function saveZebraSetting(nextValue: boolean) {
+    const previousValue = autoPrintEnabled;
     setAutoPrintEnabled(nextValue);
-    setZebraSaved(false);
+    setZebraSaveStatus('saving');
     const response = await fetch('/api/zebra/settings', { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoPrintEnabled: nextValue }) });
-    setZebraSaved(response.ok);
+    if (response.ok) {
+      setZebraSaveStatus('saved');
+    } else {
+      setAutoPrintEnabled(previousValue);
+      setZebraSaveStatus('error');
+    }
   }
 
   async function toggleMapping(mapping: ProgramMappingRecord) {
@@ -540,9 +546,28 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
       </form>
       {message && <p className="login-error">{message}</p>}
       <section className="settings-card">
-        <h2>Drukowanie etykiet</h2>
-        <label className="inline-check"><input type="checkbox" checked={autoPrintEnabled} onChange={(event) => void saveZebraSetting(event.target.checked)} /> {autoPrintEnabled ? 'Włączone' : 'Wyłączone'}</label>
-        {zebraSaved && <p className="ok-text">Zapisano</p>}
+        <div className="settings-row zebra-print-toggle">
+          <div>
+            <div className="settings-row-title">Drukowanie etykiet</div>
+            <div className="settings-row-subtitle">Automatyczny wydruk po wyniku testu</div>
+          </div>
+          <div className="toggle-switch-wrap">
+            <button
+              type="button"
+              className={`toggle-switch ${autoPrintEnabled ? 'is-on' : 'is-off'}`}
+              role="switch"
+              aria-checked={autoPrintEnabled}
+              disabled={zebraSaveStatus === 'saving'}
+              onClick={() => void saveZebraSetting(!autoPrintEnabled)}
+            >
+              <span className="toggle-switch-thumb" />
+            </button>
+            <small>{autoPrintEnabled ? 'Włączone' : 'Wyłączone'}</small>
+          </div>
+        </div>
+        {zebraSaveStatus === 'saving' && <p className="settings-save-status">Zapisywanie...</p>}
+        {zebraSaveStatus === 'saved' && <p className="settings-save-status ok-text">Zapisano</p>}
+        {zebraSaveStatus === 'error' && <p className="settings-save-status error-text">Nie udało się zmienić ustawienia</p>}
       </section>
       <section className="users-table-wrap">
         <table>
@@ -1205,6 +1230,7 @@ function App() {
               <div><span>Start LPC</span><strong className={startOk ? 'ok-text' : 'error-text'}>{startOk ? 'OK' : 'FAIL'}</strong></div>
               <p className={startOk ? 'operator-message ok-text' : 'operator-message error-text'}>{startMessage}</p>
               <span className="mode-badge">{lastAccepted.programStart.mode}</span>
+              {lastAccepted.programStart.dryRun && <span className="dry-run-badge">SUCHY TEST — brak realnego startu LPC</span>}
             </div>
           )}
 

@@ -38,6 +38,15 @@ describe('parseLpcResult', () => {
     expect(Object.keys(result?.measurements ?? {})).toEqual(['RL', 'Pt', 'EDC', 'PL', 'LLR', 'HLR', 'FPR']);
   });
 
+  it('parses a final result frame even when the measurement unit is missing', () => {
+    const result = parseLpcResult('F54D060 A C01 N1 P05 A-- 06:40:13.630 06/23/26 0000020041 SL - No_barcode DPT P RL 7,253');
+
+    expect(result).not.toBeNull();
+    expect(result?.result).toBe('ACCEPT');
+    expect(result?.leakValue).toBe(7.253);
+    expect(result?.leakUnit).toBeNull();
+  });
+
   it('parses a frame without message id/type and derives result from linkInfo', () => {
     const result = parseLpcResult(
       'C01 N1 P05 R-- 06:40:13.630 06/23/26 0000020041 SL - No_barcode DPT P RL 10.787688 pa/s Pt 2.072516 bar',

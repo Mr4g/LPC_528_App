@@ -27,4 +27,12 @@ describe('parseResultDetails', () => {
     expect(parseResultDetails('No_barcode DPT P RL 12 mbar').leakUnit).toBe('mbar');
     expect(parseResultDetails('No_barcode DPT P RL 0,012 bar').leakValue).toBe(0.012);
   });
+
+  it('keeps a measurement value when the unit is missing', () => {
+    const result = parseResultDetails('No_barcode DPT P RL 7,253');
+
+    expect(result.leakType).toBe('RL');
+    expect(result.leakValue).toBe(7.253);
+    expect(result.leakUnit).toBeNull();
+  });
 });

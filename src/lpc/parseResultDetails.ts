@@ -33,7 +33,8 @@ function parseNumber(value: string): number {
   return Number(value.replace(',', '.'));
 }
 
-function normalizeMeasurementUnit(unit: string): string {
+function normalizeMeasurementUnit(unit: string | null | undefined): string | null {
+  if (!unit) return null;
   return unit.toLowerCase() === 'pa/s' ? 'Pa/s' : unit;
 }
 
@@ -75,15 +76,15 @@ export function parseResultDetails(rawDetails: string | null | undefined): Parse
   details.testType = tokens[1] ?? null;
   details.testEvaluation = tokens[2] ?? null;
 
-  for (let index = 3; index < tokens.length - 2; index += 1) {
+  for (let index = 3; index < tokens.length - 1; index += 1) {
     const key = tokens[index];
     if (!MEASUREMENT_KEY_SET.has(key)) continue;
 
     const value = parseNumber(tokens[index + 1]);
     const unit = normalizeMeasurementUnit(tokens[index + 2]);
-    if (!Number.isFinite(value) || !unit) continue;
+    if (!Number.isFinite(value)) continue;
 
-    details.measurements[key] = { value, unit };
+    if (unit) details.measurements[key] = { value, unit };
     if (details.leakType === null) {
       details.leakType = key;
       details.leakValue = value;

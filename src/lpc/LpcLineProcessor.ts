@@ -165,7 +165,7 @@ export class LpcLineProcessor {
       diagnostic.parsedAs = 'error';
       diagnostic.parseError = error instanceof Error ? error.message : 'Unknown LPC line processing error';
       this.storeRawLine(diagnostic);
-      this.debugLog('IGNORED LINE reason', diagnostic.parseError);
+      this.debugLog('PARSER EXCEPTION', error instanceof Error ? (error.stack ?? error.message) : error);
       return diagnostic;
     }
   }

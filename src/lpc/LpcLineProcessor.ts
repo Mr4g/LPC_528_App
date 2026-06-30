@@ -11,6 +11,7 @@ import { parseLpcResult } from './parseLpcResult';
 import { parseLpcStream } from './parseLpcStream';
 import type { LpcTcpClient } from './LpcTcpClient';
 import { LpcTestCurveBuffer } from './LpcTestCurveBuffer';
+import { shouldPrintForResult, type ZebraPrinter } from '../zebra/ZebraPrinter';
 
 export type LpcParsedAs = 'stream' | 'result' | 'ignored' | 'error';
 
@@ -57,6 +58,9 @@ export interface LpcLineProcessorOptions {
   maxRawLines?: number;
   database?: AppDatabase;
   testSessionManager?: TestSessionManager;
+  zebraPrinter?: ZebraPrinter;
+  zebraEnabled?: boolean;
+  zebraPrintOnResult?: boolean;
 }
 
 export class LpcLineProcessor {
@@ -132,6 +136,7 @@ export class LpcLineProcessor {
         this.options.lastResultStore?.set(enrichedResult);
         this.options.resultHistoryStore?.add(enrichedResult);
         this.options.testSessionManager?.complete();
+        void this.autoPrint(enrichedResult);
         this.lastResultAt = receivedAt;
         this.resultCount += 1;
         diagnostic.parsedAs = 'result';
@@ -206,10 +211,35 @@ export class LpcLineProcessor {
       currentTestSelectedAt: currentTest.selectedAt,
       operatorLogin: currentTest.operatorLogin ?? null,
       operatorRole: currentTest.operatorRole ?? null,
+      labelPrintMode: currentTest.labelPrintMode ?? 'ok_only',
       barcode: this.resolveBarcode(result, currentTest),
       program: currentTest.programText,
       programText: currentTest.programText,
     };
+  }
+
+  private async autoPrint(result: EnrichedLpcResult): Promise<void> {
+    if (!this.options.zebraEnabled || !this.options.zebraPrintOnResult || !this.options.zebraPrinter) return;
+    if (this.options.database?.getSetting('zebra.autoPrintEnabled') === 'false') {
+      console.log('[ZEBRA] Auto print globally disabled');
+      return;
+    }
+    if (!shouldPrintForResult(result.result, result.labelPrintMode ?? 'ok_only')) {
+      console.log('[ZEBRA] Auto print skipped by labelPrintMode', { result: result.result, labelPrintMode: result.labelPrintMode ?? 'ok_only' });
+      return;
+    }
+    const key = this.options.zebraPrinter.getAutoPrintKey(result);
+    if (this.options.zebraPrinter.hasPrinted(key)) {
+      console.log('[ZEBRA] Auto print skipped duplicate', { key });
+      return;
+    }
+    console.log('[ZEBRA] Auto print allowed', { key, result: result.result, labelPrintMode: result.labelPrintMode ?? 'ok_only' });
+    this.options.zebraPrinter.markPrinted(key);
+    try {
+      await this.options.zebraPrinter.printResult(result);
+    } catch (error) {
+      console.error('[ZEBRA] Auto print failed', error);
+    }
   }
 
   private resolveBarcode(result: LpcResult, currentTest: CurrentTest): string {

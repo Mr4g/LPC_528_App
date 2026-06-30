@@ -51,19 +51,19 @@ export function createUsersRouter(authService: AuthService): Router {
     const role = req.body?.role;
     if (!isUserRole(role)) return res.status(400).json({ ok: false, error: 'INVALID_ROLE', message: 'Nieprawidłowa rola.' });
     if (!canManageTarget('admin', role)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Nie można ustawić tej roli.' });
-    const target = authService.getUserById(req.params.id);
+    const target = authService.getUserById(String(req.params.id));
     if (!target || !canManageTarget('admin', target.role)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Brak uprawnień.' });
-    const user = authService.setRole(req.params.id, role);
+    const user = authService.setRole(String(req.params.id), role);
     return user ? res.json({ ok: true, user }) : res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
   });
 
   router.post('/:id/reset-password', (req: AuthenticatedRequest, res) => {
-    const target = authService.getUserById(req.params.id);
+    const target = authService.getUserById(String(req.params.id));
     if (!target) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
     if (!canManageTarget(req.user?.role ?? 'operator', target.role)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Brak uprawnień.' });
     const password = typeof req.body?.password === 'string' ? req.body.password : '';
     try {
-      const user = authService.resetPassword(req.params.id, password);
+      const user = authService.resetPassword(String(req.params.id), password);
       return res.json({ ok: true, user });
     } catch (error) {
       return res.status(400).json({ ok: false, error: 'RESET_PASSWORD_FAILED', message: error instanceof Error ? error.message : 'Nie udało się zresetować hasła.' });
@@ -71,17 +71,17 @@ export function createUsersRouter(authService: AuthService): Router {
   });
 
   router.patch('/:id/disable', (req: AuthenticatedRequest, res) => {
-    const target = authService.getUserById(req.params.id);
+    const target = authService.getUserById(String(req.params.id));
     if (!target) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
     if (!canManageTarget(req.user?.role ?? 'operator', target.role)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Brak uprawnień.' });
-    return res.json({ ok: true, user: authService.setActive(req.params.id, false) });
+    return res.json({ ok: true, user: authService.setActive(String(req.params.id), false) });
   });
 
   router.patch('/:id/enable', (req: AuthenticatedRequest, res) => {
-    const target = authService.getUserById(req.params.id);
+    const target = authService.getUserById(String(req.params.id));
     if (!target) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
     if (!canManageTarget(req.user?.role ?? 'operator', target.role)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Brak uprawnień.' });
-    return res.json({ ok: true, user: authService.setActive(req.params.id, true) });
+    return res.json({ ok: true, user: authService.setActive(String(req.params.id), true) });
   });
 
   return router;

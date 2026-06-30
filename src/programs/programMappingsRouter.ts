@@ -21,7 +21,7 @@ export function createProgramMappingsRouter(service: ProgramMappingService): Rou
 
   router.patch('/:id', (req: AuthenticatedRequest, res) => {
     try {
-      const mapping = service.update(req.params.id, req.body ?? {}, req.user?.login ?? null);
+      const mapping = service.update(String(req.params.id), req.body ?? {}, req.user?.login ?? null);
       return mapping ? res.json({ ok: true, mapping }) : res.status(404).json({ ok: false, error: 'MAPPING_NOT_FOUND' });
     } catch (error) {
       return res.status(400).json({ ok: false, error: 'INVALID_MAPPING', message: error instanceof Error ? error.message : 'Nie udało się zapisać mapowania.' });
@@ -29,17 +29,17 @@ export function createProgramMappingsRouter(service: ProgramMappingService): Rou
   });
 
   router.patch('/:id/disable', (req: AuthenticatedRequest, res) => {
-    const mapping = service.setActive(req.params.id, false, req.user?.login ?? null);
+    const mapping = service.setActive(String(req.params.id), false, req.user?.login ?? null);
     return mapping ? res.json({ ok: true, mapping }) : res.status(404).json({ ok: false, error: 'MAPPING_NOT_FOUND' });
   });
 
   router.patch('/:id/enable', (req: AuthenticatedRequest, res) => {
-    const mapping = service.setActive(req.params.id, true, req.user?.login ?? null);
+    const mapping = service.setActive(String(req.params.id), true, req.user?.login ?? null);
     return mapping ? res.json({ ok: true, mapping }) : res.status(404).json({ ok: false, error: 'MAPPING_NOT_FOUND' });
   });
 
   router.delete('/:id', requireRole(['admin']), (req: AuthenticatedRequest, res) => {
-    const mapping = service.setActive(req.params.id, false, req.user?.login ?? null);
+    const mapping = service.setActive(String(req.params.id), false, req.user?.login ?? null);
     return mapping ? res.json({ ok: true, mapping }) : res.status(404).json({ ok: false, error: 'MAPPING_NOT_FOUND' });
   });
 

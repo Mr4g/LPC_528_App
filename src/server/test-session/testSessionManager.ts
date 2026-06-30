@@ -64,7 +64,7 @@ export class TestSessionManager {
     const now = new Date().toISOString();
     this.state = {
       ok: true,
-      status: 'running',
+      status: 'waiting_for_result',
       locked: true,
       activeTestId: crypto.randomUUID(),
       barcode: currentTest.barcode,
@@ -131,7 +131,8 @@ export class TestSessionManager {
     this.clearNoDataWarning();
     this.noDataWarningHandle = setTimeout(() => {
       if (!LOCKED_STATUSES.has(this.state.status) || this.state.lastStreamAt) return;
-      this.state = { ...this.state, message: 'Brak danych z LPC' };
+      this.state = { ...this.state, status: 'error', locked: false, completedAt: new Date().toISOString(), message: 'Program został wysłany do LPC, ale aplikacja nie otrzymała danych ze streamingu. Sprawdź połączenie Telnet/Interface Connection.' };
+      this.clearTimeout();
       this.persistAndEmit();
     }, this.options.noDataWarningMs);
   }

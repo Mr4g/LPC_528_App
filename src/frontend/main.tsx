@@ -161,6 +161,7 @@ interface ProgramMappingRecord {
   description: string | null;
   isActive: boolean;
   matchType: 'exact' | 'contains';
+  labelPrintMode: 'ok_only' | 'ok_and_nok';
   createdAt: string;
   updatedAt: string;
   createdBy: string | null;
@@ -426,6 +427,9 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
   const [programNumber, setProgramNumber] = useState(1);
   const [description, setDescription] = useState('');
   const [isActive, setIsActive] = useState(true);
+  const [labelPrintMode, setLabelPrintMode] = useState<'ok_only' | 'ok_and_nok'>('ok_only');
+  const [autoPrintEnabled, setAutoPrintEnabled] = useState(true);
+  const [zebraSaved, setZebraSaved] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   async function loadMappings() {
@@ -433,8 +437,14 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
     if (payload?.mappings) setMappings(payload.mappings);
   }
 
+  async function loadZebraSettings() {
+    const payload = await fetchJson<{ ok: true; autoPrintEnabled: boolean }>('/api/zebra/settings');
+    if (payload) setAutoPrintEnabled(payload.autoPrintEnabled);
+  }
+
   useEffect(() => {
     void loadMappings();
+    void loadZebraSettings();
   }, []);
 
   function resetForm() {
@@ -444,6 +454,7 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
     setProgramNumber(1);
     setDescription('');
     setIsActive(true);
+    setLabelPrintMode('ok_only');
   }
 
   function editMapping(mapping: ProgramMappingRecord) {
@@ -453,6 +464,7 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
     setProgramNumber(mapping.programNumber);
     setDescription(mapping.description ?? '');
     setIsActive(mapping.isActive);
+    setLabelPrintMode(mapping.labelPrintMode ?? 'ok_only');
   }
 
   async function saveMapping(event: FormEvent<HTMLFormElement>) {
@@ -475,7 +487,7 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
       method: editingId ? 'PATCH' : 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ barcodePattern: trimmedPattern, matchType, programNumber, description, isActive }),
+      body: JSON.stringify({ barcodePattern: trimmedPattern, matchType, programNumber, description, isActive, labelPrintMode }),
     });
     const payload = (await response.json()) as { ok: boolean; message?: string };
     setMessage(response.ok ? 'Mapowanie zapisane' : payload.message ?? 'Nie udało się zapisać mapowania');
@@ -483,6 +495,13 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
       resetForm();
       await loadMappings();
     }
+  }
+
+  async function saveZebraSetting(nextValue: boolean) {
+    setAutoPrintEnabled(nextValue);
+    setZebraSaved(false);
+    const response = await fetch('/api/zebra/settings', { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoPrintEnabled: nextValue }) });
+    setZebraSaved(response.ok);
   }
 
   async function toggleMapping(mapping: ProgramMappingRecord) {
@@ -510,21 +529,31 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
         <select value={programNumber} onChange={(event) => setProgramNumber(Number(event.target.value))}>
           {Array.from({ length: 31 }, (_, index) => index + 1).map((program) => <option key={program} value={program}>P{String(program).padStart(2, '0')}</option>)}
         </select>
+        <select value={labelPrintMode} onChange={(event) => setLabelPrintMode(event.target.value as 'ok_only' | 'ok_and_nok')}>
+          <option value="ok_only">Tylko OK</option>
+          <option value="ok_and_nok">OK i NOK</option>
+        </select>
         <input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Opis" />
         <label className="inline-check"><input type="checkbox" checked={isActive} onChange={(event) => setIsActive(event.target.checked)} /> Aktywny</label>
         <button type="submit">{editingId ? 'Zapisz zmiany' : 'Dodaj mapowanie'}</button>
         {editingId && <button type="button" onClick={resetForm}>Anuluj</button>}
       </form>
       {message && <p className="login-error">{message}</p>}
+      <section className="settings-card">
+        <h2>Drukowanie etykiet</h2>
+        <label className="inline-check"><input type="checkbox" checked={autoPrintEnabled} onChange={(event) => void saveZebraSetting(event.target.checked)} /> {autoPrintEnabled ? 'Włączone' : 'Wyłączone'}</label>
+        {zebraSaved && <p className="ok-text">Zapisano</p>}
+      </section>
       <section className="users-table-wrap">
         <table>
-          <thead><tr><th>Barcode / pattern</th><th>Typ</th><th>Program</th><th>Opis</th><th>Status</th><th>UpdatedAt</th><th>Akcje</th></tr></thead>
+          <thead><tr><th>Barcode / pattern</th><th>Typ</th><th>Program</th><th>Druk</th><th>Opis</th><th>Status</th><th>UpdatedAt</th><th>Akcje</th></tr></thead>
           <tbody>
             {mappings.map((mapping) => (
               <tr key={mapping.id}>
                 <td title={mapping.barcodePattern}>{mapping.barcodePattern}</td>
                 <td>{mapping.matchType === 'exact' ? 'Dokładne' : 'Zawiera'}</td>
                 <td>{mapping.programText}</td>
+                <td>{mapping.labelPrintMode === 'ok_and_nok' ? 'OK i NOK' : 'Tylko OK'}</td>
                 <td title={mapping.description ?? ''}>{mapping.description ?? '-'}</td>
                 <td>{mapping.isActive ? 'aktywny' : 'nieaktywny'}</td>
                 <td>{formatDateTime(mapping.updatedAt)}</td>
@@ -1011,7 +1040,7 @@ function App() {
             <td title={formatDateTime(result.receivedAt)}>{formatDateTime(result.receivedAt)}</td>
             <td><span className={`result-badge ${getResultClass(result.result)}`}>{formatResultLabel(result.result)}</span></td>
             <td title={result.operatorLogin ?? '-'}>{result.operatorLogin ?? '-'}</td>
-            <td title={result.programText}>{result.programText}</td>
+            <td title={result.programText ?? '-'}>{result.programText}</td>
             <td title={result.barcode}>{result.barcode}</td>
             <td title={String(result.uniqueId ?? result.totalAbs)}>{result.uniqueId ?? result.totalAbs}</td>
             <td title={`${result.leakType} ${formatMeasurement(result.leakValue, result.leakUnit)}`}>{result.leakType} {formatMeasurement(result.leakValue, result.leakUnit)}</td>
@@ -1038,7 +1067,7 @@ function App() {
             <tr key={`preview-${result.receivedAt}-${result.uniqueId}`}>
               <td title={formatDateTime(result.receivedAt)}>{formatDateTime(result.receivedAt)}</td>
               <td><span className={`result-badge ${getResultClass(result.result)}`}>{formatResultLabel(result.result)}</span></td>
-              <td title={result.programText}>{result.programText}</td>
+              <td title={result.programText ?? '-'}>{result.programText}</td>
               <td title={result.barcode}>{result.barcode}</td>
               <td title={`${result.leakType} ${formatMeasurement(result.leakValue, result.leakUnit)}`}>
                 {result.leakType} {formatMeasurement(result.leakValue, result.leakUnit)}

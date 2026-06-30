@@ -699,3 +699,12 @@ Mapowania mogą edytować tylko role `line_leader` i `admin`; operator nie widzi
 ## Test results persistence
 
 Każdy finalny `lpc:result` jest zapisywany do tabeli `test_results`. Endpoint `GET /api/lpc/results` oraz pełniejszy `GET /api/test-results` czytają dane z DB, więc historia wyników i ostatni wynik są dostępne po restarcie IPC.
+
+
+## LPC-528 deployment notes
+
+- `scripts/eip_start_program.py` and `scripts/lpc_backup_csv.py` are part of the application repository and must be present on the Windows IPC. Do not rely on untracked local copies.
+- ProgramStarter checks that `PROGRAM_START_SCRIPT_PATH` exists and points to a file before running `PROGRAM_START_COMMAND`; missing script, missing Python launcher, non-zero exit and timeout return operator-readable diagnostics.
+- After a program is sent to LPC, if no real stream point or final result arrives within `ACTIVE_TEST_NO_DATA_WARNING_MS` / `ACTIVE_TEST_TIMEOUT_MS` (default 5000 ms), the active test is ended with an error and barcode input is unlocked.
+- Final Zebra ZPL layout uses `^PW240`, `^LL220`, Y positions `40/75/110`, fonts `24/24/20`, centered text, and no frame/`^GB`.
+- Label printing is configured per barcode/program mapping with `Tylko OK` (`ok_only`, default) or `OK i NOK` (`ok_and_nok`). Line leader/admin can globally enable or disable automatic label printing in Programy / Mapowanie barcode.

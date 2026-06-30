@@ -46,6 +46,21 @@ describe('ScriptProgramStarter', () => {
     expect(result.exitCode).toBe(0);
   });
 
+  it('returns readable error when scriptPath is missing', async () => {
+    const result = await new ScriptProgramStarter({ command: process.execPath, scriptPath: '/definitely/missing/eip_start_program.py' }).startProgram(request);
+
+    expect(result.success).toBe(false);
+    expect(result.errorMessage).toContain('Nie znaleziono skryptu startu LPC');
+  });
+
+  it('returns readable error when command cannot be launched', async () => {
+    const scriptPath = tempScript("process.exit(0);");
+    const result = await new ScriptProgramStarter({ command: 'definitely-missing-python-command', scriptPath }).startProgram(request);
+
+    expect(result.success).toBe(false);
+    expect(result.errorMessage).toBe('Nie można uruchomić komendy PROGRAM_START_COMMAND=definitely-missing-python-command. Sprawdź instalację Pythona.');
+  });
+
   it('returns success=false when scriptPath is empty', async () => {
     const result = await new ScriptProgramStarter({ command: process.execPath, scriptPath: '' }).startProgram(request);
 
@@ -61,6 +76,6 @@ describe('ScriptProgramStarter', () => {
     expect(result.stdout).toBe('out');
     expect(result.stderr).toBe('err');
     expect(result.exitCode).toBe(2);
-    expect(result.errorMessage).toBeTruthy();
+    expect(result.errorMessage).toBe('Skrypt startu LPC zakończył się błędem. Szczegóły w logu backendu.');
   });
 });

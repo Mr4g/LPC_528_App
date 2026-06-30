@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { promisify } from 'node:util';
 import type { ProgramStartRequest, ProgramStartResult } from '../shared/types';
 
@@ -23,6 +23,7 @@ export class MockProgramStarter implements ProgramStarter {
 export interface ScriptProgramStarterOptions {
   command: string;
   scriptPath: string;
+  timeoutMs?: number;
 }
 
 export class ScriptProgramStarter implements ProgramStarter {
@@ -33,17 +34,32 @@ export class ScriptProgramStarter implements ProgramStarter {
     const scriptPath = this.options.scriptPath.trim();
     const args = scriptPath ? [scriptPath, String(request.program)] : [];
 
+    console.log('[PROGRAM_START] mode=script');
+    console.log(`[PROGRAM_START] command=${command}`);
+    console.log(`[PROGRAM_START] scriptPath=${scriptPath}`);
+    console.log(`[PROGRAM_START] scriptExists=${Boolean(scriptPath && existsSync(scriptPath))}`);
+    console.log(`[PROGRAM_START] programNumber=${request.program}`);
+
     if (!scriptPath) {
-      return this.failure(command, scriptPath, args, 'PROGRAM_START_SCRIPT_PATH is empty');
+      return this.failure(command, scriptPath, args, 'Nie znaleziono skryptu startu LPC: PROGRAM_START_SCRIPT_PATH is empty');
     }
 
     if (!existsSync(scriptPath)) {
-      return this.failure(command, scriptPath, args, `Program start script does not exist: ${scriptPath}`);
+      return this.failure(command, scriptPath, args, `Nie znaleziono skryptu startu LPC: ${scriptPath}`);
     }
 
+    if (!statSync(scriptPath).isFile()) {
+      return this.failure(command, scriptPath, args, `Nie znaleziono skryptu startu LPC: ${scriptPath}`);
+    }
+
+    const startedAt = Date.now();
     try {
-      console.log(`Starting LPC program ${request.programText} with ${command}`, args);
-      const { stdout, stderr } = await execFileAsync(command, args, { windowsHide: true });
+      const { stdout, stderr } = await execFileAsync(command, args, { windowsHide: true, timeout: this.options.timeoutMs ?? 30000 });
+      const durationMs = Date.now() - startedAt;
+      console.log('[PROGRAM_START] exitCode=0');
+      console.log(`[PROGRAM_START] stdout=${stdout}`);
+      console.log(`[PROGRAM_START] stderr=${stderr}`);
+      console.log(`[PROGRAM_START] durationMs=${durationMs}`);
       return {
         attempted: true,
         success: true,
@@ -57,8 +73,21 @@ export class ScriptProgramStarter implements ProgramStarter {
         message: `Program ${request.programText} sent to LPC`,
       };
     } catch (error) {
-      const processError = error as Error & { stdout?: string; stderr?: string; code?: number | null };
-      return this.failure(command, scriptPath, args, processError.message, processError.stdout, processError.stderr, processError.code ?? null);
+      const processError = error as Error & { stdout?: string; stderr?: string; code?: number | string | null; signal?: string; killed?: boolean };
+      const durationMs = Date.now() - startedAt;
+      const exitCode = typeof processError.code === 'number' ? processError.code : null;
+      console.error('[PROGRAM_START] failed', { command, args, exitCode, stdout: processError.stdout, stderr: processError.stderr, durationMs });
+      console.log(`[PROGRAM_START] exitCode=${exitCode}`);
+      console.log(`[PROGRAM_START] stdout=${processError.stdout ?? ''}`);
+      console.log(`[PROGRAM_START] stderr=${processError.stderr ?? ''}`);
+      console.log(`[PROGRAM_START] durationMs=${durationMs}`);
+      if (processError.message.includes('ETIMEDOUT') || processError.killed || processError.signal === 'SIGTERM') {
+        return this.failure(command, scriptPath, args, 'Timeout uruchamiania programu LPC.', processError.stdout, processError.stderr, exitCode);
+      }
+      if (processError.message.includes('ENOENT') || processError.code === 'ENOENT') {
+        return this.failure(command, scriptPath, args, `Nie można uruchomić komendy PROGRAM_START_COMMAND=${command}. Sprawdź instalację Pythona.`, processError.stdout, processError.stderr, exitCode);
+      }
+      return this.failure(command, scriptPath, args, 'Skrypt startu LPC zakończył się błędem. Szczegóły w logu backendu.', processError.stdout, processError.stderr, exitCode);
     }
   }
 
@@ -82,7 +111,7 @@ export class ScriptProgramStarter implements ProgramStarter {
       stderr,
       exitCode,
       errorMessage,
-      message: `Failed to send program to LPC: ${errorMessage}`,
+      message: errorMessage,
     };
   }
 }

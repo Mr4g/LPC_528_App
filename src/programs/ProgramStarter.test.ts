@@ -46,6 +46,30 @@ describe('ScriptProgramStarter', () => {
     expect(result.exitCode).toBe(0);
   });
 
+  it('returns dry-run failure when stdout contains DRY_RUN', async () => {
+    const scriptPath = tempScript("process.stdout.write('DRY_RUN: Program P01 validated, not sent to LPC');");
+    const result = await new ScriptProgramStarter({ command: process.execPath, scriptPath }).startProgram(request);
+
+    expect(result.success).toBe(false);
+    expect(result.dryRun).toBe(true);
+    expect(result.message).toBe('Skrypt startu LPC działa w trybie suchy test. Program nie został wysłany do testera.');
+  });
+
+  it('returns readable error when scriptPath is missing', async () => {
+    const result = await new ScriptProgramStarter({ command: process.execPath, scriptPath: '/definitely/missing/eip_start_program.py' }).startProgram(request);
+
+    expect(result.success).toBe(false);
+    expect(result.errorMessage).toContain('Nie znaleziono skryptu startu LPC');
+  });
+
+  it('returns readable error when command cannot be launched', async () => {
+    const scriptPath = tempScript("process.exit(0);");
+    const result = await new ScriptProgramStarter({ command: 'definitely-missing-python-command', scriptPath }).startProgram(request);
+
+    expect(result.success).toBe(false);
+    expect(result.errorMessage).toBe('Nie można uruchomić komendy PROGRAM_START_COMMAND=definitely-missing-python-command. Sprawdź instalację Pythona.');
+  });
+
   it('returns success=false when scriptPath is empty', async () => {
     const result = await new ScriptProgramStarter({ command: process.execPath, scriptPath: '' }).startProgram(request);
 
@@ -61,6 +85,6 @@ describe('ScriptProgramStarter', () => {
     expect(result.stdout).toBe('out');
     expect(result.stderr).toBe('err');
     expect(result.exitCode).toBe(2);
-    expect(result.errorMessage).toBeTruthy();
+    expect(result.errorMessage).toBe('Skrypt startu LPC zakończył się błędem. Szczegóły w logu backendu.');
   });
 });

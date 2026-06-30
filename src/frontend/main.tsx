@@ -16,12 +16,14 @@ interface ScanAcceptedPayload {
   currentTest: CurrentTest;
   programStartRequest: ProgramStartRequest;
   programStart: ProgramStartResult;
+  activeTest?: TestSessionState | null;
 }
 
 interface ScanRejectedPayload {
   ok?: false;
   barcode: string;
   error: 'NO_MAPPING' | 'TEST_IN_PROGRESS';
+  code?: 'TEST_IN_PROGRESS';
   errorCode?: 'TEST_IN_PROGRESS';
   message: string;
   activeTest?: TestSessionState;
@@ -161,6 +163,7 @@ interface ProgramMappingRecord {
   description: string | null;
   isActive: boolean;
   matchType: 'exact' | 'contains';
+  labelPrintMode: 'ok_only' | 'ok_and_nok';
   createdAt: string;
   updatedAt: string;
   createdBy: string | null;
@@ -426,6 +429,9 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
   const [programNumber, setProgramNumber] = useState(1);
   const [description, setDescription] = useState('');
   const [isActive, setIsActive] = useState(true);
+  const [labelPrintMode, setLabelPrintMode] = useState<'ok_only' | 'ok_and_nok'>('ok_only');
+  const [autoPrintEnabled, setAutoPrintEnabled] = useState(true);
+  const [zebraSaveStatus, setZebraSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [message, setMessage] = useState<string | null>(null);
 
   async function loadMappings() {
@@ -433,8 +439,14 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
     if (payload?.mappings) setMappings(payload.mappings);
   }
 
+  async function loadZebraSettings() {
+    const payload = await fetchJson<{ ok: true; autoPrintEnabled: boolean }>('/api/zebra/settings');
+    if (payload) setAutoPrintEnabled(payload.autoPrintEnabled);
+  }
+
   useEffect(() => {
     void loadMappings();
+    void loadZebraSettings();
   }, []);
 
   function resetForm() {
@@ -444,6 +456,7 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
     setProgramNumber(1);
     setDescription('');
     setIsActive(true);
+    setLabelPrintMode('ok_only');
   }
 
   function editMapping(mapping: ProgramMappingRecord) {
@@ -453,6 +466,7 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
     setProgramNumber(mapping.programNumber);
     setDescription(mapping.description ?? '');
     setIsActive(mapping.isActive);
+    setLabelPrintMode(mapping.labelPrintMode ?? 'ok_only');
   }
 
   async function saveMapping(event: FormEvent<HTMLFormElement>) {
@@ -475,13 +489,26 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
       method: editingId ? 'PATCH' : 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ barcodePattern: trimmedPattern, matchType, programNumber, description, isActive }),
+      body: JSON.stringify({ barcodePattern: trimmedPattern, matchType, programNumber, description, isActive, labelPrintMode }),
     });
     const payload = (await response.json()) as { ok: boolean; message?: string };
     setMessage(response.ok ? 'Mapowanie zapisane' : payload.message ?? 'Nie udało się zapisać mapowania');
     if (response.ok) {
       resetForm();
       await loadMappings();
+    }
+  }
+
+  async function saveZebraSetting(nextValue: boolean) {
+    const previousValue = autoPrintEnabled;
+    setAutoPrintEnabled(nextValue);
+    setZebraSaveStatus('saving');
+    const response = await fetch('/api/zebra/settings', { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoPrintEnabled: nextValue }) });
+    if (response.ok) {
+      setZebraSaveStatus('saved');
+    } else {
+      setAutoPrintEnabled(previousValue);
+      setZebraSaveStatus('error');
     }
   }
 
@@ -510,21 +537,50 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
         <select value={programNumber} onChange={(event) => setProgramNumber(Number(event.target.value))}>
           {Array.from({ length: 31 }, (_, index) => index + 1).map((program) => <option key={program} value={program}>P{String(program).padStart(2, '0')}</option>)}
         </select>
+        <select value={labelPrintMode} onChange={(event) => setLabelPrintMode(event.target.value as 'ok_only' | 'ok_and_nok')}>
+          <option value="ok_only">Tylko OK</option>
+          <option value="ok_and_nok">OK i NOK</option>
+        </select>
         <input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Opis" />
         <label className="inline-check"><input type="checkbox" checked={isActive} onChange={(event) => setIsActive(event.target.checked)} /> Aktywny</label>
         <button type="submit">{editingId ? 'Zapisz zmiany' : 'Dodaj mapowanie'}</button>
         {editingId && <button type="button" onClick={resetForm}>Anuluj</button>}
       </form>
       {message && <p className="login-error">{message}</p>}
+      <section className="settings-card">
+        <div className="settings-row zebra-print-toggle">
+          <div>
+            <div className="settings-row-title">Drukowanie etykiet</div>
+            <div className="settings-row-subtitle">Automatyczny wydruk po wyniku testu</div>
+          </div>
+          <div className="toggle-switch-wrap">
+            <button
+              type="button"
+              className={`toggle-switch ${autoPrintEnabled ? 'is-on' : 'is-off'}`}
+              role="switch"
+              aria-checked={autoPrintEnabled}
+              disabled={zebraSaveStatus === 'saving'}
+              onClick={() => void saveZebraSetting(!autoPrintEnabled)}
+            >
+              <span className="toggle-switch-thumb" />
+            </button>
+            <small>{autoPrintEnabled ? 'Włączone' : 'Wyłączone'}</small>
+          </div>
+        </div>
+        {zebraSaveStatus === 'saving' && <p className="settings-save-status">Zapisywanie...</p>}
+        {zebraSaveStatus === 'saved' && <p className="settings-save-status ok-text">Zapisano</p>}
+        {zebraSaveStatus === 'error' && <p className="settings-save-status error-text">Nie udało się zmienić ustawienia</p>}
+      </section>
       <section className="users-table-wrap">
         <table>
-          <thead><tr><th>Barcode / pattern</th><th>Typ</th><th>Program</th><th>Opis</th><th>Status</th><th>UpdatedAt</th><th>Akcje</th></tr></thead>
+          <thead><tr><th>Barcode / pattern</th><th>Typ</th><th>Program</th><th>Druk</th><th>Opis</th><th>Status</th><th>UpdatedAt</th><th>Akcje</th></tr></thead>
           <tbody>
             {mappings.map((mapping) => (
               <tr key={mapping.id}>
                 <td title={mapping.barcodePattern}>{mapping.barcodePattern}</td>
                 <td>{mapping.matchType === 'exact' ? 'Dokładne' : 'Zawiera'}</td>
                 <td>{mapping.programText}</td>
+                <td>{mapping.labelPrintMode === 'ok_and_nok' ? 'OK i NOK' : 'Tylko OK'}</td>
                 <td title={mapping.description ?? ''}>{mapping.description ?? '-'}</td>
                 <td>{mapping.isActive ? 'aktywny' : 'nieaktywny'}</td>
                 <td>{formatDateTime(mapping.updatedAt)}</td>
@@ -759,6 +815,7 @@ function App() {
         setLastAccepted(payload);
         setLastRejected(null);
         setStatus(payload.programStart.success ? 'program-selected' : 'start-error');
+        if (payload.activeTest) setTestSession(payload.activeTest);
         if (payload.programStart.success && !hasLiveCurveRef.current) resetChartForNewTest();
       });
 
@@ -899,7 +956,6 @@ function App() {
 
     setStatus('scanning');
     setLastRejected(null);
-    resetChartForNewTest();
 
     const response = await fetch('/api/scan', {
       method: 'POST',
@@ -918,7 +974,7 @@ function App() {
 
     if (!response.ok || !('programStart' in payload)) {
       const rejectedPayload = payload as ScanRejectedPayload;
-      if (rejectedPayload.errorCode === 'TEST_IN_PROGRESS') {
+      if (rejectedPayload.errorCode === 'TEST_IN_PROGRESS' || rejectedPayload.code === 'TEST_IN_PROGRESS') {
         setLastRejected(rejectedPayload);
         if (rejectedPayload.activeTest) setTestSession(rejectedPayload.activeTest);
       } else {
@@ -929,11 +985,13 @@ function App() {
       return;
     }
 
+    resetChartForNewTest();
     setLastAccepted(payload);
     setLastRejected(null);
     setBarcode('');
     setStatus(payload.programStart.success ? 'program-selected' : 'start-error');
-    focusBarcodeInput(0);
+    if (payload.activeTest) setTestSession(payload.activeTest);
+    if (!payload.programStart.success) focusBarcodeInput(0);
   }
 
   async function lpcAction(action: 'connect' | 'disconnect') {
@@ -998,7 +1056,7 @@ function App() {
   const connectionClass = lpcStatus?.lastError ? 'connection-error' : `connection-${lpcStatus?.status ?? 'idle'}`;
   const displayedCurvePoints = curvePoints.length > 0 ? curvePoints : completedCurvePoints;
   const scanLocked = Boolean(testSession?.locked);
-  const scanStatusText = scanLocked ? 'Test w toku' : (status === 'program-selected' && lastAccepted ? `${lastAccepted.currentTest.programText} wybrany` : statusLabels[status]);
+  const scanStatusText = scanLocked ? 'Trwa test — poczekaj na wynik' : (status === 'program-selected' && lastAccepted ? `${lastAccepted.currentTest.programText} wybrany` : statusLabels[status]);
   const activeTestHelper = scanLocked ? [testSession?.programText, testSession?.barcode].filter(Boolean).join(' / ') : '';
   const resultsTable = resultHistory.length > 0 ? (
     <table className="results-table">
@@ -1011,7 +1069,7 @@ function App() {
             <td title={formatDateTime(result.receivedAt)}>{formatDateTime(result.receivedAt)}</td>
             <td><span className={`result-badge ${getResultClass(result.result)}`}>{formatResultLabel(result.result)}</span></td>
             <td title={result.operatorLogin ?? '-'}>{result.operatorLogin ?? '-'}</td>
-            <td title={result.programText}>{result.programText}</td>
+            <td title={result.programText ?? '-'}>{result.programText}</td>
             <td title={result.barcode}>{result.barcode}</td>
             <td title={String(result.uniqueId ?? result.totalAbs)}>{result.uniqueId ?? result.totalAbs}</td>
             <td title={`${result.leakType} ${formatMeasurement(result.leakValue, result.leakUnit)}`}>{result.leakType} {formatMeasurement(result.leakValue, result.leakUnit)}</td>
@@ -1038,7 +1096,7 @@ function App() {
             <tr key={`preview-${result.receivedAt}-${result.uniqueId}`}>
               <td title={formatDateTime(result.receivedAt)}>{formatDateTime(result.receivedAt)}</td>
               <td><span className={`result-badge ${getResultClass(result.result)}`}>{formatResultLabel(result.result)}</span></td>
-              <td title={result.programText}>{result.programText}</td>
+              <td title={result.programText ?? '-'}>{result.programText}</td>
               <td title={result.barcode}>{result.barcode}</td>
               <td title={`${result.leakType} ${formatMeasurement(result.leakValue, result.leakUnit)}`}>
                 {result.leakType} {formatMeasurement(result.leakValue, result.leakUnit)}
@@ -1156,13 +1214,13 @@ function App() {
               ref={barcodeInputRef}
               autoFocus
               disabled={scanLocked}
-              value={scanLocked ? 'Trwa test...' : barcode}
+              value={scanLocked ? 'Trwa test — poczekaj na wynik' : barcode}
               onChange={(event) => setBarcode(event.target.value)}
-              placeholder={scanLocked ? 'Trwa test...' : 'Zeskanuj barcode'}
+              placeholder={scanLocked ? 'Trwa test — poczekaj na wynik' : 'Zeskanuj barcode'}
             />
             {scanLocked && (
               <p className="scan-helper">
-                Poczekaj na wynik bieżącego testu{activeTestHelper ? <>: <strong>{activeTestHelper}</strong></> : '.'}
+                Trwa test — poczekaj na wynik{activeTestHelper ? <>: <strong>{activeTestHelper}</strong></> : '.'}
               </p>
             )}
             <button className="scan-submit" type="submit" disabled={status === 'scanning' || scanLocked}>Wyślij skan</button>
@@ -1176,13 +1234,14 @@ function App() {
               <div><span>Start LPC</span><strong className={startOk ? 'ok-text' : 'error-text'}>{startOk ? 'OK' : 'FAIL'}</strong></div>
               <p className={startOk ? 'operator-message ok-text' : 'operator-message error-text'}>{startMessage}</p>
               <span className="mode-badge">{lastAccepted.programStart.mode}</span>
+              {lastAccepted.programStart.dryRun && <span className="dry-run-badge">SUCHY TEST — brak realnego startu LPC</span>}
             </div>
           )}
 
-          {lastRejected && lastRejected.error !== 'TEST_IN_PROGRESS' && (
-            <div className="scan-error">
+          {lastRejected && (
+            <div className={lastRejected.error === 'TEST_IN_PROGRESS' ? 'scan-helper' : 'scan-error'}>
               <strong>{lastRejected.error}</strong>
-              <span>{lastRejected.message}: {lastRejected.barcode}</span>
+              <span>{lastRejected.error === 'TEST_IN_PROGRESS' ? lastRejected.message : `${lastRejected.message}: ${lastRejected.barcode}`}</span>
             </div>
           )}
         </aside>

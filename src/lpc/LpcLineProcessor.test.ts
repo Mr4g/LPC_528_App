@@ -72,6 +72,24 @@ describe('LpcLineProcessor', () => {
     expect(processor.getPipelineStatus()).toMatchObject({ resultCount: 1 });
   });
 
+  it('emits result when final result measurement has no unit', () => {
+    const { processor, emitted, lastResultStore } = createProcessor();
+
+    processor.processLine('F54D060 A C01 N1 P05 A-- 06:40:13.630 06/23/26 0000020041 SL - No_barcode DPT P RL 7,253');
+
+    expect(emitted.some((item) => item.event === 'lpc:result')).toBe(true);
+    expect(lastResultStore.get()).toMatchObject({ result: 'ACCEPT', leakValue: 7.253, leakUnit: null });
+  });
+
+  it('emits result with bar unit from comma decimal measurement', () => {
+    const { processor, emitted, lastResultStore } = createProcessor();
+
+    processor.processLine('F54D060 A C01 N1 P05 A-- 06:40:13.630 06/23/26 0000020041 SL - No_barcode DPT P RL 0,012 bar');
+
+    expect(emitted.some((item) => item.event === 'lpc:result')).toBe(true);
+    expect(lastResultStore.get()).toMatchObject({ result: 'ACCEPT', leakValue: 0.012, leakUnit: 'bar' });
+  });
+
   it('ignores menu after sending interface selection', () => {
     const { processor, emitted, tcpClient } = createProcessor();
 

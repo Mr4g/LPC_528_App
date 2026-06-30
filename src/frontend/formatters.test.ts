@@ -11,7 +11,10 @@ describe('frontend formatters', () => {
   });
 
   it('formats measurements with units', () => {
-    expect(formatMeasurement(10.7876, 'pa/s')).toBe('10.79 pa/s');
+    expect(formatMeasurement(10.7876, 'pa/s')).toBe('10,788 Pa/s');
+    expect(formatMeasurement(0.012, 'bar')).toBe('0,012 bar');
+    expect(formatMeasurement(12, 'mbar')).toBe('12 mbar');
+    expect(formatMeasurement(12, null)).toBe('12');
   });
 
   it('formats LPC connection status labels', () => {

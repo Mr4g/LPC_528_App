@@ -23,6 +23,8 @@ import { createTestResultsRouter } from './test-results/testResultsRouter';
 import { TestSessionManager } from './test-session/testSessionManager';
 import { createTestSessionRouter } from './test-session/testSessionRouter';
 import { createUsersRouter } from './users/usersRouter';
+import { ZebraPrinter } from '../zebra/ZebraPrinter';
+import { createZebraRouter } from '../zebra/zebraRouter';
 
 const config = loadConfig();
 const app = express();
@@ -75,6 +77,7 @@ const lpcTcpClient = new LpcTcpClient({
   staleConnectionTimeoutMs: config.LPC_STALE_CONNECTION_TIMEOUT_MS,
   heartbeatPayload: config.LPC_HEARTBEAT_PAYLOAD,
 });
+const zebraPrinter = new ZebraPrinter(config);
 const lpcCurveBuffer = new LpcTestCurveBuffer({
   maxPoints: config.LPC_STREAM_BUFFER_LIMIT,
   minElapsedStepSec: config.LPC_MIN_ELAPSED_STEP_SEC,
@@ -99,6 +102,9 @@ const lpcLineProcessor = new LpcLineProcessor({
   debugPipeline: config.LPC_DEBUG_PIPELINE,
   database,
   testSessionManager,
+  zebraPrinter,
+  zebraEnabled: config.ZEBRA_ENABLED,
+  zebraPrintOnResult: config.ZEBRA_PRINT_ON_RESULT,
 });
 
 lpcTcpClient.on('status', (state) => {
@@ -114,6 +120,7 @@ lpcTcpClient.on('reconnecting', (state) => {
   io.emit('lpc:reconnecting', state);
 });
 lpcTcpClient.on('error', (error, state) => {
+  if (testSessionManager.getStatus().locked) testSessionManager.fail(error.message, 'LPC_CONNECTION_ERROR');
   io.emit('lpc:error', { message: error.message, state });
 });
 lpcTcpClient.on('rawData', (data) => {
@@ -143,6 +150,7 @@ app.use('/api/users', createUsersRouter(authService));
 app.use('/api/test-results', createTestResultsRouter(database));
 app.use('/api/test-session', createTestSessionRouter(testSessionManager));
 app.use('/api/backup', createBackupRouter());
+app.use('/api/zebra', createZebraRouter(database, zebraPrinter));
 app.use('/api/programs', requireAuth, createProgramsRouter({ config, programStarter }));
 app.use('/api/program-mappings', createProgramMappingsRouter(programMappingService));
 app.use('/api/lpc', createLpcRouter({

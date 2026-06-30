@@ -51,8 +51,9 @@ export class TestSessionManager {
       ok: false,
       response: {
         ok: false,
+        code: 'TEST_IN_PROGRESS',
         errorCode: 'TEST_IN_PROGRESS',
-        message: 'Test jest w toku. Poczekaj na zakończenie poprzedniego testu.',
+        message: 'Test jest w toku. Poczekaj na wynik przed kolejnym skanem.',
         activeTest: status,
       },
     };
@@ -62,9 +63,10 @@ export class TestSessionManager {
     this.clearTimeout();
     this.clearNoDataWarning();
     const now = new Date().toISOString();
+    console.log(`[ACTIVE_TEST] started barcode=${currentTest.barcode} program=${currentTest.programText}`);
     this.state = {
       ok: true,
-      status: 'running',
+      status: 'waiting_for_result',
       locked: true,
       activeTestId: crypto.randomUUID(),
       barcode: currentTest.barcode,
@@ -85,19 +87,22 @@ export class TestSessionManager {
 
   markStream(): void {
     if (!LOCKED_STATUSES.has(this.state.status)) return;
-    this.state = { ...this.state, status: 'running', lastStreamAt: new Date().toISOString(), message: null };
+    if (!this.state.lastStreamAt) console.log('[ACTIVE_TEST] first_stream_received');
+    this.state = { ...this.state, status: 'running', lastStreamAt: new Date().toISOString(), message: 'Trwa test — poczekaj na wynik' };
     this.clearNoDataWarning();
     this.persistAndEmit();
   }
 
   complete(): void {
+    console.log('[ACTIVE_TEST] ended reason=FINAL_RESULT');
     this.clearTimeout();
     this.clearNoDataWarning();
     this.state = { ...this.state, status: 'completed', locked: false, completedAt: new Date().toISOString(), message: 'Test zakończony' };
     this.persistAndEmit();
   }
 
-  fail(message: string): void {
+  fail(message: string, reason = 'PROGRAM_START_FAILED'): void {
+    console.log(`[ACTIVE_TEST] ended reason=${reason}`);
     this.clearTimeout();
     this.clearNoDataWarning();
     this.state = { ...this.state, status: 'error', locked: false, completedAt: new Date().toISOString(), message };
@@ -118,6 +123,7 @@ export class TestSessionManager {
 
   private timeout(): void {
     if (!LOCKED_STATUSES.has(this.state.status)) return;
+    console.log('[ACTIVE_TEST] ended reason=ACTIVE_TEST_TIMEOUT');
     this.state = { ...this.state, status: 'timeout', locked: false, timeoutAt: new Date().toISOString(), message: 'Test przekroczył czas oczekiwania na wynik' };
     this.persistAndEmit();
   }
@@ -131,7 +137,9 @@ export class TestSessionManager {
     this.clearNoDataWarning();
     this.noDataWarningHandle = setTimeout(() => {
       if (!LOCKED_STATUSES.has(this.state.status) || this.state.lastStreamAt) return;
-      this.state = { ...this.state, message: 'Brak danych z LPC' };
+      console.log('[ACTIVE_TEST] ended reason=NO_STREAM_TIMEOUT');
+      this.state = { ...this.state, status: 'error', locked: false, completedAt: new Date().toISOString(), message: 'Program został wysłany do LPC, ale aplikacja nie otrzymała danych ze streamingu. Sprawdź połączenie Telnet/Interface Connection.' };
+      this.clearTimeout();
       this.persistAndEmit();
     }, this.options.noDataWarningMs);
   }

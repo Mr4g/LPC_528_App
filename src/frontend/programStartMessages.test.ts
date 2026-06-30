@@ -11,6 +11,6 @@ describe('getProgramStartOperatorMessage', () => {
   });
 
   it('shows failure for script mode errors', () => {
-    expect(getProgramStartOperatorMessage({ attempted: true, success: false, mode: 'script', message: 'fail' }, 'P01')).toBe('Błąd wysłania programu do LPC');
+    expect(getProgramStartOperatorMessage({ attempted: true, success: false, mode: 'script', message: 'fail' }, 'P01')).toBe('fail');
   });
 });

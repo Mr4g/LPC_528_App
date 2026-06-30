@@ -1,5 +1,6 @@
 export type MeasurementValue = number | null;
 export type LpcResultValue = 'ACCEPT' | 'REJECT' | 'ERROR' | 'UNKNOWN';
+export type LabelPrintMode = 'ok_only' | 'ok_and_nok';
 
 export interface LpcMeasurementMap {
   [key: string]: {
@@ -53,6 +54,7 @@ export interface LpcResult {
   normalized: string;
   operatorLogin?: string | null;
   operatorRole?: string | null;
+  labelPrintMode?: LabelPrintMode;
 }
 
 export interface LpcStreamPoint {
@@ -90,6 +92,7 @@ export interface CurrentTest {
   selectedAt: string;
   operatorLogin?: string;
   operatorRole?: string;
+  labelPrintMode?: LabelPrintMode;
 }
 
 export interface ProgramStartResult {
@@ -103,6 +106,7 @@ export interface ProgramStartResult {
   stderr?: string;
   exitCode?: number | null;
   errorMessage?: string;
+  dryRun?: boolean;
   message: string;
 }
 
@@ -117,4 +121,5 @@ export interface ProgramStartRequest {
   selectedAt: string;
   operatorLogin?: string;
   operatorRole?: string;
+  labelPrintMode?: LabelPrintMode;
 }

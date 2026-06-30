@@ -25,10 +25,16 @@ export function formatNumber(value: number | null | undefined, digits = 2): stri
   return value.toFixed(digits);
 }
 
-export function formatMeasurement(value: number | null | undefined, unit: string | null | undefined, digits = 2): string {
-  const formattedValue = formatNumber(value, digits);
-  if (formattedValue === '-') return '-';
-  return `${formattedValue} ${unit ?? ''}`.trim();
+export function normalizeMeasurementUnit(unit: string | null | undefined): string | null {
+  if (!unit) return null;
+  return unit.toLowerCase() === 'pa/s' ? 'Pa/s' : unit;
+}
+
+export function formatMeasurement(value: number | null | undefined, unit: string | null | undefined, maximumFractionDigits = 3): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return '-';
+  const formattedValue = value.toLocaleString('pl-PL', { maximumFractionDigits });
+  const normalizedUnit = normalizeMeasurementUnit(unit);
+  return normalizedUnit ? `${formattedValue} ${normalizedUnit}` : formattedValue;
 }
 
 export function formatDateTime(iso: string | null | undefined): string {

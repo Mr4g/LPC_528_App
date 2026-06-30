@@ -25,6 +25,7 @@ export function createScannerRouter(options: {
     const rawBarcode = typeof req.body?.barcode === 'string' ? req.body.barcode : '';
     const lock = options.testSessionManager?.assertCanStart();
     if (lock && !lock.ok) {
+      console.log(`[ACTIVE_TEST] scan rejected reason=TEST_IN_PROGRESS barcode=${rawBarcode}`);
       return res.status(409).json({ ...(lock.response as object), barcode: rawBarcode, error: 'TEST_IN_PROGRESS' });
     }
 
@@ -53,16 +54,17 @@ export function createScannerRouter(options: {
     const programStartRequest = { ...mapping.programStartRequest, ...operatorContext };
 
     options.currentTestStore.set(currentTest);
-    options.testSessionManager?.start(currentTest);
+    const activeTest = options.testSessionManager?.start(currentTest) ?? null;
     const programStart = await options.programStarter.startProgram(programStartRequest);
     if (!programStart.success) {
-      options.testSessionManager?.fail(programStart.message);
+      options.testSessionManager?.fail(programStart.message, 'PROGRAM_START_FAILED');
     }
     const payload = {
       scan,
       currentTest,
       programStartRequest,
       programStart,
+      activeTest: options.testSessionManager?.getStatus() ?? activeTest,
     };
 
     options.io.emit('scan:accepted', payload);

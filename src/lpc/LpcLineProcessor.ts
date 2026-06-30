@@ -132,6 +132,7 @@ export class LpcLineProcessor {
       const result = parseLpcResult(rawLine);
       if (result) {
         const enrichedResult = this.attachCurrentTest(result);
+        console.log(`[ACTIVE_TEST] final_result_received status=${enrichedResult.result}`);
         this.options.database?.insertTestResult(enrichedResult, this.options.testSessionManager?.getActiveTestId() ?? null);
         this.options.lastResultStore?.set(enrichedResult);
         this.options.resultHistoryStore?.add(enrichedResult);

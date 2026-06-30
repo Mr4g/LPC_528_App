@@ -16,12 +16,14 @@ interface ScanAcceptedPayload {
   currentTest: CurrentTest;
   programStartRequest: ProgramStartRequest;
   programStart: ProgramStartResult;
+  activeTest?: TestSessionState | null;
 }
 
 interface ScanRejectedPayload {
   ok?: false;
   barcode: string;
   error: 'NO_MAPPING' | 'TEST_IN_PROGRESS';
+  code?: 'TEST_IN_PROGRESS';
   errorCode?: 'TEST_IN_PROGRESS';
   message: string;
   activeTest?: TestSessionState;
@@ -813,6 +815,7 @@ function App() {
         setLastAccepted(payload);
         setLastRejected(null);
         setStatus(payload.programStart.success ? 'program-selected' : 'start-error');
+        if (payload.activeTest) setTestSession(payload.activeTest);
         if (payload.programStart.success && !hasLiveCurveRef.current) resetChartForNewTest();
       });
 
@@ -953,7 +956,6 @@ function App() {
 
     setStatus('scanning');
     setLastRejected(null);
-    resetChartForNewTest();
 
     const response = await fetch('/api/scan', {
       method: 'POST',
@@ -972,7 +974,7 @@ function App() {
 
     if (!response.ok || !('programStart' in payload)) {
       const rejectedPayload = payload as ScanRejectedPayload;
-      if (rejectedPayload.errorCode === 'TEST_IN_PROGRESS') {
+      if (rejectedPayload.errorCode === 'TEST_IN_PROGRESS' || rejectedPayload.code === 'TEST_IN_PROGRESS') {
         setLastRejected(rejectedPayload);
         if (rejectedPayload.activeTest) setTestSession(rejectedPayload.activeTest);
       } else {
@@ -983,11 +985,13 @@ function App() {
       return;
     }
 
+    resetChartForNewTest();
     setLastAccepted(payload);
     setLastRejected(null);
     setBarcode('');
     setStatus(payload.programStart.success ? 'program-selected' : 'start-error');
-    focusBarcodeInput(0);
+    if (payload.activeTest) setTestSession(payload.activeTest);
+    if (!payload.programStart.success) focusBarcodeInput(0);
   }
 
   async function lpcAction(action: 'connect' | 'disconnect') {
@@ -1052,7 +1056,7 @@ function App() {
   const connectionClass = lpcStatus?.lastError ? 'connection-error' : `connection-${lpcStatus?.status ?? 'idle'}`;
   const displayedCurvePoints = curvePoints.length > 0 ? curvePoints : completedCurvePoints;
   const scanLocked = Boolean(testSession?.locked);
-  const scanStatusText = scanLocked ? 'Test w toku' : (status === 'program-selected' && lastAccepted ? `${lastAccepted.currentTest.programText} wybrany` : statusLabels[status]);
+  const scanStatusText = scanLocked ? 'Trwa test — poczekaj na wynik' : (status === 'program-selected' && lastAccepted ? `${lastAccepted.currentTest.programText} wybrany` : statusLabels[status]);
   const activeTestHelper = scanLocked ? [testSession?.programText, testSession?.barcode].filter(Boolean).join(' / ') : '';
   const resultsTable = resultHistory.length > 0 ? (
     <table className="results-table">
@@ -1210,13 +1214,13 @@ function App() {
               ref={barcodeInputRef}
               autoFocus
               disabled={scanLocked}
-              value={scanLocked ? 'Trwa test...' : barcode}
+              value={scanLocked ? 'Trwa test — poczekaj na wynik' : barcode}
               onChange={(event) => setBarcode(event.target.value)}
-              placeholder={scanLocked ? 'Trwa test...' : 'Zeskanuj barcode'}
+              placeholder={scanLocked ? 'Trwa test — poczekaj na wynik' : 'Zeskanuj barcode'}
             />
             {scanLocked && (
               <p className="scan-helper">
-                Poczekaj na wynik bieżącego testu{activeTestHelper ? <>: <strong>{activeTestHelper}</strong></> : '.'}
+                Trwa test — poczekaj na wynik{activeTestHelper ? <>: <strong>{activeTestHelper}</strong></> : '.'}
               </p>
             )}
             <button className="scan-submit" type="submit" disabled={status === 'scanning' || scanLocked}>Wyślij skan</button>
@@ -1234,10 +1238,10 @@ function App() {
             </div>
           )}
 
-          {lastRejected && lastRejected.error !== 'TEST_IN_PROGRESS' && (
-            <div className="scan-error">
+          {lastRejected && (
+            <div className={lastRejected.error === 'TEST_IN_PROGRESS' ? 'scan-helper' : 'scan-error'}>
               <strong>{lastRejected.error}</strong>
-              <span>{lastRejected.message}: {lastRejected.barcode}</span>
+              <span>{lastRejected.error === 'TEST_IN_PROGRESS' ? lastRejected.message : `${lastRejected.message}: ${lastRejected.barcode}`}</span>
             </div>
           )}
         </aside>

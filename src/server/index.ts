@@ -120,6 +120,7 @@ lpcTcpClient.on('reconnecting', (state) => {
   io.emit('lpc:reconnecting', state);
 });
 lpcTcpClient.on('error', (error, state) => {
+  if (testSessionManager.getStatus().locked) testSessionManager.fail(error.message, 'LPC_CONNECTION_ERROR');
   io.emit('lpc:error', { message: error.message, state });
 });
 lpcTcpClient.on('rawData', (data) => {

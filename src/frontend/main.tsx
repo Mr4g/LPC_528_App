@@ -117,6 +117,7 @@ declare global {
 
 type OperatorStatus = 'ready' | 'scanning' | 'program-selected' | 'no-mapping' | 'start-error';
 type UserRole = 'operator' | 'line_leader' | 'admin';
+type LabelPrintMode = 'ok_only' | 'ok_and_nok' | 'disabled';
 type ChartStatus = 'waiting' | 'live' | 'completed';
 type TestSessionStatus = 'idle' | 'program_selected' | 'starting' | 'running' | 'waiting_for_result' | 'completed' | 'timeout' | 'error';
 
@@ -161,10 +162,17 @@ interface ProgramMappingRecord {
   description: string | null;
   isActive: boolean;
   matchType: 'exact' | 'contains';
+  labelPrintMode: LabelPrintMode;
   createdAt: string;
   updatedAt: string;
   createdBy: string | null;
   updatedBy: string | null;
+}
+
+interface ZebraSettingsState {
+  enabledFromEnv: boolean;
+  autoPrintEnabled: boolean;
+  effectiveAutoPrintEnabled: boolean;
 }
 
 interface PublicUser extends AuthUser {
@@ -318,6 +326,8 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<UserRole>('operator');
   const [message, setMessage] = useState<string | null>(null);
+  const [zebraSettings, setZebraSettings] = useState<ZebraSettingsState | null>(null);
+  const [zebraSettingsMessage, setZebraSettingsMessage] = useState<string | null>(null);
 
   async function loadUsers() {
     const payload = await fetchJson<{ ok: true; users: PublicUser[] }>('/api/users');
@@ -426,15 +436,42 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
   const [programNumber, setProgramNumber] = useState(1);
   const [description, setDescription] = useState('');
   const [isActive, setIsActive] = useState(true);
+  const [labelPrintMode, setLabelPrintMode] = useState<LabelPrintMode>('ok_only');
   const [message, setMessage] = useState<string | null>(null);
+  const [zebraSettings, setZebraSettings] = useState<ZebraSettingsState | null>(null);
+  const [zebraSettingsMessage, setZebraSettingsMessage] = useState<string | null>(null);
 
   async function loadMappings() {
     const payload = await fetchJson<{ ok: true; mappings: ProgramMappingRecord[] }>('/api/program-mappings');
     if (payload?.mappings) setMappings(payload.mappings);
   }
 
+  async function loadZebraSettings() {
+    const payload = await fetchJson<{ ok: true } & ZebraSettingsState>('/api/zebra/settings');
+    if (payload) setZebraSettings(payload);
+  }
+
+  async function toggleZebraAutoPrint() {
+    if (!zebraSettings) return;
+    setZebraSettingsMessage(null);
+    const response = await fetch('/api/zebra/settings', {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ autoPrintEnabled: !zebraSettings.autoPrintEnabled }),
+    });
+    const payload = await response.json() as ({ ok: true } & ZebraSettingsState) | { ok: false; message?: string };
+    if (response.ok && payload.ok) {
+      setZebraSettings(payload);
+      setZebraSettingsMessage('Zapisano');
+    } else {
+      setZebraSettingsMessage('Nie udało się zmienić ustawienia');
+    }
+  }
+
   useEffect(() => {
     void loadMappings();
+    void loadZebraSettings();
   }, []);
 
   function resetForm() {
@@ -444,6 +481,7 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
     setProgramNumber(1);
     setDescription('');
     setIsActive(true);
+    setLabelPrintMode('ok_only');
   }
 
   function editMapping(mapping: ProgramMappingRecord) {
@@ -453,6 +491,7 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
     setProgramNumber(mapping.programNumber);
     setDescription(mapping.description ?? '');
     setIsActive(mapping.isActive);
+    setLabelPrintMode(mapping.labelPrintMode ?? 'ok_only');
   }
 
   async function saveMapping(event: FormEvent<HTMLFormElement>) {
@@ -475,7 +514,7 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
       method: editingId ? 'PATCH' : 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ barcodePattern: trimmedPattern, matchType, programNumber, description, isActive }),
+      body: JSON.stringify({ barcodePattern: trimmedPattern, matchType, programNumber, description, isActive, labelPrintMode }),
     });
     const payload = (await response.json()) as { ok: boolean; message?: string };
     setMessage(response.ok ? 'Mapowanie zapisane' : payload.message ?? 'Nie udało się zapisać mapowania');
@@ -501,6 +540,16 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
         </div>
         <button type="button" onClick={props.onBack}>Wróć do panelu</button>
       </header>
+      <section className="users-table-wrap">
+        <h2>Ustawienia Zebra</h2>
+        <p>Drukowanie etykiet: <strong>{zebraSettings?.effectiveAutoPrintEnabled ? 'WŁĄCZONE' : 'WYŁĄCZONE'}</strong></p>
+        <button type="button" onClick={() => void toggleZebraAutoPrint()} disabled={!zebraSettings || !zebraSettings.enabledFromEnv}>
+          {zebraSettings?.autoPrintEnabled ? 'Wyłącz automatyczne drukowanie' : 'Włącz automatyczne drukowanie'}
+        </button>
+        {!zebraSettings?.enabledFromEnv && <p className="empty-state">ZEBRA_PRINT_ON_RESULT=false w .env — przełącznik runtime nie uruchomi automatycznego druku.</p>}
+        {zebraSettingsMessage && <p className="login-error">{zebraSettingsMessage}</p>}
+      </section>
+
       <form className="user-form mapping-form" onSubmit={saveMapping}>
         <input value={barcodePattern} onChange={(event) => setBarcodePattern(event.target.value)} placeholder="Barcode / pattern" />
         <select value={matchType} onChange={(event) => setMatchType(event.target.value as 'exact' | 'contains')}>
@@ -511,6 +560,11 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
           {Array.from({ length: 31 }, (_, index) => index + 1).map((program) => <option key={program} value={program}>P{String(program).padStart(2, '0')}</option>)}
         </select>
         <input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Opis" />
+        <select value={labelPrintMode} onChange={(event) => setLabelPrintMode(event.target.value as LabelPrintMode)} aria-label="Tryb drukowania etykiety">
+          <option value="disabled">Nie drukuj</option>
+          <option value="ok_only">Tylko OK</option>
+          <option value="ok_and_nok">OK i NOK</option>
+        </select>
         <label className="inline-check"><input type="checkbox" checked={isActive} onChange={(event) => setIsActive(event.target.checked)} /> Aktywny</label>
         <button type="submit">{editingId ? 'Zapisz zmiany' : 'Dodaj mapowanie'}</button>
         {editingId && <button type="button" onClick={resetForm}>Anuluj</button>}
@@ -518,13 +572,14 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
       {message && <p className="login-error">{message}</p>}
       <section className="users-table-wrap">
         <table>
-          <thead><tr><th>Barcode / pattern</th><th>Typ</th><th>Program</th><th>Opis</th><th>Status</th><th>UpdatedAt</th><th>Akcje</th></tr></thead>
+          <thead><tr><th>Barcode / pattern</th><th>Typ</th><th>Program</th><th>Druk etykiety</th><th>Opis</th><th>Status</th><th>UpdatedAt</th><th>Akcje</th></tr></thead>
           <tbody>
             {mappings.map((mapping) => (
               <tr key={mapping.id}>
                 <td title={mapping.barcodePattern}>{mapping.barcodePattern}</td>
                 <td>{mapping.matchType === 'exact' ? 'Dokładne' : 'Zawiera'}</td>
                 <td>{mapping.programText}</td>
+                <td>{mapping.labelPrintMode === 'disabled' ? 'Nie drukuj' : mapping.labelPrintMode === 'ok_and_nok' ? 'OK i NOK' : 'Tylko OK'}</td>
                 <td title={mapping.description ?? ''}>{mapping.description ?? '-'}</td>
                 <td>{mapping.isActive ? 'aktywny' : 'nieaktywny'}</td>
                 <td>{formatDateTime(mapping.updatedAt)}</td>
@@ -570,6 +625,7 @@ function App() {
   const [forceRefreshResponse, setForceRefreshResponse] = useState<string | null>(null);
   const [diagnosticProgram, setDiagnosticProgram] = useState('1');
   const [programStartTestResponse, setProgramStartTestResponse] = useState<string | null>(null);
+  const [zebraStatusResponse, setZebraStatusResponse] = useState<string | null>(null);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [resultsOpen, setResultsOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -963,6 +1019,16 @@ function App() {
     await refreshLpcStatus();
   }
 
+  async function refreshZebraStatus() {
+    const response = await fetch('/api/zebra/status', { credentials: 'include' });
+    setZebraStatusResponse(JSON.stringify(await response.json(), null, 2));
+  }
+
+  async function testZebraPrint() {
+    const response = await fetch('/api/zebra/test-print', { method: 'POST', credentials: 'include' });
+    setZebraStatusResponse(JSON.stringify(await response.json(), null, 2));
+  }
+
   async function testProgramStart() {
     const response = await fetch('/api/programs/start', {
       method: 'POST',
@@ -1011,7 +1077,7 @@ function App() {
             <td title={formatDateTime(result.receivedAt)}>{formatDateTime(result.receivedAt)}</td>
             <td><span className={`result-badge ${getResultClass(result.result)}`}>{formatResultLabel(result.result)}</span></td>
             <td title={result.operatorLogin ?? '-'}>{result.operatorLogin ?? '-'}</td>
-            <td title={result.programText}>{result.programText}</td>
+            <td title={result.programText ?? '-'}>{result.programText}</td>
             <td title={result.barcode}>{result.barcode}</td>
             <td title={String(result.uniqueId ?? result.totalAbs)}>{result.uniqueId ?? result.totalAbs}</td>
             <td title={`${result.leakType} ${formatMeasurement(result.leakValue, result.leakUnit)}`}>{result.leakType} {formatMeasurement(result.leakValue, result.leakUnit)}</td>
@@ -1038,7 +1104,7 @@ function App() {
             <tr key={`preview-${result.receivedAt}-${result.uniqueId}`}>
               <td title={formatDateTime(result.receivedAt)}>{formatDateTime(result.receivedAt)}</td>
               <td><span className={`result-badge ${getResultClass(result.result)}`}>{formatResultLabel(result.result)}</span></td>
-              <td title={result.programText}>{result.programText}</td>
+              <td title={result.programText ?? '-'}>{result.programText}</td>
               <td title={result.barcode}>{result.barcode}</td>
               <td title={`${result.leakType} ${formatMeasurement(result.leakValue, result.leakUnit)}`}>
                 {result.leakType} {formatMeasurement(result.leakValue, result.leakUnit)}
@@ -1297,6 +1363,15 @@ function App() {
                 <textarea value={mockLine} onChange={(event) => setMockLine(event.target.value)} placeholder="Raw LPC line do testu UI" />
                 <button type="button" onClick={() => void sendMockLine()}>Wyślij mock line</button>
                 {mockLineResponse && <pre>{mockLineResponse}</pre>}
+              </section>
+
+              <section>
+                <h3>Zebra</h3>
+                <div className="lpc-actions">
+                  <button type="button" onClick={() => void refreshZebraStatus()}>Status Zebra</button>
+                  <button type="button" onClick={() => void testZebraPrint()}>Test print</button>
+                </div>
+                {zebraStatusResponse && <pre>{zebraStatusResponse}</pre>}
               </section>
 
               <section>

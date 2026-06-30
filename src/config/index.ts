@@ -9,7 +9,7 @@ const barcodeProgramMapSchema = z.preprocess((value: unknown) => {
   } catch {
     return value;
   }
-}, z.record(z.coerce.number().int().min(1).max(31))).default({});
+}, z.record(z.string(), z.coerce.number().int().min(1).max(31))).default({});
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -48,14 +48,36 @@ const envSchema = z.object({
   PROGRAM_START_MODE: z.enum(['mock', 'script']).default('mock'),
   PROGRAM_START_COMMAND: z.string().min(1).default('python3'),
   PROGRAM_START_SCRIPT_PATH: z.string().default(''),
+  PROGRAM_START_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
   BARCODE_PROGRAM_MAP: barcodeProgramMapSchema,
   SPLUNK_HEC_URL: z.string().url().optional().or(z.literal('')),
   SPLUNK_HEC_TOKEN: z.string().optional().or(z.literal('')),
   SPLUNK_INDEX: z.string().min(1).default('lpc528'),
   SPLUNK_SOURCE: z.string().min(1).default('lpc-528-app'),
   SPLUNK_SOURCETYPE: z.string().min(1).default('lpc:result'),
-  ZEBRA_HOST: z.string().min(1),
+  ZEBRA_ENABLED: z.coerce.boolean().default(false),
+  ZEBRA_HOST: z.string().min(1).default('127.0.0.1'),
   ZEBRA_PORT: z.coerce.number().int().positive().default(9100),
+  ZEBRA_PRINT_ON_RESULT: z.coerce.boolean().default(false),
+  ZEBRA_DPI: z.coerce.number().int().positive().default(203),
+  ZEBRA_LABEL_WIDTH_DOTS: z.coerce.number().int().positive().default(240),
+  ZEBRA_LABEL_HEIGHT_DOTS: z.coerce.number().int().positive().default(220),
+  ZEBRA_LABEL_OFFSET_X: z.coerce.number().int().nonnegative().default(0),
+  ZEBRA_LABEL_OFFSET_Y: z.coerce.number().int().nonnegative().default(0),
+  ZEBRA_TEXT_X: z.coerce.number().int().nonnegative().default(0),
+  ZEBRA_TEXT_WIDTH_DOTS: z.coerce.number().int().positive().default(240),
+  ZEBRA_FONT_LINE1_HEIGHT: z.coerce.number().int().positive().default(24),
+  ZEBRA_FONT_LINE1_WIDTH: z.coerce.number().int().positive().default(24),
+  ZEBRA_FONT_LINE2_HEIGHT: z.coerce.number().int().positive().default(24),
+  ZEBRA_FONT_LINE2_WIDTH: z.coerce.number().int().positive().default(24),
+  ZEBRA_FONT_LINE3_HEIGHT: z.coerce.number().int().positive().default(20),
+  ZEBRA_FONT_LINE3_WIDTH: z.coerce.number().int().positive().default(20),
+  ZEBRA_LINE1_Y: z.coerce.number().int().nonnegative().default(40),
+  ZEBRA_LINE2_Y: z.coerce.number().int().nonnegative().default(75),
+  ZEBRA_LINE3_Y: z.coerce.number().int().nonnegative().default(110),
+  ZEBRA_TEST_PRESSURE_LABEL: z.string().min(1).default('6 Bar'),
+  ZEBRA_COPIES: z.coerce.number().int().positive().default(1),
+  ZEBRA_CONNECT_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
   BACKUP_COMMAND: z.string().min(1),
   BACKUP_SCRIPT: z.string().min(1),
   BACKUP_REPORT: z.string().min(1).default('Chan Last 100'),

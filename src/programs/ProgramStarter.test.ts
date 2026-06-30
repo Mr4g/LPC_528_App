@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -46,11 +46,42 @@ describe('ScriptProgramStarter', () => {
     expect(result.exitCode).toBe(0);
   });
 
-  it('returns success=false when scriptPath is empty', async () => {
+  it('returns a clear failure when scriptPath is empty', async () => {
     const result = await new ScriptProgramStarter({ command: process.execPath, scriptPath: '' }).startProgram(request);
 
     expect(result.success).toBe(false);
-    expect(result.errorMessage).toContain('PROGRAM_START_SCRIPT_PATH is empty');
+    expect(result.errorCode).toBe('PROGRAM_START_SCRIPT_MISSING');
+    expect(result.message).toContain('PROGRAM_START_SCRIPT_PATH is empty');
+  });
+
+  it('returns a clear failure when script does not exist', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'lpc-program-starter-missing-'));
+    const missingScript = path.join(dir, 'missing.py');
+    const result = await new ScriptProgramStarter({ command: process.execPath, scriptPath: missingScript }).startProgram(request);
+
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe('PROGRAM_START_SCRIPT_MISSING');
+    expect(result.message).toBe(`Nie znaleziono skryptu startu LPC: ${missingScript}`);
+  });
+
+  it('returns a clear failure when scriptPath is not a file', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'lpc-program-starter-dir-'));
+    const scriptDir = path.join(dir, 'script-dir');
+    mkdirSync(scriptDir);
+    const result = await new ScriptProgramStarter({ command: process.execPath, scriptPath: scriptDir }).startProgram(request);
+
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe('PROGRAM_START_SCRIPT_MISSING');
+  });
+
+
+  it('returns a clear failure when command cannot be spawned', async () => {
+    const scriptPath = tempScript("process.stdout.write('never');");
+    const result = await new ScriptProgramStarter({ command: 'definitely-missing-python-command', scriptPath }).startProgram(request);
+
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe('PROGRAM_START_COMMAND_MISSING');
+    expect(result.message).toContain('Nie można uruchomić komendy PROGRAM_START_COMMAND=definitely-missing-python-command');
   });
 
   it('returns success=false and stdout/stderr when the process exits non-zero', async () => {
@@ -61,6 +92,8 @@ describe('ScriptProgramStarter', () => {
     expect(result.stdout).toBe('out');
     expect(result.stderr).toBe('err');
     expect(result.exitCode).toBe(2);
-    expect(result.errorMessage).toBeTruthy();
+    expect(result.errorCode).toBe('PROGRAM_START_SCRIPT_FAILED');
+    expect(result.message).toBe('Skrypt startu LPC zakończył się błędem. Szczegóły w logu backendu.');
   });
 });
+

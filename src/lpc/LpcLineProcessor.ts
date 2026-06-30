@@ -20,6 +20,7 @@ export interface EnrichedLpcResult extends LpcResult {
   currentTestProgram?: number;
   currentTestProgramText?: string;
   currentTestSelectedAt?: string;
+  labelPrintMode?: import('../shared/types').LabelPrintMode;
   operatorLogin?: string | null;
   operatorRole?: string | null;
 }
@@ -57,6 +58,7 @@ export interface LpcLineProcessorOptions {
   maxRawLines?: number;
   database?: AppDatabase;
   testSessionManager?: TestSessionManager;
+  onFinalResult?: (result: EnrichedLpcResult) => void | Promise<void>;
 }
 
 export class LpcLineProcessor {
@@ -132,6 +134,9 @@ export class LpcLineProcessor {
         this.options.lastResultStore?.set(enrichedResult);
         this.options.resultHistoryStore?.add(enrichedResult);
         this.options.testSessionManager?.complete();
+        void Promise.resolve(this.options.onFinalResult?.(enrichedResult)).catch((error) => {
+          console.error('[ZEBRA] Automatic print failed:', error instanceof Error ? error.message : error);
+        });
         this.lastResultAt = receivedAt;
         this.resultCount += 1;
         diagnostic.parsedAs = 'result';
@@ -206,6 +211,7 @@ export class LpcLineProcessor {
       currentTestSelectedAt: currentTest.selectedAt,
       operatorLogin: currentTest.operatorLogin ?? null,
       operatorRole: currentTest.operatorRole ?? null,
+      labelPrintMode: currentTest.labelPrintMode ?? 'ok_only',
       barcode: this.resolveBarcode(result, currentTest),
       program: currentTest.programText,
       programText: currentTest.programText,

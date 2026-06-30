@@ -118,7 +118,7 @@ export class TestSessionManager {
 
   private timeout(): void {
     if (!LOCKED_STATUSES.has(this.state.status)) return;
-    this.state = { ...this.state, status: 'timeout', locked: false, timeoutAt: new Date().toISOString(), message: 'Test przekroczył czas oczekiwania na wynik' };
+    this.state = { ...this.state, status: 'error', locked: false, timeoutAt: new Date().toISOString(), message: 'Program został wysłany do LPC, ale aplikacja nie otrzymała danych ze streamingu. Sprawdź połączenie Telnet/Interface Connection.' };
     this.persistAndEmit();
   }
 
@@ -131,7 +131,7 @@ export class TestSessionManager {
     this.clearNoDataWarning();
     this.noDataWarningHandle = setTimeout(() => {
       if (!LOCKED_STATUSES.has(this.state.status) || this.state.lastStreamAt) return;
-      this.state = { ...this.state, message: 'Brak danych z LPC' };
+      this.state = { ...this.state, message: 'Brak danych ze streamingu LPC po starcie programu.' };
       this.persistAndEmit();
     }, this.options.noDataWarningMs);
   }

@@ -699,3 +699,123 @@ Mapowania mogą edytować tylko role `line_leader` i `admin`; operator nie widzi
 ## Test results persistence
 
 Każdy finalny `lpc:result` jest zapisywany do tabeli `test_results`. Endpoint `GET /api/lpc/results` oraz pełniejszy `GET /api/test-results` czytają dane z DB, więc historia wyników i ostatni wynik są dostępne po restarcie IPC.
+
+## Drukowanie etykiet Zebra
+
+Sprawdzony fizycznie layout dla Zebra ZT231 to `PW 240`, `LL 220`, pozycje `Y 40/75/110`, fonty `24/24/20`. Etykieta Zebra jest drukowana bez ramki, bez `^GB`, bez linii poziomych i bez ozdobników. ZPL zawiera wyłącznie trzy wycentrowane linie tekstu:
+
+```text
+TEST OK/NOK - 6 Bar
+wyciek pa/s
+operator data
+```
+
+Przykład:
+
+```text
+TEST OK - 6 Bar
+7,253 pa/s
+GAZD 30.06.2026
+```
+
+Domyślny ZPL dla test print przy `ZEBRA_COPIES=1`:
+
+```zpl
+^XA
+^CI28
+^PW240
+^LL220
+^LH0,0
+^FO0,40^A0N,24,24^FB240,1,0,C,0^FDTEST OK - 6 Bar^FS
+^FO0,75^A0N,24,24^FB240,1,0,C,0^FD7,253 pa/s^FS
+^FO0,110^A0N,20,20^FB240,1,0,C,0^FDGAZD 30.06.2026^FS
+^XZ
+```
+
+### Konfiguracja
+
+```env
+ZEBRA_ENABLED=true
+ZEBRA_HOST=192.168.200.60
+ZEBRA_PORT=9100
+ZEBRA_PRINT_ON_RESULT=true
+ZEBRA_DPI=203
+ZEBRA_LABEL_WIDTH_DOTS=240
+ZEBRA_LABEL_HEIGHT_DOTS=220
+ZEBRA_LABEL_OFFSET_X=0
+ZEBRA_LABEL_OFFSET_Y=0
+ZEBRA_TEXT_X=0
+ZEBRA_TEXT_WIDTH_DOTS=240
+ZEBRA_FONT_LINE1_HEIGHT=24
+ZEBRA_FONT_LINE1_WIDTH=24
+ZEBRA_FONT_LINE2_HEIGHT=24
+ZEBRA_FONT_LINE2_WIDTH=24
+ZEBRA_FONT_LINE3_HEIGHT=20
+ZEBRA_FONT_LINE3_WIDTH=20
+ZEBRA_LINE1_Y=40
+ZEBRA_LINE2_Y=75
+ZEBRA_LINE3_Y=110
+ZEBRA_TEST_PRESSURE_LABEL=6 Bar
+ZEBRA_COPIES=1
+```
+
+### Polityka drukowania per barcode
+
+Każde mapowanie barcode/program ma `labelPrintMode`:
+
+- `disabled` — nie drukuj automatycznie,
+- `ok_only` — drukuj tylko wynik OK / ACCEPT,
+- `ok_and_nok` — drukuj wynik OK / ACCEPT i NOK / REJECT.
+
+Nowe i migrowane mapowania mają domyślnie `ok_only`. Line leader/admin może dodatkowo globalnie wyłączyć lub włączyć automatyczny druk w UI `Programy / Ustawienia Zebra`; przełącznik zapisuje runtime setting w SQLite, nie wymaga restartu i nie zmienia `.env`. Tryb ustawisz w ekranie `Programy / Mapowanie barcode` w polu `Druk etykiety`.
+
+### Kalibracja
+
+Endpoint kalibracji drukuje bez ramki tekst testowy `TEST OK - 6 Bar`, `7,253 pa/s`, `GAZD 30.06.2026`. Dostępne presety: `tiny`, `small`, `medium`, `wide`, `custom`.
+
+```bash
+curl -X POST http://localhost:3000/api/zebra/test-print-calibration \
+  -H "Content-Type: application/json" \
+  -d '{"preset":"tiny"}'
+```
+
+### Preview ZPL
+
+Preview zwraca dokładnie ZPL i layout, które zostałyby użyte do wydruku, ale nie drukuje fizycznie.
+
+```bash
+curl -X POST http://localhost:3000/api/zebra/preview-zpl
+```
+
+### Test ręczny
+
+```bash
+curl -X POST http://localhost:3000/api/zebra/test-print \
+  -H "Content-Type: application/json" \
+  -d '{"status":"OK","pressure":"6 Bar","leak":"7,253 pa/s","operator":"GAZD","date":"30.06.2026"}'
+```
+
+Jeśli drukarka nie drukuje, sprawdź czy `ZEBRA_ENABLED=true`, czy IP drukarki Zebra ZT231 jest zgodne z `ZEBRA_HOST`, czy port `9100` jest osiągalny z backendu oraz czy drukarka przyjmuje raw TCP/ZPL.
+
+## Skrypty Windows IPC
+
+Aplikacja w trybie `PROGRAM_START_MODE=script` wymaga, żeby lokalne skrypty były dostępne po checkout/resecie repozytorium:
+
+- `scripts/eip_start_program.py` — uruchamiany przez backend jako `PROGRAM_START_COMMAND PROGRAM_START_SCRIPT_PATH <programNumber>` do startu programu LPC,
+- `scripts/lpc_backup_csv.py` — helper backupu CSV używany przez konfigurację backupu.
+
+Na Windows IPC ręczny test startu programu P01:
+
+```powershell
+py "C:\Projekty\LPC528_App\LPC_528_App\scripts\eip_start_program.py" 1
+```
+
+Oczekiwany wynik:
+
+```text
+OK: Program P01 sent to LPC
+```
+
+Jeśli `PROGRAM_START_SCRIPT_PATH` nie istnieje albo nie wskazuje pliku, backend zwraca konkretny błąd `Nie znaleziono skryptu startu LPC: ...`. Jeśli nie da się uruchomić komendy z `PROGRAM_START_COMMAND`, backend zwraca komunikat o sprawdzeniu instalacji Pythona. Jeśli skrypt kończy się kodem różnym od zera, backend loguje `stdout`, `stderr` i `exitCode`, a UI pokazuje błąd skryptu.
+
+Po udanym starcie programu aktywny test czeka na streaming LPC. Jeśli w czasie `ACTIVE_TEST_NO_DATA_WARNING_MS` nie pojawi się stream, UI pokaże ostrzeżenie `Brak danych ze streamingu LPC po starcie programu.`. Jeśli do `ACTIVE_TEST_TIMEOUT_MS` nie przyjdzie stream ani finalny wynik, test przechodzi w błąd, skanowanie zostaje odblokowane, a UI pokazuje `Program został wysłany do LPC, ale aplikacja nie otrzymała danych ze streamingu. Sprawdź połączenie Telnet/Interface Connection.`.

@@ -1,9 +1,10 @@
 import crypto from 'node:crypto';
-import type { BarcodeScan } from '../shared/types';
+import type { BarcodeScan, LabelPrintMode } from '../shared/types';
 import type { AppDatabase } from '../server/db/database';
 import { mapBarcodeToProgram, type BarcodeProgramMappingResult } from '../scanner/mapBarcodeToProgram';
 
 export type ProgramMappingMatchType = 'exact' | 'contains';
+export type { LabelPrintMode };
 
 export interface ProgramMappingRecord {
   id: string;
@@ -13,6 +14,7 @@ export interface ProgramMappingRecord {
   description: string | null;
   isActive: boolean;
   matchType: ProgramMappingMatchType;
+  labelPrintMode: LabelPrintMode;
   createdAt: string;
   updatedAt: string;
   createdBy: string | null;
@@ -25,6 +27,7 @@ export interface ProgramMappingInput {
   description?: unknown;
   isActive?: unknown;
   matchType?: unknown;
+  labelPrintMode?: unknown;
 }
 
 export function formatProgramText(programNumber: number): string {
@@ -35,12 +38,17 @@ function isMatchType(value: unknown): value is ProgramMappingMatchType {
   return value === 'exact' || value === 'contains';
 }
 
+export function isLabelPrintMode(value: unknown): value is LabelPrintMode {
+  return value === 'ok_only' || value === 'ok_and_nok' || value === 'disabled';
+}
+
 function validateProgramMappingInput(input: ProgramMappingInput, partial = false): {
   barcodePattern?: string;
   programNumber?: number;
   description?: string | null;
   isActive?: boolean;
   matchType?: ProgramMappingMatchType;
+  labelPrintMode?: LabelPrintMode;
 } {
   const output: {
     barcodePattern?: string;
@@ -48,6 +56,7 @@ function validateProgramMappingInput(input: ProgramMappingInput, partial = false
     description?: string | null;
     isActive?: boolean;
     matchType?: ProgramMappingMatchType;
+    labelPrintMode?: LabelPrintMode;
   } = {};
 
   if (!partial || input.barcodePattern !== undefined) {
@@ -66,6 +75,12 @@ function validateProgramMappingInput(input: ProgramMappingInput, partial = false
     const matchType = input.matchType ?? 'exact';
     if (!isMatchType(matchType)) throw new Error('Typ dopasowania jest wymagany.');
     output.matchType = matchType;
+  }
+
+  if (!partial || input.labelPrintMode !== undefined) {
+    const labelPrintMode = input.labelPrintMode ?? 'ok_only';
+    if (!isLabelPrintMode(labelPrintMode)) throw new Error('Tryb drukowania etykiet jest wymagany.');
+    output.labelPrintMode = labelPrintMode;
   }
 
   if (input.description !== undefined) {
@@ -106,6 +121,7 @@ export class ProgramMappingService {
       description: data.description ?? null,
       isActive: data.isActive ?? true,
       matchType: data.matchType ?? 'exact',
+      labelPrintMode: data.labelPrintMode ?? 'ok_only',
       createdAt: now,
       updatedAt: now,
       createdBy: actorLogin,
@@ -170,6 +186,7 @@ export class ProgramMappingService {
         selectedAt,
         mappingId: match.id,
         matchType: match.matchType,
+        labelPrintMode: match.labelPrintMode,
       },
       programStartRequest: {
         type: 'program_start_request',
@@ -180,6 +197,7 @@ export class ProgramMappingService {
         selectedAt,
         mappingId: match.id,
         matchType: match.matchType,
+        labelPrintMode: match.labelPrintMode,
       },
     };
   }

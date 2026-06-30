@@ -23,6 +23,10 @@ import { createTestResultsRouter } from './test-results/testResultsRouter';
 import { TestSessionManager } from './test-session/testSessionManager';
 import { createTestSessionRouter } from './test-session/testSessionRouter';
 import { createUsersRouter } from './users/usersRouter';
+import { ZebraClient } from '../zebra/zebraClient';
+import { createZebraConfig } from '../zebra/zebraConfig';
+import { createZebraRouter } from '../zebra/zebraRouter';
+import { ZebraService } from '../zebra/zebraService';
 
 const config = loadConfig();
 const app = express();
@@ -61,6 +65,7 @@ const programStarter = createProgramStarter({
   mode: config.PROGRAM_START_MODE,
   command: config.PROGRAM_START_COMMAND,
   scriptPath: config.PROGRAM_START_SCRIPT_PATH,
+  timeoutMs: config.PROGRAM_START_TIMEOUT_MS,
 });
 const lpcTcpClient = new LpcTcpClient({
   host: config.LPC_HOST,
@@ -81,6 +86,16 @@ const lpcCurveBuffer = new LpcTestCurveBuffer({
 });
 const lastResultStore = new LastResultStore();
 const resultHistoryStore = new ResultHistoryStore(50);
+const zebraConfig = createZebraConfig(config);
+const getZebraRuntimeAutoPrintEnabled = () => {
+  const setting = database.getAppSetting('zebra.autoPrintEnabled');
+  return setting ? setting.value !== 'false' : zebraConfig.printOnResult;
+};
+const zebraService = new ZebraService(
+  zebraConfig,
+  new ZebraClient({ host: zebraConfig.host, port: zebraConfig.port, timeoutMs: zebraConfig.connectTimeoutMs }),
+  getZebraRuntimeAutoPrintEnabled,
+);
 const persistedResults = database.listTestResults({ limit: 50 }).results.map((result) => ({ ...result, currentTestValid: false }));
 persistedResults.slice().reverse().forEach((result) => resultHistoryStore.add(result));
 const persistedLastResult = database.getLastTestResult();
@@ -99,6 +114,9 @@ const lpcLineProcessor = new LpcLineProcessor({
   debugPipeline: config.LPC_DEBUG_PIPELINE,
   database,
   testSessionManager,
+  onFinalResult: async (result) => {
+    await zebraService.printResultLabel(result, { operatorLogin: result.operatorLogin, auto: true });
+  },
 });
 
 lpcTcpClient.on('status', (state) => {
@@ -143,6 +161,7 @@ app.use('/api/users', createUsersRouter(authService));
 app.use('/api/test-results', createTestResultsRouter(database));
 app.use('/api/test-session', createTestSessionRouter(testSessionManager));
 app.use('/api/backup', createBackupRouter());
+app.use('/api/zebra', createZebraRouter({ zebraService, lastResultStore, resultHistoryStore, database }));
 app.use('/api/programs', requireAuth, createProgramsRouter({ config, programStarter }));
 app.use('/api/program-mappings', createProgramMappingsRouter(programMappingService));
 app.use('/api/lpc', createLpcRouter({

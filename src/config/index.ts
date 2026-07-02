@@ -1,6 +1,19 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
+
+export function parseEnvBool(value: string | undefined, defaultValue: boolean): boolean {
+  if (value == null || value.trim() === '') return defaultValue;
+  const normalized = value.trim().toLowerCase();
+  if (['true', '1', 'yes', 'y', 'on'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'n', 'off'].includes(normalized)) return false;
+  return defaultValue;
+}
+
+function envBool(defaultValue: boolean) {
+  return z.preprocess((value) => typeof value === 'string' ? parseEnvBool(value, defaultValue) : value, z.boolean()).default(defaultValue);
+}
+
 const barcodeProgramMapSchema = z.preprocess((value: unknown) => {
   if (typeof value !== 'string') return value;
 
@@ -63,7 +76,7 @@ const envSchema = z.object({
   SPLUNK_SOURCE: z.string().min(1).default('LPC-528-01'),
   SPLUNK_SOURCETYPE: z.string().min(1).default('_json'),
   SPLUNK_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
-  SPLUNK_VERIFY_TLS: z.coerce.boolean().default(true),
+  SPLUNK_VERIFY_TLS: envBool(true),
   SPLUNK_SEND_RESULT: z.coerce.boolean().default(true),
   SPLUNK_SEND_CURVE: z.coerce.boolean().default(true),
   SPLUNK_BUFFER_ENABLED: z.coerce.boolean().default(true),

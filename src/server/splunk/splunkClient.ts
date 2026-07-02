@@ -44,7 +44,7 @@ export class SplunkClient {
 
   constructor(private readonly config: SplunkRuntimeConfig) {
     this.normalizedUrl = config.url ? normalizeSplunkHecUrl(config.url) : '';
-    if (config.enabled) console.info(`[SPLUNK] normalizedUrl=${this.normalizedUrl} verifyTls=${config.verifyTls}`);
+    if (config.enabled) console.info(`[SPLUNK] config enabled=${config.enabled} configured=${isSplunkConfigured(config)} verifyTls=${config.verifyTls} urlConfigured=${Boolean(config.url)} tokenConfigured=${Boolean(config.token)}`);
   }
 
   getStatus() {
@@ -65,6 +65,7 @@ export class SplunkClient {
     if (!isSplunkConfigured(this.config)) return { ok: false, error: 'Splunk HEC URL or token is not configured' };
 
     const started = Date.now();
+    console.log(`[SPLUNK] tls verify=${this.config.verifyTls}`);
     const body = JSON.stringify(envelope);
     return new Promise<SplunkSendResult>((resolve) => {
       const url = new URL(this.normalizedUrl);

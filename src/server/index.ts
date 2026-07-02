@@ -43,7 +43,7 @@ configureAuthCookies({
   secure: config.AUTH_COOKIE_SECURE,
   sameSite: config.AUTH_COOKIE_SAME_SITE,
 });
-const authService = new AuthService(database, config.AUTH_SESSION_SECRET, authCookieMaxAgeMs);
+const authService = new AuthService(database, config.AUTH_SESSION_SECRET, authCookieMaxAgeMs, config.CARD_UID_PATTERN, config.AUTH_TEST_IDLE_LOGOUT_MINUTES * 60 * 1000);
 const adminSeed = config.AUTH_RESET_DEFAULT_ADMIN && config.NODE_ENV !== 'production'
   ? authService.resetDefaultAdminFromEnv(config.DEFAULT_ADMIN_LOGIN, config.DEFAULT_ADMIN_PASSWORD)
   : authService.seedDefaultAdmin(config.DEFAULT_ADMIN_LOGIN, config.DEFAULT_ADMIN_PASSWORD);
@@ -71,6 +71,7 @@ const testSessionManager = new TestSessionManager(database, io, {
   activeTestTimeoutMs: config.ACTIVE_TEST_TIMEOUT_MS,
   noDataWarningMs: config.ACTIVE_TEST_NO_DATA_WARNING_MS,
   onEnded: (session, reason) => {
+    authService.markTestActivity(session.operatorUserId);
     const envelope = buildSplunkErrorEnvelope(splunkConfig, {
       session,
       reason,
@@ -119,6 +120,7 @@ const lpcLineProcessor = new LpcLineProcessor({
   debugLines: config.LPC_DEBUG_LINES,
   debugPipeline: config.LPC_DEBUG_PIPELINE,
   database,
+  authService,
   testSessionManager,
   zebraPrinter,
   zebraEnabled: config.ZEBRA_ENABLED,
@@ -166,6 +168,8 @@ app.use('/api/auth', createAuthRouter(authService, {
   nodeEnv: config.NODE_ENV,
   authDebug: config.AUTH_DEBUG,
   resetDefaultAdmin: config.AUTH_RESET_DEFAULT_ADMIN && config.NODE_ENV !== 'production',
+  cardLoginEnabled: config.CARD_LOGIN_ENABLED,
+  testSessionManager,
 }));
 app.use('/api/users', createUsersRouter(authService));
 app.use('/api/test-results', createTestResultsRouter(database));
@@ -185,7 +189,7 @@ app.use('/api/lpc', createLpcRouter({
   database,
   getSocketClientsCount: () => io.engine.clientsCount,
 }));
-app.use('/api', createScannerRouter({ config, io, programStarter, currentTestStore, programMappingService, testSessionManager }));
+app.use('/api', createScannerRouter({ config, io, programStarter, currentTestStore, programMappingService, testSessionManager, authService }));
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'lpc-528-app' });

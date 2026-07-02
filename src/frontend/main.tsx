@@ -144,6 +144,7 @@ interface TestSessionState {
   barcode: string | null;
   programNumber: number | null;
   programText: string | null;
+  operatorUserId: string | null;
   operatorLogin: string | null;
   startedAt: string | null;
   lastStreamAt: string | null;
@@ -190,6 +191,9 @@ interface PublicUser extends AuthUser {
   updatedAt: string;
   lastLoginAt: string | null;
   createdBy: string | null;
+  cardUidLast4: string | null;
+  cardMask: string | null;
+  lastTestAt: string | null;
 }
 
 const statusLabels: Record<OperatorStatus, string> = {
@@ -202,6 +206,10 @@ const statusLabels: Record<OperatorStatus, string> = {
 
 const showDiagnostics = ((import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SHOW_DIAGNOSTICS ?? 'false') === 'true';
 const LOGIN_REGEX = /^[A-Za-z]{3,5}$/;
+const CARD_UID_REGEX = /^\d{8}$/;
+const CARD_SCAN_IDLE_MS = 200;
+function normalizeCardScanInput(value: string): string { return value.trim().replace(/[\r\n]/g, ''); }
+function maskCardUid(value: string): string { return `****${value.slice(-4)}`; }
 
 function getInitialRoute(): string {
   return ['/login', '/admin/users', '/admin/programs'].includes(window.location.pathname) ? window.location.pathname : '/operator';
@@ -285,7 +293,39 @@ function buildCurveSignature(points: LpcCurvePoint[]): string {
 function LoginPage(props: { onLoggedIn: (user: AuthUser) => void }) {
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
+  const [cardBuffer, setCardBuffer] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const idleTimerRef = useRef<number | null>(null);
+
+  async function submitCard(uidInput: string) {
+    const cardUid = normalizeCardScanInput(uidInput);
+    if (!cardUid) return;
+    setCardBuffer('');
+    if (!CARD_UID_REGEX.test(cardUid)) {
+      setError('Nieznana karta. Przyłóż przypisaną kartę lub zaloguj hasłem.');
+      return;
+    }
+    const response = await fetch('/api/auth/card-login', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cardUid }),
+    });
+    const payload = (await response.json()) as { ok: boolean; user?: AuthUser; message?: string; error?: string };
+    if (!response.ok || !payload.user) {
+      setError(payload.message ?? payload.error ?? 'Nieznana karta. Przyłóż przypisaną kartę lub zaloguj hasłem.');
+      return;
+    }
+    setError(null);
+    props.onLoggedIn(payload.user);
+  }
+
+  function onCardInput(value: string) {
+    setCardBuffer(value);
+    if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = window.setTimeout(() => void submitCard(value), CARD_SCAN_IDLE_MS);
+  }
 
   async function submitLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -315,16 +355,31 @@ function LoginPage(props: { onLoggedIn: (user: AuthUser) => void }) {
 
   return (
     <main className="login-shell">
-      <form className="login-card" onSubmit={submitLogin}>
+      <div className="login-card">
         <span className="eyebrow">LPC-528</span>
-        <h1>Logowanie operatora</h1>
-        <label>Login / skrót osobowy</label>
-        <input className="auth-input" autoFocus value={login} onChange={(event) => setLogin(event.target.value.toUpperCase())} placeholder="Login" />
-        <label>Hasło</label>
-        <input className="auth-input" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Hasło" />
+        <h1>Przyłóż kartę operatora</h1>
+        <p>ELATEC TWN4 wpisuje UID jak klawiatura i zatwierdza Enterem.</p>
+        <input
+          className="auth-input"
+          autoFocus
+          value={cardBuffer}
+          onChange={(event) => onCardInput(event.target.value)}
+          onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void submitCard(cardBuffer); } }}
+          placeholder="Przyłóż kartę"
+          inputMode="numeric"
+        />
         {error && <p className="login-error">{error}</p>}
-        <button type="submit">Zaloguj</button>
-      </form>
+        <button type="button" onClick={() => setPasswordVisible((visible) => !visible)}>Nie masz karty? Zaloguj hasłem</button>
+        {passwordVisible && (
+          <form className="password-fallback" onSubmit={submitLogin}>
+            <label>Login / skrót osobowy</label>
+            <input className="auth-input" value={login} onChange={(event) => setLogin(event.target.value.toUpperCase())} placeholder="Login" />
+            <label>Hasło</label>
+            <input className="auth-input" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Hasło" />
+            <button type="submit">Zaloguj hasłem</button>
+          </form>
+        )}
+      </div>
     </main>
   );
 }
@@ -334,6 +389,7 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<UserRole>('operator');
+  const [cardUid, setCardUid] = useState('');
   const [message, setMessage] = useState<string | null>(null);
 
   async function loadUsers() {
@@ -362,7 +418,7 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ login: normalizedLogin, password, role }),
+      body: JSON.stringify({ login: normalizedLogin, password, role, cardUid: cardUid.trim() || undefined }),
     });
     const payload = (await response.json()) as { ok: boolean; message?: string };
     setMessage(response.ok ? 'Użytkownik dodany.' : payload.message ?? 'Nie udało się dodać użytkownika.');
@@ -370,12 +426,28 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
       setLogin('');
       setPassword('');
       setRole('operator');
+      setCardUid('');
       await loadUsers();
     }
   }
 
   async function userAction(id: string, action: 'enable' | 'disable') {
     await fetch(`/api/users/${id}/${action}`, { method: 'PATCH', credentials: 'include' });
+    await loadUsers();
+  }
+
+  async function changeCard(id: string) {
+    const uid = window.prompt('Przyłóż kartę albo wpisz UID (np. 05389148)');
+    if (!uid) return;
+    const response = await fetch(`/api/users/${id}/card`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cardUid: uid }) });
+    const payload = (await response.json()) as { ok: boolean; message?: string };
+    setMessage(response.ok ? `Karta odczytana: ${maskCardUid(normalizeCardScanInput(uid))}` : payload.message ?? 'Nie udało się przypisać karty.');
+    await loadUsers();
+  }
+
+  async function removeCard(id: string) {
+    if (!window.confirm('Usunąć kartę użytkownika?')) return;
+    await fetch(`/api/users/${id}/card`, { method: 'DELETE', credentials: 'include' });
     await loadUsers();
   }
 
@@ -407,22 +479,27 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
           <option value="operator">operator</option>
           {props.user.role === 'admin' && <option value="line_leader">line_leader</option>}
         </select>
+        <input value={cardUid} onChange={(event) => setCardUid(normalizeCardScanInput(event.target.value))} onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault(); }} placeholder="Przyłóż kartę (opcjonalnie)" inputMode="numeric" />
+        {cardUid && <span className="settings-save-status ok-text">Karta odczytana: {maskCardUid(cardUid)}</span>}
         <button type="submit">Dodaj użytkownika</button>
       </form>
       {message && <p className="login-error">{message}</p>}
       <section className="users-table-wrap">
         <table>
-          <thead><tr><th>Login</th><th>Rola</th><th>Status</th><th>Utworzono</th><th>Ostatnie logowanie</th><th>Akcje</th></tr></thead>
+          <thead><tr><th>Login</th><th>Rola</th><th>Status</th><th>Karta</th><th>Utworzono</th><th>Ostatnie logowanie</th><th>Akcje</th></tr></thead>
           <tbody>
             {users.map((item) => (
               <tr key={item.id}>
                 <td>{item.login}</td>
                 <td>{item.role}</td>
                 <td>{item.isActive ? 'aktywny' : 'nieaktywny'}</td>
+                <td>{item.cardMask ?? '-'}</td>
                 <td>{formatDateTime(item.createdAt)}</td>
                 <td>{formatDateTime(item.lastLoginAt)}</td>
                 <td>
                   <button type="button" onClick={() => void resetPassword(item.id)}>Resetuj hasło</button>
+                  <button type="button" onClick={() => void changeCard(item.id)}>Zmień kartę</button>
+                  {item.cardMask && <button type="button" onClick={() => void removeCard(item.id)}>Usuń kartę</button>}
                   <button type="button" onClick={() => void userAction(item.id, item.isActive ? 'disable' : 'enable')}>{item.isActive ? 'Dezaktywuj' : 'Aktywuj'}</button>
                 </td>
               </tr>
@@ -975,6 +1052,31 @@ function App() {
     };
   }, []);
 
+  async function handleCardAction(cardUid: string): Promise<boolean> {
+    const response = await fetch('/api/auth/card-action', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cardUid }) });
+    const payload = (await response.json()) as { ok: boolean; action?: 'LOGIN' | 'LOGGED_OUT' | 'SWITCHED_USER' | 'UNKNOWN_CARD' | 'TEST_IN_PROGRESS'; message?: string; user?: AuthUser | null };
+    if (!response.ok && payload.action === 'UNKNOWN_CARD') return false;
+    if (payload.action === 'LOGGED_OUT') {
+      setAuthUser(null);
+      setBarcode('');
+      navigateTo('/login', setRoute);
+      return true;
+    }
+    if (payload.user) {
+      setAuthUser(payload.user);
+      setBarcode('');
+      focusBarcodeInput(100);
+      return true;
+    }
+    if (payload.message) {
+      setLastRejected({ barcode: cardUid, error: 'TEST_IN_PROGRESS', errorCode: 'TEST_IN_PROGRESS', message: payload.message, activeTest: testSession ?? undefined });
+      setBarcode('');
+      focusBarcodeInput(0);
+      return true;
+    }
+    return false;
+  }
+
   async function submitScan(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!authUser) {
@@ -995,6 +1097,10 @@ function App() {
     if (!trimmedBarcode) {
       focusBarcodeInput(0);
       return;
+    }
+    if (CARD_UID_REGEX.test(trimmedBarcode)) {
+      const handledAsCard = await handleCardAction(trimmedBarcode);
+      if (handledAsCard) return;
     }
 
     setStatus('scanning');

@@ -15,6 +15,7 @@ export interface TestSessionState {
   barcode: string | null;
   programNumber: number | null;
   programText: string | null;
+  operatorUserId: string | null;
   operatorLogin: string | null;
   startedAt: string | null;
   lastStreamAt: string | null;
@@ -72,6 +73,7 @@ export class TestSessionManager {
       barcode: currentTest.barcode,
       programNumber: currentTest.program,
       programText: currentTest.programText,
+      operatorUserId: currentTest.operatorUserId ?? null,
       operatorLogin: currentTest.operatorLogin ?? null,
       startedAt: now,
       lastStreamAt: null,
@@ -177,14 +179,14 @@ export class TestSessionManager {
   }
 
   private idle(): TestSessionState {
-    return { ok: true, status: 'idle', locked: false, activeTestId: null, barcode: null, programNumber: null, programText: null, operatorLogin: null, startedAt: null, lastStreamAt: null, completedAt: null, timeoutAt: null, message: null };
+    return { ok: true, status: 'idle', locked: false, activeTestId: null, barcode: null, programNumber: null, programText: null, operatorUserId: null, operatorLogin: null, startedAt: null, lastStreamAt: null, completedAt: null, timeoutAt: null, message: null };
   }
 
   private fromStored(stored: StoredTestSession, status: TestSessionStatus, locked: boolean, message: string | null): TestSessionState {
-    return { ok: true, status, locked, activeTestId: stored.id, barcode: stored.barcode, programNumber: stored.programNumber, programText: stored.programText, operatorLogin: stored.operatorLogin, startedAt: stored.startedAt, lastStreamAt: stored.lastStreamAt, completedAt: stored.completedAt, timeoutAt: stored.timeoutAt, message };
+    return { ok: true, status, locked, activeTestId: stored.id, barcode: stored.barcode, programNumber: stored.programNumber, programText: stored.programText, operatorUserId: stored.operatorUserId, operatorLogin: stored.operatorLogin, startedAt: stored.startedAt, lastStreamAt: stored.lastStreamAt, completedAt: stored.completedAt, timeoutAt: stored.timeoutAt, message };
   }
 
   private toStoredSession(state = this.state): StoredTestSession {
-    return { id: state.activeTestId ?? 'idle', status: state.status, barcode: state.barcode, programNumber: state.programNumber, programText: state.programText, operatorLogin: state.operatorLogin, startedAt: state.startedAt, completedAt: state.completedAt, lastStreamAt: state.lastStreamAt, timeoutAt: state.timeoutAt, message: state.message };
+    return { id: state.activeTestId ?? 'idle', status: state.status, barcode: state.barcode, programNumber: state.programNumber, programText: state.programText, operatorUserId: state.operatorUserId, operatorLogin: state.operatorLogin, startedAt: state.startedAt, completedAt: state.completedAt, lastStreamAt: state.lastStreamAt, timeoutAt: state.timeoutAt, message: state.message };
   }
 }

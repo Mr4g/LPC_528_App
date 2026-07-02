@@ -4,6 +4,7 @@ import type { CurrentTestStore } from '../scanner/currentTestStore';
 import type { LastResultStore } from './LastResultStore';
 import type { ResultHistoryStore } from './ResultHistoryStore';
 import type { AppDatabase } from '../server/db/database';
+import type { AuthService } from '../server/auth/authService';
 import type { TestSessionManager } from '../server/test-session/testSessionManager';
 import { isIgnoredLpcLine, isInterfaceSelectionPrompt } from './lpcFrameFilters';
 import { normalizeLpcLine } from './normalizeLpcLine';
@@ -61,6 +62,7 @@ export interface LpcLineProcessorOptions {
   debugPipeline?: boolean;
   maxRawLines?: number;
   database?: AppDatabase;
+  authService?: AuthService;
   testSessionManager?: TestSessionManager;
   zebraPrinter?: ZebraPrinter;
   zebraEnabled?: boolean;
@@ -146,6 +148,7 @@ export class LpcLineProcessor {
         this.options.lastResultStore?.set(enrichedResult);
         this.options.resultHistoryStore?.add(enrichedResult);
         this.options.testSessionManager?.complete();
+        this.options.authService?.markTestActivity(activeSessionBeforeComplete?.operatorUserId);
         void this.autoPrint(enrichedResult);
         this.sendSplunkResult(enrichedResult, activeSessionBeforeComplete, completedCurve.points);
         this.lastResultAt = receivedAt;

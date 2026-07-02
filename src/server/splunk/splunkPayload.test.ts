@@ -34,7 +34,7 @@ describe('buildSplunkResultEnvelope', () => {
   it('includes test metadata, operator and full curve point package', () => {
     const envelope = buildSplunkResultEnvelope(config, {
       result,
-      session: { ok: true, status: 'running', locked: true, activeTestId: 'test-1', barcode: '5901234123457', programNumber: 1, programText: 'P01', operatorLogin: 'ADM', startedAt: '2026-06-30T10:00:00.000Z', lastStreamAt: null, completedAt: null, timeoutAt: null, message: null },
+      session: { ok: true, status: 'running', locked: true, activeTestId: 'test-1', barcode: '5901234123457', programNumber: 1, programText: 'P01', operatorUserId: 'user-1', operatorLogin: 'ADM', startedAt: '2026-06-30T10:00:00.000Z', lastStreamAt: null, completedAt: null, timeoutAt: null, message: null },
       curvePoints: [{ elapsedTimeSec: 0.1, remainingTimeSec: 1, pressureBar: 0.001, pressureMbar: 1, segment: 'raw-stream' }],
       config: { LPC_HOST: '192.0.2.10', LPC_PORT: 23, LPC_INTERFACE_SELECTION: '1' },
     });

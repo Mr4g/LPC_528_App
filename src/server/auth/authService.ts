@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import type { AppDatabase } from '../db/database';
 import { normalizeOperatorLogin, validateOperatorLogin } from './operatorLogin';
+import { cardUidLast4, hashCardUid, hashPrefix, maskCardLast4, normalizeCardUid } from './cardUid';
 import type { AuthUser, PublicUser, UserRecord, UserRole } from './types';
 
 const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000;
@@ -57,10 +58,18 @@ export type DefaultAdminSeedResult =
 
 export type LoginResult =
   | { ok: true; user: AuthUser }
-  | { ok: false; reason: 'INVALID_CREDENTIALS' | 'INACTIVE' };
+  | { ok: false; reason: 'INVALID_CREDENTIALS' | 'INACTIVE' | 'UNKNOWN_CARD' | 'INVALID_CARD' };
+
+export type CardActionResult =
+  | { ok: true; action: 'LOGIN' | 'LOGGED_OUT' | 'SWITCHED_USER'; user: AuthUser | null; message: string }
+  | { ok: false; action: 'UNKNOWN_CARD' | 'TEST_IN_PROGRESS' | 'INVALID_CARD'; message: string };
+
+export class CardAssignmentError extends Error {
+  constructor(message: string, readonly code: 'CARD_ALREADY_ASSIGNED' | 'INVALID_CARD') { super(message); }
+}
 
 export class AuthService {
-  constructor(private readonly db: AppDatabase, private readonly sessionSecret: string, private readonly sessionMaxAgeMs = SESSION_MAX_AGE_MS) {}
+  constructor(private readonly db: AppDatabase, private readonly sessionSecret: string, private readonly sessionMaxAgeMs = SESSION_MAX_AGE_MS, private readonly cardUidPattern = '^\\d{8}$', private readonly testIdleLogoutMs = 15 * 60 * 1000) {}
 
   seedDefaultAdmin(loginInput: string, password: string): DefaultAdminSeedResult {
     const login = normalizeOperatorLogin(loginInput);
@@ -136,11 +145,86 @@ export class AuthService {
       updatedAt: now,
       lastLoginAt: null,
       createdBy: input.createdBy,
+      cardUidHash: null,
+      cardUidLast4: null,
+      cardAssignedAt: null,
+      lastTestAt: new Date().toISOString(),
     };
 
     this.db.insertUser(user);
 
     return this.toPublicUser(user);
+  }
+
+  loginByCard(cardUidInput: string): LoginResult {
+    const normalized = normalizeCardUid(cardUidInput);
+    if (!this.isValidCardUid(normalized)) return { ok: false, reason: 'INVALID_CARD' };
+    const hash = hashCardUid(normalized, this.sessionSecret);
+    const user = this.db.findByCardUidHash(hash);
+    if (!user) {
+      console.info(`[CARD] action=UNKNOWN_CARD cardLast4=${cardUidLast4(normalized)} hashPrefix=${hashPrefix(hash)}`);
+      return { ok: false, reason: 'UNKNOWN_CARD' };
+    }
+    const now = new Date().toISOString();
+    this.db.updateUser(user.id, { lastLoginAt: now, lastTestAt: now, updatedAt: now });
+    console.info(`[CARD] action=LOGIN login=${user.login} cardLast4=${user.cardUidLast4 ?? cardUidLast4(normalized)} hashPrefix=${hashPrefix(hash)}`);
+    return { ok: true, user: { id: user.id, login: user.login, role: user.role } };
+  }
+
+  handleCardAction(cardUidInput: string, currentUser: AuthUser | undefined, testLocked: boolean): CardActionResult {
+    if (!currentUser) {
+      const login = this.loginByCard(cardUidInput);
+      if (!login.ok) return { ok: false, action: login.reason === 'INVALID_CARD' ? 'INVALID_CARD' : 'UNKNOWN_CARD', message: 'Nieznana karta. Przyłóż przypisaną kartę lub zaloguj hasłem.' };
+      return { ok: true, action: 'LOGIN', user: login.user, message: `Zalogowano: ${login.user.login}` };
+    }
+    const normalized = normalizeCardUid(cardUidInput);
+    if (!this.isValidCardUid(normalized)) return { ok: false, action: 'INVALID_CARD', message: 'Nieznana karta' };
+    const hash = hashCardUid(normalized, this.sessionSecret);
+    const cardUser = this.db.findByCardUidHash(hash);
+    if (!cardUser) {
+      console.info(`[CARD] action=UNKNOWN_CARD cardLast4=${cardUidLast4(normalized)} hashPrefix=${hashPrefix(hash)}`);
+      return { ok: false, action: 'UNKNOWN_CARD', message: 'Nieznana karta' };
+    }
+    if (testLocked) return { ok: false, action: 'TEST_IN_PROGRESS', message: 'Nie można zmienić operatora podczas trwania testu.' };
+    if (cardUser.id === currentUser.id) {
+      console.info(`[CARD] action=LOGOUT login=${currentUser.login} cardLast4=${cardUser.cardUidLast4 ?? cardUidLast4(normalized)} hashPrefix=${hashPrefix(hash)}`);
+      return { ok: true, action: 'LOGGED_OUT', user: null, message: 'Wylogowano' };
+    }
+    const now = new Date().toISOString();
+    this.db.updateUser(cardUser.id, { lastLoginAt: now, lastTestAt: now, updatedAt: now });
+    console.info(`[CARD] action=SWITCHED_USER login=${cardUser.login} cardLast4=${cardUser.cardUidLast4 ?? cardUidLast4(normalized)} hashPrefix=${hashPrefix(hash)}`);
+    return { ok: true, action: 'SWITCHED_USER', user: { id: cardUser.id, login: cardUser.login, role: cardUser.role }, message: `Przelogowano na: ${cardUser.login}` };
+  }
+
+  assignCard(id: string, cardUidInput: string): PublicUser | null {
+    const normalized = normalizeCardUid(cardUidInput);
+    if (!this.isValidCardUid(normalized)) throw new CardAssignmentError('Nieprawidłowy UID karty.', 'INVALID_CARD');
+    const hash = hashCardUid(normalized, this.sessionSecret);
+    const existing = this.db.findByCardUidHash(hash);
+    if (existing && existing.id !== id) throw new CardAssignmentError('Ta karta jest już przypisana do innego użytkownika.', 'CARD_ALREADY_ASSIGNED');
+    const now = new Date().toISOString();
+    const user = this.db.updateUser(id, { cardUidHash: hash, cardUidLast4: cardUidLast4(normalized), cardAssignedAt: now, updatedAt: now });
+    return user ? this.toPublicUser(user) : null;
+  }
+
+  removeCard(id: string): PublicUser | null {
+    const user = this.db.updateUser(id, { cardUidHash: null, cardUidLast4: null, cardAssignedAt: null, updatedAt: new Date().toISOString() });
+    return user ? this.toPublicUser(user) : null;
+  }
+
+  markTestActivity(userId: string | null | undefined, at = new Date().toISOString()): void {
+    if (!userId) return;
+    this.db.updateUser(userId, { lastTestAt: at, updatedAt: at });
+  }
+
+  isSessionIdleExpired(user: UserRecord): boolean {
+    if (this.testIdleLogoutMs <= 0) return false;
+    const last = user.lastTestAt ?? user.lastLoginAt ?? user.createdAt;
+    return Date.now() - Date.parse(last) > this.testIdleLogoutMs;
+  }
+
+  isValidCardUid(uid: string): boolean {
+    return new RegExp(this.cardUidPattern).test(uid);
   }
 
   login(loginInput: string, password: string): AuthUser | null {
@@ -158,7 +242,7 @@ export class AuthService {
     if (!verifyPassword(password, user.passwordHash)) return { ok: false, reason: 'INVALID_CREDENTIALS' };
 
     const lastLoginAt = new Date().toISOString();
-    this.db.updateUser(user.id, { lastLoginAt, updatedAt: lastLoginAt });
+    this.db.updateUser(user.id, { lastLoginAt, lastTestAt: lastLoginAt, updatedAt: lastLoginAt });
     return { ok: true, user: { id: user.id, login: user.login, role: user.role } };
   }
 
@@ -214,8 +298,9 @@ export class AuthService {
 
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as SessionPayload;
     if (payload.exp < Date.now()) return null;
-    const user = this.getUserById(payload.id);
+    const user = this.db.findById(payload.id);
     if (!user || !user.isActive) return null;
+    if (this.isSessionIdleExpired(user)) return null;
     return { id: user.id, login: user.login, role: user.role };
   }
 
@@ -229,6 +314,9 @@ export class AuthService {
       updatedAt: user.updatedAt,
       lastLoginAt: user.lastLoginAt,
       createdBy: user.createdBy,
+      cardUidLast4: user.cardUidLast4,
+      cardMask: maskCardLast4(user.cardUidLast4),
+      lastTestAt: user.lastTestAt,
     };
   }
 

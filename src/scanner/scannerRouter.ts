@@ -7,6 +7,7 @@ import { parseBarcodeScan } from './parseBarcodeScan';
 import { mapBarcodeToProgram } from './mapBarcodeToProgram';
 import type { ProgramMappingService } from '../programs/programMappingStore';
 import type { TestSessionManager } from '../server/test-session/testSessionManager';
+import type { AuthService } from '../server/auth/authService';
 import { CurrentTestStore } from './currentTestStore';
 
 export function createScannerRouter(options: {
@@ -16,6 +17,7 @@ export function createScannerRouter(options: {
   currentTestStore: CurrentTestStore;
   programMappingService?: ProgramMappingService;
   testSessionManager?: TestSessionManager;
+  authService?: AuthService;
 }): Router {
   const router = Router();
 
@@ -47,6 +49,7 @@ export function createScannerRouter(options: {
     }
 
     const operatorContext = {
+      operatorUserId: req.user?.id,
       operatorLogin: req.user?.login,
       operatorRole: req.user?.role,
     };
@@ -55,6 +58,7 @@ export function createScannerRouter(options: {
 
     options.currentTestStore.set(currentTest);
     const activeTest = options.testSessionManager?.start(currentTest) ?? null;
+    options.authService?.markTestActivity(req.user?.id);
     const programStart = await options.programStarter.startProgram(programStartRequest);
     if (!programStart.success) {
       options.testSessionManager?.fail(programStart.message, 'PROGRAM_START_FAILED');

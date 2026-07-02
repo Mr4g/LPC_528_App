@@ -24,6 +24,7 @@ export interface StoredTestSession {
   barcode: string | null;
   programNumber: number | null;
   programText: string | null;
+  operatorUserId: string | null;
   operatorLogin: string | null;
   startedAt: string | null;
   completedAt: string | null;
@@ -55,6 +56,10 @@ function rowToUser(row: Record<string, unknown>): UserRecord {
     updatedAt: String(row.updatedAt),
     lastLoginAt: row.lastLoginAt === null ? null : String(row.lastLoginAt),
     createdBy: row.createdBy === null ? null : String(row.createdBy),
+    cardUidHash: row.card_uid_hash === null || row.card_uid_hash === undefined ? null : String(row.card_uid_hash),
+    cardUidLast4: row.card_uid_last4 === null || row.card_uid_last4 === undefined ? null : String(row.card_uid_last4),
+    cardAssignedAt: row.card_assigned_at === null || row.card_assigned_at === undefined ? null : String(row.card_assigned_at),
+    lastTestAt: row.last_test_at === null || row.last_test_at === undefined ? null : String(row.last_test_at),
   };
 }
 
@@ -82,6 +87,7 @@ function rowToSession(row: Record<string, unknown>): StoredTestSession {
     barcode: row.barcode === null ? null : String(row.barcode),
     programNumber: row.programNumber === null ? null : Number(row.programNumber),
     programText: row.programText === null ? null : String(row.programText),
+    operatorUserId: row.operatorUserId === null || row.operatorUserId === undefined ? null : String(row.operatorUserId),
     operatorLogin: row.operatorLogin === null ? null : String(row.operatorLogin),
     startedAt: row.startedAt === null ? null : String(row.startedAt),
     completedAt: row.completedAt === null ? null : String(row.completedAt),
@@ -207,18 +213,19 @@ export class AppDatabase {
   listUsers(): UserRecord[] { return (this.db.prepare('SELECT * FROM users ORDER BY login ASC').all() as Record<string, unknown>[]).map(rowToUser); }
   findByLogin(login: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE login = ?').get(login) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
   findById(id: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
+  findByCardUidHash(hash: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE card_uid_hash = ? AND isActive = 1').get(hash) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
 
   insertUser(user: UserRecord): void {
-    this.db.prepare(`INSERT INTO users (id, login, passwordHash, role, isActive, createdAt, updatedAt, lastLoginAt, createdBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(user.id, user.login, user.passwordHash, user.role, user.isActive, user.createdAt, user.updatedAt, user.lastLoginAt, user.createdBy);
+    this.db.prepare(`INSERT INTO users (id, login, passwordHash, role, isActive, createdAt, updatedAt, lastLoginAt, createdBy, card_uid_hash, card_uid_last4, card_assigned_at, last_test_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(user.id, user.login, user.passwordHash, user.role, user.isActive, user.createdAt, user.updatedAt, user.lastLoginAt, user.createdBy, user.cardUidHash, user.cardUidLast4, user.cardAssignedAt, user.lastTestAt);
   }
 
   updateUser(id: string, patch: Partial<UserRecord>): UserRecord | null {
     const existing = this.findById(id);
     if (!existing) return null;
     const next = { ...existing, ...patch };
-    this.db.prepare(`UPDATE users SET login = ?, passwordHash = ?, role = ?, isActive = ?, createdAt = ?, updatedAt = ?, lastLoginAt = ?, createdBy = ? WHERE id = ?`)
-      .run(next.login, next.passwordHash, next.role, next.isActive, next.createdAt, next.updatedAt, next.lastLoginAt, next.createdBy, id);
+    this.db.prepare(`UPDATE users SET login = ?, passwordHash = ?, role = ?, isActive = ?, createdAt = ?, updatedAt = ?, lastLoginAt = ?, createdBy = ?, card_uid_hash = ?, card_uid_last4 = ?, card_assigned_at = ?, last_test_at = ? WHERE id = ?`)
+      .run(next.login, next.passwordHash, next.role, next.isActive, next.createdAt, next.updatedAt, next.lastLoginAt, next.createdBy, next.cardUidHash, next.cardUidLast4, next.cardAssignedAt, next.lastTestAt, id);
     return this.findById(id);
   }
 
@@ -284,12 +291,12 @@ export class AppDatabase {
   }
 
   upsertTestSession(session: StoredTestSession): void {
-    this.db.prepare(`INSERT INTO test_sessions (id, status, barcode, programNumber, programText, operatorLogin, startedAt, completedAt, lastStreamAt, timeoutAt, message)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET status = excluded.status, barcode = excluded.barcode, programNumber = excluded.programNumber, programText = excluded.programText,
+    this.db.prepare(`INSERT INTO test_sessions (id, status, barcode, programNumber, programText, operatorUserId, operatorLogin, startedAt, completedAt, lastStreamAt, timeoutAt, message)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET status = excluded.status, barcode = excluded.barcode, programNumber = excluded.programNumber, programText = excluded.programText, operatorUserId = excluded.operatorUserId,
       operatorLogin = excluded.operatorLogin, startedAt = excluded.startedAt, completedAt = excluded.completedAt, lastStreamAt = excluded.lastStreamAt,
       timeoutAt = excluded.timeoutAt, message = excluded.message`)
-      .run(session.id, session.status, session.barcode, session.programNumber, session.programText, session.operatorLogin, session.startedAt, session.completedAt, session.lastStreamAt, session.timeoutAt, session.message);
+      .run(session.id, session.status, session.barcode, session.programNumber, session.programText, session.operatorUserId, session.operatorLogin, session.startedAt, session.completedAt, session.lastStreamAt, session.timeoutAt, session.message);
   }
 
   getLatestTestSession(): StoredTestSession | null {
@@ -352,12 +359,21 @@ export class AppDatabase {
       CREATE INDEX IF NOT EXISTS idx_test_results_operatorLogin ON test_results(operatorLogin);
       CREATE INDEX IF NOT EXISTS idx_test_results_result ON test_results(result);
       CREATE INDEX IF NOT EXISTS idx_test_results_programText ON test_results(programText);
-      CREATE TABLE IF NOT EXISTS test_sessions (id TEXT PRIMARY KEY, status TEXT NOT NULL, barcode TEXT, programNumber INTEGER, programText TEXT, operatorLogin TEXT, startedAt TEXT, completedAt TEXT, lastStreamAt TEXT, timeoutAt TEXT, message TEXT);
+      CREATE TABLE IF NOT EXISTS test_sessions (id TEXT PRIMARY KEY, status TEXT NOT NULL, barcode TEXT, programNumber INTEGER, programText TEXT, operatorUserId TEXT, operatorLogin TEXT, startedAt TEXT, completedAt TEXT, lastStreamAt TEXT, timeoutAt TEXT, message TEXT);
       CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT NULL);
       CREATE TABLE IF NOT EXISTS splunk_event_buffer (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, next_attempt_at TEXT, sent_at TEXT, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, status TEXT NOT NULL DEFAULT 'pending', event_type TEXT NOT NULL, test_id TEXT, payload_json TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS idx_splunk_event_buffer_status_next ON splunk_event_buffer(status, next_attempt_at);
       CREATE INDEX IF NOT EXISTS idx_splunk_event_buffer_test_id ON splunk_event_buffer(test_id);
     `);
+    const userColumns = this.db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
+    const addUserColumn = (name: string, sql: string) => { if (!userColumns.some((column) => column.name === name)) this.db.prepare(sql).run(); };
+    addUserColumn('card_uid_hash', 'ALTER TABLE users ADD COLUMN card_uid_hash TEXT');
+    addUserColumn('card_uid_last4', 'ALTER TABLE users ADD COLUMN card_uid_last4 TEXT');
+    addUserColumn('card_assigned_at', 'ALTER TABLE users ADD COLUMN card_assigned_at TEXT');
+    addUserColumn('last_test_at', 'ALTER TABLE users ADD COLUMN last_test_at TEXT');
+    const sessionColumns = this.db.prepare('PRAGMA table_info(test_sessions)').all() as Array<{ name: string }>;
+    if (!sessionColumns.some((column) => column.name === 'operatorUserId')) this.db.prepare('ALTER TABLE test_sessions ADD COLUMN operatorUserId TEXT').run();
+    this.db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_card_uid_hash ON users(card_uid_hash) WHERE card_uid_hash IS NOT NULL').run();
     const programColumns = this.db.prepare('PRAGMA table_info(program_mappings)').all() as Array<{ name: string }>;
     if (!programColumns.some((column) => column.name === 'labelPrintMode')) {
       this.db.prepare("ALTER TABLE program_mappings ADD COLUMN labelPrintMode TEXT NOT NULL DEFAULT 'ok_only'").run();

@@ -373,7 +373,7 @@ function LoginPage(props: { onLoggedIn: (user: AuthUser) => void }) {
         <div className="login-hero">
           <div>
             <span className="eyebrow">LPC-528</span>
-            <h1>Przyłóż kartę operatora</h1>
+            <h1>Przyłóż kartę <span>operatora</span></h1>
             <p>Czytnik ELATEC TWN4 wpisuje UID automatycznie i zatwierdza Enterem.</p>
           </div>
           <div className="rfid-badge" aria-hidden="true">

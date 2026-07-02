@@ -1704,73 +1704,79 @@ body.theme-dark .results-preview {
 /* Refined operator login screen */
 .login-shell {
   min-height: 100vh;
-  padding: clamp(18px, 4vh, 40px);
+  padding: clamp(20px, 4vh, 40px);
   overflow-y: auto;
 }
 
 .login-card.operator-login-card {
-  width: min(560px, 94vw);
-  max-height: calc(100vh - 36px);
+  width: min(520px, 94vw);
+  max-height: calc(100vh - 40px);
   overflow-y: auto;
-  gap: 22px;
-  padding: clamp(28px, 4vw, 44px);
-  border-radius: 30px;
-  background:
-    radial-gradient(circle at top right, rgba(0, 174, 239, 0.15), transparent 34%),
-    rgba(255, 255, 255, 0.96);
-  border: 1px solid rgba(0, 174, 239, 0.20);
-  box-shadow: 0 24px 70px rgba(21, 44, 115, 0.18), 0 0 0 1px rgba(255, 255, 255, 0.52) inset;
+  gap: 20px;
+  padding: clamp(26px, 4vw, 40px);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid rgba(96, 112, 138, 0.16);
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.18);
 }
 
 .login-hero {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: start;
-  gap: 22px;
+  gap: 20px;
+  padding-bottom: 2px;
 }
 
 .login-hero .eyebrow {
   display: inline-flex;
-  margin-bottom: 10px;
-  color: var(--carrier-blue);
-  font-weight: 1000;
-  letter-spacing: 0.14em;
+  margin-bottom: 12px;
+  color: var(--carrier-blue-2);
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.16em;
 }
 
 .login-hero h1 {
   margin: 0;
-  font-size: clamp(2.5rem, 5vw, 4.4rem);
-  line-height: 0.95;
-  letter-spacing: -0.05em;
+  max-width: 410px;
+  font-size: clamp(2.2rem, 4.3vw, 3.35rem);
+  line-height: 1.02;
+  letter-spacing: -0.045em;
+  font-weight: 1000;
+}
+
+.login-hero h1 span {
+  display: block;
 }
 
 .login-hero p {
-  margin: 16px 0 0;
-  max-width: 430px;
+  margin: 14px 0 0;
+  max-width: 390px;
   color: var(--carrier-muted);
-  font-size: clamp(1rem, 1.4vw, 1.2rem);
-  line-height: 1.45;
-  font-weight: 700;
+  font-size: clamp(0.94rem, 1.2vw, 1.04rem);
+  line-height: 1.5;
+  font-weight: 650;
 }
 
 .rfid-badge {
-  width: 76px;
-  height: 76px;
+  width: 54px;
+  height: 54px;
   display: grid;
   place-items: center;
-  border-radius: 24px;
-  color: var(--carrier-blue);
-  background: linear-gradient(145deg, rgba(0, 174, 239, 0.16), rgba(74, 184, 255, 0.06));
-  border: 1px solid rgba(0, 174, 239, 0.26);
-  box-shadow: 0 18px 42px rgba(0, 174, 239, 0.18);
+  border-radius: 18px;
+  color: var(--carrier-blue-2);
+  background: rgba(0, 174, 239, 0.08);
+  border: 1px solid rgba(0, 174, 239, 0.18);
 }
 
 .rfid-badge svg {
-  width: 46px;
-  height: 46px;
+  width: 31px;
+  height: 31px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 2.6;
+  stroke-width: 2.2;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -1779,10 +1785,10 @@ body.theme-dark .results-preview {
 .password-fallback {
   display: grid;
   gap: 12px;
-  padding: 18px;
-  border-radius: 24px;
-  border: 1px solid rgba(96, 112, 138, 0.18);
-  background: linear-gradient(180deg, rgba(238, 243, 250, 0.84), rgba(255, 255, 255, 0.72));
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(96, 112, 138, 0.16);
+  background: rgba(248, 250, 252, 0.82);
 }
 
 .login-section-label,
@@ -1791,9 +1797,14 @@ body.theme-dark .results-preview {
   align-items: center;
   gap: 8px;
   color: var(--carrier-text);
-  font-size: 0.98rem;
-  font-weight: 1000;
-  letter-spacing: 0.02em;
+  font-size: 0.88rem;
+  font-weight: 900;
+  letter-spacing: 0.015em;
+}
+
+.login-section-label span {
+  color: var(--carrier-blue-2);
+  font-size: 0.78rem;
 }
 
 .login-input-wrap {
@@ -1803,46 +1814,64 @@ body.theme-dark .results-preview {
 .login-card input.auth-input.card-reader-input,
 .password-field-stack input.auth-input {
   width: 100%;
-  min-height: 64px;
-  border-radius: 18px;
-  border: 2px solid rgba(96, 112, 138, 0.26);
+  min-height: 56px;
+  border-radius: 14px;
+  border: 1px solid rgba(96, 112, 138, 0.28);
   background: #ffffff;
-  box-shadow: 0 10px 24px rgba(21, 44, 115, 0.08);
+  box-shadow: none;
+  font-size: 1rem;
+}
+
+.login-card input.auth-input::placeholder {
+  color: rgba(96, 112, 138, 0.72);
 }
 
 .login-card input.auth-input:focus,
 .login-card input.auth-input:focus-visible {
   outline: none;
-  border-color: var(--carrier-blue-2);
-  box-shadow: 0 0 0 4px rgba(0, 174, 239, 0.16), 0 16px 30px rgba(21, 44, 115, 0.12);
+  border-color: rgba(0, 174, 239, 0.72);
+  box-shadow: 0 0 0 3px rgba(0, 174, 239, 0.13);
 }
 
 .card-login-error {
   margin: 0;
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: rgba(217, 48, 37, 0.10);
-  border: 1px solid rgba(217, 48, 37, 0.22);
+  padding: 9px 11px;
+  border-radius: 12px;
+  background: rgba(217, 48, 37, 0.08);
+  border: 1px solid rgba(217, 48, 37, 0.18);
   color: #b42318;
-  font-size: 0.98rem;
+  font-size: 0.92rem;
   line-height: 1.35;
 }
 
 .login-card button.password-toggle-button,
 .login-card button.password-submit-button {
   width: 100%;
-  min-height: 58px;
-  border-radius: 18px;
-  font-size: 1.05rem;
+  min-height: 54px;
+  border-radius: 14px;
+  font-size: 1rem;
+  font-weight: 900;
 }
 
 .login-card button.password-toggle-button {
-  background: linear-gradient(135deg, rgba(0, 174, 239, 0.92), rgba(47, 129, 247, 0.92));
-  box-shadow: 0 16px 34px rgba(0, 174, 239, 0.18);
+  background: rgba(0, 174, 239, 0.12);
+  color: var(--carrier-blue-2);
+  border: 1px solid rgba(0, 174, 239, 0.20);
+  box-shadow: none;
+}
+
+.login-card button.password-toggle-button:hover {
+  background: rgba(0, 174, 239, 0.17);
+  transform: translateY(-1px);
+}
+
+.login-card button.password-submit-button {
+  background: linear-gradient(135deg, #0078d4, #00aeef);
+  box-shadow: 0 14px 30px rgba(0, 120, 212, 0.20);
 }
 
 .password-fallback {
-  animation: loginPanelIn 160ms ease-out;
+  animation: loginPanelIn 140ms ease-out;
 }
 
 .password-panel-header {
@@ -1852,44 +1881,47 @@ body.theme-dark .results-preview {
 }
 
 .password-panel-header strong {
-  color: var(--carrier-blue);
-  font-size: 1.2rem;
-  font-weight: 1000;
+  color: var(--carrier-blue-2);
+  font-size: 1.08rem;
+  font-weight: 950;
 }
 
 .password-panel-header span {
   color: var(--carrier-muted);
-  font-size: 0.98rem;
-  font-weight: 700;
+  font-size: 0.92rem;
+  font-weight: 650;
 }
 
 .password-field-stack {
   display: grid;
-  gap: 8px;
+  gap: 7px;
 }
 
 .login-card button:focus-visible {
-  outline: 4px solid rgba(0, 174, 239, 0.28);
+  outline: 3px solid rgba(0, 174, 239, 0.24);
   outline-offset: 3px;
 }
 
 @keyframes loginPanelIn {
-  from { opacity: 0; transform: translateY(-6px); }
+  from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
 body.theme-dark .login-card.operator-login-card {
-  background:
-    radial-gradient(circle at top right, rgba(74, 184, 255, 0.18), transparent 36%),
-    rgba(15, 23, 42, 0.94);
-  border-color: rgba(148, 163, 184, 0.22);
-  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.36), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  background: rgba(15, 23, 42, 0.95);
+  border-color: rgba(148, 163, 184, 0.18);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.34);
 }
 
 body.theme-dark .login-reader-panel,
 body.theme-dark .password-fallback {
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.72), rgba(30, 41, 59, 0.48));
-  border-color: rgba(148, 163, 184, 0.20);
+  background: rgba(15, 23, 42, 0.50);
+  border-color: rgba(148, 163, 184, 0.16);
+}
+
+body.theme-dark .rfid-badge {
+  background: rgba(0, 174, 239, 0.10);
+  border-color: rgba(74, 184, 255, 0.22);
 }
 
 body.theme-dark .login-hero p,
@@ -1904,18 +1936,28 @@ body.theme-dark .password-field-stack label {
 
 body.theme-dark .login-card input.auth-input.card-reader-input,
 body.theme-dark .password-field-stack input.auth-input {
-  background: #f8fafc;
+  background: rgba(248, 250, 252, 0.98);
   color: #0f172a;
+}
+
+body.theme-dark .login-card button.password-toggle-button {
+  background: rgba(0, 174, 239, 0.10);
+  color: #7dd3fc;
+  border-color: rgba(125, 211, 252, 0.18);
+}
+
+body.theme-dark .login-card button.password-toggle-button:hover {
+  background: rgba(0, 174, 239, 0.16);
 }
 
 body.theme-dark .card-login-error {
   color: #fecaca;
-  background: rgba(239, 68, 68, 0.13);
-  border-color: rgba(248, 113, 113, 0.28);
+  background: rgba(239, 68, 68, 0.11);
+  border-color: rgba(248, 113, 113, 0.22);
 }
 
 @media (max-width: 620px) {
   .login-hero { grid-template-columns: 1fr; }
-  .rfid-badge { width: 64px; height: 64px; }
+  .rfid-badge { width: 48px; height: 48px; }
   .login-card.operator-login-card { padding: 24px; }
 }

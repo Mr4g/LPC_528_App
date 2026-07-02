@@ -141,6 +141,7 @@ declare global {
 }
 
 type OperatorStatus = 'ready' | 'scanning' | 'program-selected' | 'no-mapping' | 'start-error';
+type ClassifiedScan = { type: 'card'; value: string } | { type: 'barcode'; value: string } | { type: 'invalid'; value: string };
 type UserRole = 'operator' | 'line_leader' | 'admin';
 type ChartStatus = 'waiting' | 'live' | 'completed';
 type TestSessionStatus = 'idle' | 'program_selected' | 'starting' | 'running' | 'waiting_for_result' | 'completed' | 'timeout' | 'error';
@@ -228,6 +229,13 @@ const CARD_UID_REGEX = /^\d{8}$/;
 const CARD_SCAN_IDLE_MS = 200;
 function normalizeCardScanInput(value: string): string { return value.trim().replace(/[\r\n]/g, ''); }
 function maskCardUid(value: string): string { return `****${value.slice(-4)}`; }
+
+function classifyScan(raw: string): ClassifiedScan {
+  const value = raw.trim().replace(/[\r\n]/g, '');
+  if (!value || value.length < 3) return { type: 'invalid', value };
+  if (CARD_UID_REGEX.test(value)) return { type: 'card', value };
+  return { type: 'barcode', value };
+}
 
 function getInitialRoute(): string {
   return ['/login', '/admin/users', '/admin/programs'].includes(window.location.pathname) ? window.location.pathname : '/operator';
@@ -898,6 +906,7 @@ function App() {
     curveCompletedEvents: 0,
   });
   const barcodeInputRef = useRef<HTMLInputElement | null>(null);
+  const scanBufferRef = useRef('');
   const routeRef = useRef(route);
   const diagnosticsOpenRef = useRef(diagnosticsOpen);
   const resultsOpenRef = useRef(resultsOpen);
@@ -1227,9 +1236,15 @@ function App() {
   }, []);
 
   async function handleCardAction(cardUid: string): Promise<boolean> {
+    setBarcode('');
+    scanBufferRef.current = '';
     const response = await fetch('/api/auth/card-action', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cardUid }) });
     const payload = (await response.json()) as { ok: boolean; action?: 'LOGIN' | 'LOGGED_OUT' | 'SWITCHED_USER' | 'UNKNOWN_CARD' | 'TEST_IN_PROGRESS'; message?: string; user?: AuthUser | null };
-    if (!response.ok && payload.action === 'UNKNOWN_CARD') return false;
+    if (payload.action === 'UNKNOWN_CARD') {
+      setLastRejected({ barcode: '', error: 'NO_MAPPING', message: 'Nieznana karta operatora.' });
+      focusBarcodeInput(0);
+      return true;
+    }
     if (payload.action === 'LOGGED_OUT') {
       setAuthUser(null);
       setBarcode('');
@@ -1239,11 +1254,12 @@ function App() {
     if (payload.user) {
       setAuthUser(payload.user);
       setBarcode('');
+      setLastRejected({ barcode: '', error: 'NO_MAPPING', message: `Zalogowano operatora: ${payload.user.login}` });
       focusBarcodeInput(100);
       return true;
     }
     if (payload.message) {
-      setLastRejected({ barcode: cardUid, error: 'TEST_IN_PROGRESS', errorCode: 'TEST_IN_PROGRESS', message: payload.message, activeTest: testSession ?? undefined });
+      setLastRejected({ barcode: '', error: 'TEST_IN_PROGRESS', errorCode: 'TEST_IN_PROGRESS', message: testSession?.locked ? 'Test w toku. Zmiana operatora możliwa po zakończeniu testu.' : payload.message, activeTest: testSession ?? undefined });
       setBarcode('');
       focusBarcodeInput(0);
       return true;
@@ -1251,31 +1267,32 @@ function App() {
     return false;
   }
 
-  async function submitScan(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function submitBarcodeScan(rawScan: string) {
     if (!authUser) {
       navigateTo('/login', setRoute);
       return;
     }
-    const trimmedBarcode = barcode.trim();
+    const classified = classifyScan(rawScan);
+    if (classified.type === 'invalid') {
+      setBarcode('');
+      setLastRejected({ barcode: '', error: 'NO_MAPPING', message: 'Nieprawidłowy skan.' });
+      focusBarcodeInput(0);
+      return;
+    }
+    if (classified.type === 'card') {
+      await handleCardAction(classified.value);
+      return;
+    }
+    const trimmedBarcode = classified.value;
+    setBarcode(trimmedBarcode);
     if (testSession?.locked) {
       setLastRejected({
-        barcode: trimmedBarcode,
+        barcode: '',
         error: 'TEST_IN_PROGRESS',
         errorCode: 'TEST_IN_PROGRESS',
         message: testSession.message ?? 'Test w toku — poczekaj na wynik',
         activeTest: testSession,
       });
-      return;
-    }
-    if (!trimmedBarcode) {
-      focusBarcodeInput(0);
-      return;
-    }
-    if (CARD_UID_REGEX.test(trimmedBarcode)) {
-      setBarcode('');
-      setLastRejected(null);
-      focusBarcodeInput(0);
       return;
     }
 
@@ -1318,6 +1335,29 @@ function App() {
     if (payload.activeTest) setTestSession(payload.activeTest);
     await loadInstructionForMapping(payload.currentTest.mappingId);
     if (!payload.programStart.success) focusBarcodeInput(0);
+  }
+
+  async function submitScan(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await submitBarcodeScan(barcode || scanBufferRef.current);
+  }
+
+  async function completeBufferedScan(rawScan: string) {
+    scanBufferRef.current = '';
+    const classified = classifyScan(rawScan);
+    if (classified.type === 'card') {
+      setBarcode('');
+      await handleCardAction(classified.value);
+      return;
+    }
+    if (classified.type === 'barcode') {
+      setBarcode(classified.value);
+      await submitBarcodeScan(classified.value);
+      return;
+    }
+    setBarcode('');
+    setLastRejected({ barcode: '', error: 'NO_MAPPING', message: 'Nieprawidłowy skan.' });
+    focusBarcodeInput(0);
   }
 
   async function lpcAction(action: 'connect' | 'disconnect') {
@@ -1381,6 +1421,7 @@ function App() {
   const splunkCompactLabel = getCompactSplunkLabel(splunkStatus);
   const connectionClass = `connection-${compactLpcStatus.state}`;
   const activeInstructionMappingId = lastAccepted?.currentTest.mappingId ?? null;
+  const instructionAvailable = Boolean(currentInstruction?.exists && activeInstructionMappingId);
   const displayedCurvePoints = curvePoints.length > 0 ? curvePoints : completedCurvePoints;
   const scanLocked = Boolean(testSession?.locked);
   const scanStatusText = scanLocked ? 'Trwa test — poczekaj na wynik' : (status === 'program-selected' && lastAccepted ? `${lastAccepted.currentTest.programText} wybrany` : statusLabels[status]);
@@ -1473,12 +1514,16 @@ function App() {
         <div className="top-bar-center">
           <div className="top-metric"><span>Program</span><strong>{currentProgram}</strong></div>
           <div className="top-metric"><span>Barcode</span><strong>{lastBarcode}</strong></div>
-          {currentInstruction?.exists && activeInstructionMappingId && (
-            <button type="button" className="instruction-top-button" onClick={() => setInstructionOpen(true)} title={currentInstruction.originalName ?? 'Instrukcja PDF'}>
-              <span aria-hidden="true">PDF</span>
-              <strong>Instrukcja</strong>
-            </button>
-          )}
+          <button
+            type="button"
+            className="instruction-top-button"
+            disabled={!instructionAvailable}
+            onClick={() => { if (instructionAvailable) setInstructionOpen(true); }}
+            title={instructionAvailable ? currentInstruction?.originalName ?? 'Instrukcja PDF' : 'Brak instrukcji PDF dla programu'}
+          >
+            <span aria-hidden="true">PDF</span>
+            <strong>{instructionAvailable ? 'Instrukcja' : 'Brak PDF'}</strong>
+          </button>
         </div>
         <div className="top-bar-actions">
           <div className={`connection-badge ${connectionClass}`}>
@@ -1548,18 +1593,33 @@ function App() {
               disabled={scanLocked}
               value={scanLocked ? 'Trwa test — poczekaj na wynik' : barcode}
               onChange={(event) => {
-                const nextValue = event.target.value.trim();
-                if (CARD_UID_REGEX.test(nextValue)) {
+                if (scanLocked) return;
+                const classified = classifyScan(event.target.value);
+                if (classified.type === 'card') {
                   setBarcode('');
                   return;
                 }
-                setBarcode(event.target.value);
+                if (classified.type === 'barcode') setBarcode(event.target.value);
               }}
               onKeyDown={(event) => {
-                if (event.key === 'Enter' && CARD_UID_REGEX.test(event.currentTarget.value.trim())) {
+                if (scanLocked) return;
+                if (event.key === 'Enter') {
                   event.preventDefault();
-                  setBarcode('');
+                  const pendingScan = scanBufferRef.current || event.currentTarget.value;
+                  void completeBufferedScan(pendingScan);
+                  return;
                 }
+                if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
+                  event.preventDefault();
+                  scanBufferRef.current += event.key;
+                }
+              }}
+              onPaste={(event) => {
+                event.preventDefault();
+                if (scanLocked) return;
+                const pasted = event.clipboardData.getData('text');
+                scanBufferRef.current = pasted;
+                void completeBufferedScan(pasted);
               }}
               placeholder={scanLocked ? 'Trwa test — poczekaj na wynik' : 'Zeskanuj barcode'}
             />

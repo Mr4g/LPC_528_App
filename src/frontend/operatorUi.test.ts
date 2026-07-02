@@ -8,6 +8,8 @@ describe('operator top bar and PDF modal layout', () => {
   it('does not render the small top-bar result tile and uses the PDF instruction button there', () => {
     expect(mainSource).not.toContain('className={`top-result');
     expect(mainSource).toContain('className="instruction-top-button"');
+    expect(mainSource).toContain('disabled={!instructionAvailable}');
+    expect(mainSource).toContain('Brak instrukcji PDF dla programu');
   });
 
   it('uses a flex PDF modal body with a full-height PDF iframe', () => {
@@ -20,8 +22,9 @@ describe('operator top bar and PDF modal layout', () => {
   });
 
   it('clears card-shaped input from the barcode field instead of submitting it', () => {
-    expect(mainSource).toContain('CARD_UID_REGEX.test(nextValue)');
-    expect(mainSource).toContain('setBarcode(\'\')');
+    expect(mainSource).toContain('classifyScan(raw: string)');
+    expect(mainSource).toContain('completeBufferedScan(pendingScan)');
+    expect(mainSource).toContain('handleCardAction(classified.value)');
     expect(mainSource).not.toContain('handleCardAction(trimmedBarcode)');
   });
 });

@@ -302,6 +302,7 @@ function LoginPage(props: { onLoggedIn: (user: AuthUser) => void }) {
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const idleTimerRef = useRef<number | null>(null);
+  const loginInputRef = useRef<HTMLInputElement | null>(null);
 
   async function submitCard(uidInput: string) {
     const cardUid = normalizeCardScanInput(uidInput);
@@ -358,30 +359,65 @@ function LoginPage(props: { onLoggedIn: (user: AuthUser) => void }) {
     props.onLoggedIn(payload.user);
   }
 
+  function togglePasswordLogin() {
+    setPasswordVisible((visible) => {
+      const next = !visible;
+      if (next) window.setTimeout(() => loginInputRef.current?.focus(), 120);
+      return next;
+    });
+  }
+
   return (
     <main className="login-shell">
-      <div className="login-card">
-        <span className="eyebrow">LPC-528</span>
-        <h1>Przyłóż kartę operatora</h1>
-        <p>ELATEC TWN4 wpisuje UID jak klawiatura i zatwierdza Enterem.</p>
-        <input
-          className="auth-input"
-          autoFocus
-          value={cardBuffer}
-          onChange={(event) => onCardInput(event.target.value)}
-          onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void submitCard(cardBuffer); } }}
-          placeholder="Przyłóż kartę"
-          inputMode="numeric"
-        />
-        {error && <p className="login-error">{error}</p>}
-        <button type="button" onClick={() => setPasswordVisible((visible) => !visible)}>Nie masz karty? Zaloguj hasłem</button>
+      <div className="login-card operator-login-card">
+        <div className="login-hero">
+          <div>
+            <span className="eyebrow">LPC-528</span>
+            <h1>Przyłóż kartę operatora</h1>
+            <p>Czytnik ELATEC TWN4 wpisuje UID automatycznie i zatwierdza Enterem.</p>
+          </div>
+          <div className="rfid-badge" aria-hidden="true">
+            <svg viewBox="0 0 48 48" role="img" focusable="false">
+              <rect x="8" y="12" width="32" height="24" rx="6" />
+              <path d="M16 21h10M16 28h16" />
+              <path d="M34 18c3 3 3 9 0 12M39 15c5 5 5 15 0 20" />
+            </svg>
+          </div>
+        </div>
+
+        <section className="login-reader-panel" aria-label="Karta operatora">
+          <label className="login-section-label" htmlFor="cardUidInput"><span>▣</span>Karta operatora</label>
+          <div className="login-input-wrap">
+            <input
+              id="cardUidInput"
+              className="auth-input card-reader-input"
+              autoFocus={!passwordVisible}
+              value={cardBuffer}
+              onChange={(event) => onCardInput(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void submitCard(cardBuffer); } }}
+              placeholder="Przyłóż kartę"
+              inputMode="numeric"
+            />
+          </div>
+          {error && <p className="login-error card-login-error">{error}</p>}
+        </section>
+
+        <button type="button" className="password-toggle-button" onClick={togglePasswordLogin} aria-expanded={passwordVisible}>Nie masz karty? Zaloguj hasłem</button>
         {passwordVisible && (
           <form className="password-fallback" onSubmit={submitLogin}>
-            <label>Login / skrót osobowy</label>
-            <input className="auth-input" value={login} onChange={(event) => setLogin(event.target.value.toUpperCase())} placeholder="Login" />
-            <label>Hasło</label>
-            <input className="auth-input" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Hasło" />
-            <button type="submit">Zaloguj hasłem</button>
+            <div className="password-panel-header">
+              <strong>Logowanie hasłem</strong>
+              <span>Wpisz login i hasło, aby zalogować operatora.</span>
+            </div>
+            <div className="password-field-stack">
+              <label htmlFor="passwordLoginInput">Login / skrót osobowy</label>
+              <input id="passwordLoginInput" ref={loginInputRef} className="auth-input" value={login} onChange={(event) => setLogin(event.target.value.toUpperCase())} placeholder="Login" />
+            </div>
+            <div className="password-field-stack">
+              <label htmlFor="passwordInput">Hasło</label>
+              <input id="passwordInput" className="auth-input" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Hasło" />
+            </div>
+            <button type="submit" className="password-submit-button">Zaloguj hasłem</button>
           </form>
         )}
       </div>

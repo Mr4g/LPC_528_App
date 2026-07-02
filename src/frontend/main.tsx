@@ -78,6 +78,10 @@ interface SplunkStatusPayload {
   pending: number;
   sent: number;
   lastError: string | null;
+  lastSplunkStatus?: 'sent' | 'buffered' | 'failed' | 'disabled' | 'not_configured' | null;
+  lastSplunkAt?: string | null;
+  lastSplunkErrorCode?: number | null;
+  lastSplunkErrorText?: string | null;
 }
 
 interface LpcPortCheckPayload {
@@ -188,6 +192,15 @@ interface ProgramMappingRecord {
   updatedAt: string;
   createdBy: string | null;
   updatedBy: string | null;
+  instructionPdf?: ProgramInstructionMeta;
+}
+
+interface ProgramInstructionMeta {
+  exists: boolean;
+  originalName: string | null;
+  uploadedAt: string | null;
+  uploadedBy: string | null;
+  sizeBytes: number | null;
 }
 
 interface PublicUser extends AuthUser {
@@ -264,6 +277,10 @@ async function fetchTestSessionStatus(): Promise<TestSessionState | null> {
   return fetchJson<TestSessionState>('/api/test-session/status');
 }
 
+async function fetchSplunkStatus(): Promise<SplunkStatusPayload | null> {
+  return fetchJson<SplunkStatusPayload>('/api/splunk/status');
+}
+
 async function fetchLpcRuntimeState(): Promise<{
   lastResult: EnrichedLpcResult | null;
   results: EnrichedLpcResult[];
@@ -288,6 +305,31 @@ function getSafeLpcConnectionLabel(status: LpcStatusPayload | null): string {
   return getConnectionLabel(status.status, safeConnected);
 }
 
+type CompactLpcStatus = 'online' | 'stale' | 'offline';
+
+function getCompactLpcStatus(status: LpcStatusPayload | null): { label: string; state: CompactLpcStatus } {
+  if (!status || !status.connected || status.status === 'disconnected' || status.socketDestroyed === true || status.socketWritable === false) {
+    return { label: 'LPC offline', state: 'offline' };
+  }
+  if (status.staleConnectionDetectedAt || status.lastError) return { label: 'Brak danych', state: 'stale' };
+  return { label: 'LPC online', state: 'online' };
+}
+
+function getCompactSplunkLabel(status: SplunkStatusPayload | null): string {
+  if (!status || !status.enabled) return 'Splunk OFF';
+  switch (status.lastSplunkStatus) {
+    case 'sent': return 'Splunk OK';
+    case 'buffered': return 'Splunk bufor';
+    case 'failed':
+    case 'not_configured':
+      return 'Splunk błąd';
+    case 'disabled':
+      return 'Splunk OFF';
+    default:
+      return status.configured ? 'Splunk OK' : 'Splunk błąd';
+  }
+}
+
 
 function buildCurveSignature(points: LpcCurvePoint[]): string {
   const lastPoint = points.at(-1);
@@ -298,18 +340,21 @@ function buildCurveSignature(points: LpcCurvePoint[]): string {
 function LoginPage(props: { onLoggedIn: (user: AuthUser) => void }) {
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
-  const [cardBuffer, setCardBuffer] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const idleTimerRef = useRef<number | null>(null);
   const loginInputRef = useRef<HTMLInputElement | null>(null);
+  const cardInputRef = useRef<HTMLInputElement | null>(null);
+  const cardBufferRef = useRef('');
 
   async function submitCard(uidInput: string) {
     const cardUid = normalizeCardScanInput(uidInput);
     if (!cardUid) return;
-    setCardBuffer('');
+    cardBufferRef.current = '';
+    if (cardInputRef.current) cardInputRef.current.value = '';
     if (!CARD_UID_REGEX.test(cardUid)) {
       setError('Nieznana karta. Przyłóż przypisaną kartę lub zaloguj hasłem.');
+      window.setTimeout(() => cardInputRef.current?.focus(), 0);
       return;
     }
     const response = await fetch('/api/auth/card-login', {
@@ -321,6 +366,7 @@ function LoginPage(props: { onLoggedIn: (user: AuthUser) => void }) {
     const payload = (await response.json()) as { ok: boolean; user?: AuthUser; message?: string; error?: string };
     if (!response.ok || !payload.user) {
       setError(payload.message ?? payload.error ?? 'Nieznana karta. Przyłóż przypisaną kartę lub zaloguj hasłem.');
+      window.setTimeout(() => cardInputRef.current?.focus(), 0);
       return;
     }
     setError(null);
@@ -328,7 +374,7 @@ function LoginPage(props: { onLoggedIn: (user: AuthUser) => void }) {
   }
 
   function onCardInput(value: string) {
-    setCardBuffer(value);
+    cardBufferRef.current = value;
     if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
     idleTimerRef.current = window.setTimeout(() => void submitCard(value), CARD_SCAN_IDLE_MS);
   }
@@ -363,9 +409,14 @@ function LoginPage(props: { onLoggedIn: (user: AuthUser) => void }) {
     setPasswordVisible((visible) => {
       const next = !visible;
       if (next) window.setTimeout(() => loginInputRef.current?.focus(), 120);
+      else window.setTimeout(() => cardInputRef.current?.focus(), 120);
       return next;
     });
   }
+
+  useEffect(() => {
+    if (!passwordVisible) cardInputRef.current?.focus();
+  }, [passwordVisible]);
 
   return (
     <main className="login-shell">
@@ -385,20 +436,26 @@ function LoginPage(props: { onLoggedIn: (user: AuthUser) => void }) {
           </div>
         </div>
 
-        <section className="login-reader-panel" aria-label="Karta operatora">
-          <label className="login-section-label" htmlFor="cardUidInput"><span>▣</span>Karta operatora</label>
-          <div className="login-input-wrap">
-            <input
-              id="cardUidInput"
-              className="auth-input card-reader-input"
-              autoFocus={!passwordVisible}
-              value={cardBuffer}
-              onChange={(event) => onCardInput(event.target.value)}
-              onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void submitCard(cardBuffer); } }}
-              placeholder="Przyłóż kartę"
-              inputMode="numeric"
-            />
+        <section className="login-reader-panel card-reader-panel" aria-label="Karta operatora" onClick={() => cardInputRef.current?.focus()}>
+          <div className="card-reader-copy">
+            <span className="card-reader-icon" aria-hidden="true">▣</span>
+            <div>
+              <strong>Przyłóż kartę operatora</strong>
+              <span>Przyłóż kartę do czytnika ELATEC TWN4.</span>
+            </div>
           </div>
+          <input
+            id="cardUidInput"
+            ref={cardInputRef}
+            className="card-scan-hidden-input"
+            autoFocus={!passwordVisible}
+            defaultValue=""
+            onChange={(event) => onCardInput(event.target.value)}
+            onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void submitCard(cardBufferRef.current); } }}
+            inputMode="numeric"
+            autoComplete="off"
+            aria-label="Ukryty odczyt karty operatora"
+          />
           {error && <p className="login-error card-login-error">{error}</p>}
         </section>
 
@@ -570,7 +627,18 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
 
   async function loadMappings() {
     const payload = await fetchJson<{ ok: true; mappings: ProgramMappingRecord[] }>('/api/program-mappings');
-    if (payload?.mappings) setMappings(payload.mappings);
+    if (payload?.mappings) {
+      setMappings(payload.mappings.map((mapping) => ({
+        ...mapping,
+        instructionPdf: mapping.instructionPdf ?? {
+          exists: Boolean((mapping as unknown as { instructionPdfStoredName?: string | null }).instructionPdfStoredName),
+          originalName: (mapping as unknown as { instructionPdfOriginalName?: string | null }).instructionPdfOriginalName ?? null,
+          uploadedAt: (mapping as unknown as { instructionPdfUploadedAt?: string | null }).instructionPdfUploadedAt ?? null,
+          uploadedBy: (mapping as unknown as { instructionPdfUploadedBy?: string | null }).instructionPdfUploadedBy ?? null,
+          sizeBytes: (mapping as unknown as { instructionPdfSizeBytes?: number | null }).instructionPdfSizeBytes ?? null,
+        },
+      })));
+    }
   }
 
   async function loadZebraSettings() {
@@ -662,6 +730,23 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
     }
   }
 
+  async function uploadInstruction(mapping: ProgramMappingRecord, file: File | null) {
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await fetch(`/api/programs/${encodeURIComponent(mapping.id)}/instruction`, { method: 'POST', credentials: 'include', body: formData });
+    const payload = (await response.json()) as { ok: boolean; message?: string };
+    setMessage(response.ok ? 'Instrukcja PDF zapisana' : payload.message ?? 'Nie udało się zapisać PDF');
+    await loadMappings();
+  }
+
+  async function removeInstruction(mapping: ProgramMappingRecord) {
+    if (!window.confirm('Czy usunąć instrukcję PDF z programu?')) return;
+    await fetch(`/api/programs/${encodeURIComponent(mapping.id)}/instruction`, { method: 'DELETE', credentials: 'include' });
+    setMessage('Instrukcja PDF usunięta');
+    await loadMappings();
+  }
+
   async function toggleMapping(mapping: ProgramMappingRecord) {
     if (mapping.isActive && !window.confirm('Czy dezaktywować to mapowanie?')) return;
     await fetch(`/api/program-mappings/${mapping.id}/${mapping.isActive ? 'disable' : 'enable'}`, { method: 'PATCH', credentials: 'include' });
@@ -735,7 +820,7 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
       </section>
       <section className="users-table-wrap">
         <table>
-          <thead><tr><th>Barcode / pattern</th><th>Typ</th><th>Program</th><th>Druk</th><th>Opis</th><th>Status</th><th>UpdatedAt</th><th>Akcje</th></tr></thead>
+          <thead><tr><th>Barcode / pattern</th><th>Typ</th><th>Program</th><th>Druk</th><th>Opis</th><th>Instrukcja PDF</th><th>Status</th><th>UpdatedAt</th><th>Akcje</th></tr></thead>
           <tbody>
             {mappings.map((mapping) => (
               <tr key={mapping.id}>
@@ -744,6 +829,17 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
                 <td>{mapping.programText}</td>
                 <td>{mapping.labelPrintMode === 'ok_and_nok' ? 'OK i NOK' : 'Tylko OK'}</td>
                 <td title={mapping.description ?? ''}>{mapping.description ?? '-'}</td>
+                <td>
+                  <div className="program-instruction-cell">
+                    <span>{mapping.instructionPdf?.exists ? mapping.instructionPdf.originalName : 'Brak PDF'}</span>
+                    {mapping.instructionPdf?.uploadedAt && <small>{formatDateTime(mapping.instructionPdf.uploadedAt)} · {mapping.instructionPdf.uploadedBy ?? '-'}</small>}
+                    <label className="table-file-action">
+                      {mapping.instructionPdf?.exists ? 'Zmień PDF' : 'Dodaj PDF'}
+                      <input type="file" accept="application/pdf,.pdf" onChange={(event) => void uploadInstruction(mapping, event.target.files?.[0] ?? null)} />
+                    </label>
+                    {mapping.instructionPdf?.exists && <button type="button" onClick={() => void removeInstruction(mapping)}>Usuń PDF</button>}
+                  </div>
+                </td>
                 <td>{mapping.isActive ? 'aktywny' : 'nieaktywny'}</td>
                 <td>{formatDateTime(mapping.updatedAt)}</td>
                 <td>
@@ -790,7 +886,10 @@ function App() {
   const [programStartTestResponse, setProgramStartTestResponse] = useState<string | null>(null);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [resultsOpen, setResultsOpen] = useState(false);
+  const [instructionOpen, setInstructionOpen] = useState(false);
+  const [currentInstruction, setCurrentInstruction] = useState<ProgramInstructionMeta | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [splunkStatus, setSplunkStatus] = useState<SplunkStatusPayload | null>(null);
   const [eventCounters, setEventCounters] = useState({
     streamEvents: 0,
     resultEvents: 0,
@@ -802,6 +901,7 @@ function App() {
   const routeRef = useRef(route);
   const diagnosticsOpenRef = useRef(diagnosticsOpen);
   const resultsOpenRef = useRef(resultsOpen);
+  const instructionOpenRef = useRef(instructionOpen);
   const userMenuOpenRef = useRef(userMenuOpen);
   const ignoreCompletedCurveUntilNewStreamRef = useRef(ignoreCompletedCurveUntilNewStream);
   const hasLiveCurveRef = useRef(false);
@@ -830,7 +930,7 @@ function App() {
   function focusBarcodeInput(delayMs = 0) {
     window.setTimeout(() => {
       const input = barcodeInputRef.current;
-      if (!input || routeRef.current !== '/operator' || diagnosticsOpenRef.current || resultsOpenRef.current || userMenuOpenRef.current) return;
+      if (!input || routeRef.current !== '/operator' || diagnosticsOpenRef.current || resultsOpenRef.current || instructionOpenRef.current || userMenuOpenRef.current) return;
 
       const activeElement = document.activeElement as HTMLElement | null;
       const activeTag = activeElement?.tagName.toLowerCase();
@@ -883,6 +983,26 @@ function App() {
     if (nextStatus) setLpcStatus(nextStatus);
   }
 
+  async function refreshSplunkStatus() {
+    const nextStatus = await fetchSplunkStatus();
+    if (nextStatus) setSplunkStatus(nextStatus);
+  }
+
+  async function loadInstructionForMapping(mappingId?: string | null) {
+    if (!mappingId) {
+      setCurrentInstruction(null);
+      return;
+    }
+    const payload = await fetchJson<ProgramInstructionMeta & { ok: true }>(`/api/programs/${encodeURIComponent(mappingId)}/instruction`);
+    setCurrentInstruction(payload ? {
+      exists: payload.exists,
+      originalName: payload.originalName,
+      uploadedAt: payload.uploadedAt,
+      uploadedBy: payload.uploadedBy,
+      sizeBytes: payload.sizeBytes,
+    } : null);
+  }
+
   useEffect(() => {
     routeRef.current = route;
   }, [route]);
@@ -894,6 +1014,10 @@ function App() {
   useEffect(() => {
     resultsOpenRef.current = resultsOpen;
   }, [resultsOpen]);
+
+  useEffect(() => {
+    instructionOpenRef.current = instructionOpen;
+  }, [instructionOpen]);
 
   useEffect(() => {
     persistTheme(theme);
@@ -938,6 +1062,7 @@ function App() {
 
   useEffect(() => {
     void refreshLpcStatus();
+    void refreshSplunkStatus();
     void fetchTestSessionStatus().then((payload) => {
       if (payload) setTestSession(payload);
     });
@@ -962,7 +1087,11 @@ function App() {
     };
     refreshRuntimeState();
     const runtimePoll = window.setInterval(refreshRuntimeState, 1000);
-    return () => window.clearInterval(runtimePoll);
+    const splunkPoll = window.setInterval(() => void refreshSplunkStatus(), 5000);
+    return () => {
+      window.clearInterval(runtimePoll);
+      window.clearInterval(splunkPoll);
+    };
   }, []);
 
   useEffect(() => {
@@ -978,6 +1107,7 @@ function App() {
         setLastRejected(null);
         setStatus(payload.programStart.success ? 'program-selected' : 'start-error');
         if (payload.activeTest) setTestSession(payload.activeTest);
+        void loadInstructionForMapping(payload.currentTest.mappingId);
         if (payload.programStart.success && !hasLiveCurveRef.current) resetChartForNewTest();
       });
 
@@ -1037,6 +1167,7 @@ function App() {
         setChartFinalResult(payload);
         setFinalMarkerResult(buildFinalMarker(payload, getLastKnownCurvePoint()));
         setResultHistory((results) => mergeResultIntoHistory(results, payload, 50));
+        void refreshSplunkStatus();
         focusBarcodeInput(180);
       });
 
@@ -1065,6 +1196,7 @@ function App() {
         setChartFinalResult(payload);
         setFinalMarkerResult(buildFinalMarker(payload, getLastKnownCurvePoint()));
         setResultHistory((results) => mergeResultIntoHistory(results, payload, 50));
+        void refreshSplunkStatus();
         focusBarcodeInput(220);
       });
 
@@ -1182,6 +1314,7 @@ function App() {
     setBarcode('');
     setStatus(payload.programStart.success ? 'program-selected' : 'start-error');
     if (payload.activeTest) setTestSession(payload.activeTest);
+    await loadInstructionForMapping(payload.currentTest.mappingId);
     if (!payload.programStart.success) focusBarcodeInput(0);
   }
 
@@ -1243,8 +1376,10 @@ function App() {
   const topResultLabel = lastResult ? formatResultLabel(lastResult.result) : '-';
   const startMessage = lastAccepted ? getProgramStartOperatorMessage(lastAccepted.programStart, lastAccepted.currentTest.programText) : statusLabels[status];
   const startOk = lastAccepted?.programStart.success ?? false;
-  const connectionLabel = getSafeLpcConnectionLabel(lpcStatus);
-  const connectionClass = lpcStatus?.lastError ? 'connection-error' : `connection-${lpcStatus?.status ?? 'idle'}`;
+  const compactLpcStatus = getCompactLpcStatus(lpcStatus);
+  const splunkCompactLabel = getCompactSplunkLabel(splunkStatus);
+  const connectionClass = `connection-${compactLpcStatus.state}`;
+  const activeInstructionMappingId = lastAccepted?.currentTest.mappingId ?? null;
   const displayedCurvePoints = curvePoints.length > 0 ? curvePoints : completedCurvePoints;
   const scanLocked = Boolean(testSession?.locked);
   const scanStatusText = scanLocked ? 'Trwa test — poczekaj na wynik' : (status === 'program-selected' && lastAccepted ? `${lastAccepted.currentTest.programText} wybrany` : statusLabels[status]);
@@ -1338,13 +1473,19 @@ function App() {
           <div className="top-metric"><span>Program</span><strong>{currentProgram}</strong></div>
           <div className="top-metric"><span>Barcode</span><strong>{lastBarcode}</strong></div>
           <div className={`top-result ${lastResult ? getResultClass(lastResult.result) : 'status-unknown'}`}><span>Wynik</span><strong>{topResultLabel}</strong></div>
+          {currentInstruction?.exists && activeInstructionMappingId && (
+            <button type="button" className="instruction-top-button" onClick={() => setInstructionOpen(true)} title={currentInstruction.originalName ?? 'Instrukcja PDF'}>
+              <span aria-hidden="true">PDF</span>
+              <strong>Instrukcja</strong>
+            </button>
+          )}
         </div>
         <div className="top-bar-actions">
           <div className={`connection-badge ${connectionClass}`}>
             <span className="connection-dot" />
             <div>
-              <strong>{connectionLabel}</strong>
-              <small>{lpcStatus ? `${lpcStatus.host}:${lpcStatus.port}` : 'LPC status...'}</small>
+              <strong>{compactLpcStatus.label}</strong>
+              <small>{splunkCompactLabel}</small>
               {lpcStatus?.nextReconnectAt && <small>Ponowna próba: {formatDateTime(lpcStatus.nextReconnectAt)}</small>}
               {lpcStatus?.lastError && <small className="connection-error-text">{lpcStatus.lastError}</small>}
             </div>
@@ -1492,6 +1633,31 @@ function App() {
             <div className="results-modal-table">
               {resultsTable}
             </div>
+          </section>
+        </div>
+      )}
+
+      {instructionOpen && activeInstructionMappingId && currentInstruction?.exists && (
+        <div className="app-modal-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) {
+            setInstructionOpen(false);
+            focusBarcodeInput(120);
+          }
+        }}>
+          <section className="app-modal instruction-modal" role="dialog" aria-modal="true" aria-label="Instrukcja programu">
+            <header className="modal-header">
+              <div>
+                <span className="eyebrow">Instrukcja PDF</span>
+                <h2>Instrukcja programu {currentProgram}</h2>
+                <p>{currentInstruction.originalName ?? 'instruction.pdf'}</p>
+              </div>
+              <button type="button" className="modal-close" onClick={() => {
+                setInstructionOpen(false);
+                focusBarcodeInput(120);
+              }}>×</button>
+            </header>
+            <iframe className="instruction-frame" src={`/api/programs/${encodeURIComponent(activeInstructionMappingId)}/instruction/file`} title={`Instrukcja programu ${currentProgram}`} />
+            <a className="instruction-fallback-link" href={`/api/programs/${encodeURIComponent(activeInstructionMappingId)}/instruction/file`} target="_blank" rel="noreferrer">Otwórz PDF</a>
           </section>
         </div>
       )}

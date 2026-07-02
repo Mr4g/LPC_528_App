@@ -65,6 +65,7 @@ const envSchema = z.object({
   PROGRAM_START_MODE: z.enum(['mock', 'script']).default('mock'),
   PROGRAM_START_COMMAND: z.string().min(1).default('python3'),
   PROGRAM_START_SCRIPT_PATH: z.string().default(''),
+  PROGRAM_INSTRUCTION_UPLOAD_DIR: z.string().min(1).default('data/uploads/program-instructions'),
   LPC_EIP_HOST: z.string().default(''),
   LPC_EIP_PORT: z.coerce.number().int().positive().default(44818),
   EIP_DRY_RUN: z.coerce.boolean().default(false),

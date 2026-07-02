@@ -1,6 +1,6 @@
 import http from 'node:http';
 import https from 'node:https';
-import type { SplunkHecEnvelope, SplunkRuntimeConfig, SplunkSendResult } from './splunkTypes';
+import type { LastSplunkStatus, SplunkHecEnvelope, SplunkRuntimeConfig, SplunkSendResult } from './splunkTypes';
 import { isSplunkConfigured } from './splunkConfig';
 
 export function normalizeSplunkHecUrl(url: string): string {
@@ -41,6 +41,10 @@ function parseSplunkResponse(body: string): { code?: number; text?: string } | n
 
 export class SplunkClient {
   private readonly normalizedUrl: string;
+  private lastSplunkStatus: LastSplunkStatus | null = null;
+  private lastSplunkAt: string | null = null;
+  private lastSplunkErrorCode: number | null = null;
+  private lastSplunkErrorText: string | null = null;
 
   constructor(private readonly config: SplunkRuntimeConfig) {
     this.normalizedUrl = config.url ? normalizeSplunkHecUrl(config.url) : '';
@@ -61,12 +65,29 @@ export class SplunkClient {
       workplace: this.config.workplace,
       device: this.config.device,
       verifyTls: this.config.verifyTls,
+      lastSplunkStatus: this.lastSplunkStatus,
+      lastSplunkAt: this.lastSplunkAt,
+      lastSplunkErrorCode: this.lastSplunkErrorCode,
+      lastSplunkErrorText: this.lastSplunkErrorText,
     };
   }
 
+  setLastStatus(status: LastSplunkStatus, errorCode: number | null = null, errorText: string | null = null): void {
+    this.lastSplunkStatus = status;
+    this.lastSplunkAt = new Date().toISOString();
+    this.lastSplunkErrorCode = errorCode;
+    this.lastSplunkErrorText = errorText;
+  }
+
   async send(envelope: SplunkHecEnvelope): Promise<SplunkSendResult> {
-    if (!this.config.enabled) return { ok: true, skipped: true };
-    if (!isSplunkConfigured(this.config)) return { ok: false, error: 'Splunk HEC URL or token is not configured' };
+    if (!this.config.enabled) {
+      this.setLastStatus('disabled');
+      return { ok: true, skipped: true };
+    }
+    if (!isSplunkConfigured(this.config)) {
+      this.setLastStatus('not_configured', null, 'Splunk HEC URL or token is not configured');
+      return { ok: false, error: 'Splunk HEC URL or token is not configured' };
+    }
 
     const started = Date.now();
     console.log(`[SPLUNK] tls verify=${this.config.verifyTls}`);
@@ -85,12 +106,14 @@ export class SplunkClient {
           const code = parsed?.code;
           if (status >= 200 && status < 300 && (code === undefined || code === 0)) {
             console.log(`[SPLUNK] sent status=${status} code=${code ?? 'n/a'} durationMs=${durationMs}`);
+            this.setLastStatus('sent', code ?? null, null);
             resolve({ ok: true, status, durationMs, code });
             return;
           }
           const text = parsed?.text ?? responseBody;
           const error = status >= 200 && status < 300 ? `Splunk HEC error code=${code ?? 'unknown'} text=${text}` : `HTTP ${status}`;
           console.warn(`[SPLUNK] failed status=${status} code=${code ?? 'n/a'} text=${text} error=${error}`);
+          this.setLastStatus('failed', code ?? null, text || error);
           resolve({ ok: false, status, durationMs, code, error });
         });
       });
@@ -99,6 +122,7 @@ export class SplunkClient {
       request.on('error', (error) => {
         const message = error.message;
         console.warn(`[SPLUNK] failed status=network error=${message}`);
+        this.setLastStatus('failed', null, message);
         resolve({ ok: false, durationMs: Date.now() - started, error: message });
       });
       request.write(body);

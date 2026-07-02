@@ -77,6 +77,12 @@ function rowToProgramMapping(row: Record<string, unknown>): ProgramMappingRecord
     updatedAt: String(row.updatedAt),
     createdBy: row.createdBy === null ? null : String(row.createdBy),
     updatedBy: row.updatedBy === null ? null : String(row.updatedBy),
+    instructionPdfStoredName: row.instructionPdfStoredName === null || row.instructionPdfStoredName === undefined ? null : String(row.instructionPdfStoredName),
+    instructionPdfOriginalName: row.instructionPdfOriginalName === null || row.instructionPdfOriginalName === undefined ? null : String(row.instructionPdfOriginalName),
+    instructionPdfMimeType: row.instructionPdfMimeType === null || row.instructionPdfMimeType === undefined ? null : String(row.instructionPdfMimeType),
+    instructionPdfSizeBytes: row.instructionPdfSizeBytes === null || row.instructionPdfSizeBytes === undefined ? null : Number(row.instructionPdfSizeBytes),
+    instructionPdfUploadedAt: row.instructionPdfUploadedAt === null || row.instructionPdfUploadedAt === undefined ? null : String(row.instructionPdfUploadedAt),
+    instructionPdfUploadedBy: row.instructionPdfUploadedBy === null || row.instructionPdfUploadedBy === undefined ? null : String(row.instructionPdfUploadedBy),
   };
 }
 
@@ -234,16 +240,16 @@ export class AppDatabase {
   findProgramMappingById(id: string): ProgramMappingRecord | null { const row = this.db.prepare('SELECT * FROM program_mappings WHERE id = ?').get(id) as Record<string, unknown> | undefined; return row ? rowToProgramMapping(row) : null; }
 
   insertProgramMapping(mapping: ProgramMappingRecord): void {
-    this.db.prepare(`INSERT INTO program_mappings (id, barcodePattern, programNumber, programText, description, isActive, matchType, labelPrintMode, createdAt, updatedAt, createdBy, updatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(mapping.id, mapping.barcodePattern, mapping.programNumber, mapping.programText, mapping.description, boolToInt(mapping.isActive), mapping.matchType, mapping.labelPrintMode, mapping.createdAt, mapping.updatedAt, mapping.createdBy, mapping.updatedBy);
+    this.db.prepare(`INSERT INTO program_mappings (id, barcodePattern, programNumber, programText, description, isActive, matchType, labelPrintMode, createdAt, updatedAt, createdBy, updatedBy, instructionPdfStoredName, instructionPdfOriginalName, instructionPdfMimeType, instructionPdfSizeBytes, instructionPdfUploadedAt, instructionPdfUploadedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(mapping.id, mapping.barcodePattern, mapping.programNumber, mapping.programText, mapping.description, boolToInt(mapping.isActive), mapping.matchType, mapping.labelPrintMode, mapping.createdAt, mapping.updatedAt, mapping.createdBy, mapping.updatedBy, mapping.instructionPdfStoredName, mapping.instructionPdfOriginalName, mapping.instructionPdfMimeType, mapping.instructionPdfSizeBytes, mapping.instructionPdfUploadedAt, mapping.instructionPdfUploadedBy);
   }
 
   updateProgramMapping(id: string, patch: Partial<ProgramMappingRecord>): ProgramMappingRecord | null {
     const existing = this.findProgramMappingById(id);
     if (!existing) return null;
     const next = { ...existing, ...patch };
-    this.db.prepare(`UPDATE program_mappings SET barcodePattern = ?, programNumber = ?, programText = ?, description = ?, isActive = ?, matchType = ?, labelPrintMode = ?, createdAt = ?, updatedAt = ?, createdBy = ?, updatedBy = ? WHERE id = ?`)
-      .run(next.barcodePattern, next.programNumber, next.programText, next.description, boolToInt(next.isActive), next.matchType, next.labelPrintMode, next.createdAt, next.updatedAt, next.createdBy, next.updatedBy, id);
+    this.db.prepare(`UPDATE program_mappings SET barcodePattern = ?, programNumber = ?, programText = ?, description = ?, isActive = ?, matchType = ?, labelPrintMode = ?, createdAt = ?, updatedAt = ?, createdBy = ?, updatedBy = ?, instructionPdfStoredName = ?, instructionPdfOriginalName = ?, instructionPdfMimeType = ?, instructionPdfSizeBytes = ?, instructionPdfUploadedAt = ?, instructionPdfUploadedBy = ? WHERE id = ?`)
+      .run(next.barcodePattern, next.programNumber, next.programText, next.description, boolToInt(next.isActive), next.matchType, next.labelPrintMode, next.createdAt, next.updatedAt, next.createdBy, next.updatedBy, next.instructionPdfStoredName, next.instructionPdfOriginalName, next.instructionPdfMimeType, next.instructionPdfSizeBytes, next.instructionPdfUploadedAt, next.instructionPdfUploadedBy, id);
     return this.findProgramMappingById(id);
   }
 
@@ -375,9 +381,14 @@ export class AppDatabase {
     if (!sessionColumns.some((column) => column.name === 'operatorUserId')) this.db.prepare('ALTER TABLE test_sessions ADD COLUMN operatorUserId TEXT').run();
     this.db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_card_uid_hash ON users(card_uid_hash) WHERE card_uid_hash IS NOT NULL').run();
     const programColumns = this.db.prepare('PRAGMA table_info(program_mappings)').all() as Array<{ name: string }>;
-    if (!programColumns.some((column) => column.name === 'labelPrintMode')) {
-      this.db.prepare("ALTER TABLE program_mappings ADD COLUMN labelPrintMode TEXT NOT NULL DEFAULT 'ok_only'").run();
-    }
+    const addProgramColumn = (name: string, sql: string) => { if (!programColumns.some((column) => column.name === name)) this.db.prepare(sql).run(); };
+    addProgramColumn('labelPrintMode', "ALTER TABLE program_mappings ADD COLUMN labelPrintMode TEXT NOT NULL DEFAULT 'ok_only'");
+    addProgramColumn('instructionPdfStoredName', 'ALTER TABLE program_mappings ADD COLUMN instructionPdfStoredName TEXT');
+    addProgramColumn('instructionPdfOriginalName', 'ALTER TABLE program_mappings ADD COLUMN instructionPdfOriginalName TEXT');
+    addProgramColumn('instructionPdfMimeType', 'ALTER TABLE program_mappings ADD COLUMN instructionPdfMimeType TEXT');
+    addProgramColumn('instructionPdfSizeBytes', 'ALTER TABLE program_mappings ADD COLUMN instructionPdfSizeBytes INTEGER');
+    addProgramColumn('instructionPdfUploadedAt', 'ALTER TABLE program_mappings ADD COLUMN instructionPdfUploadedAt TEXT');
+    addProgramColumn('instructionPdfUploadedBy', 'ALTER TABLE program_mappings ADD COLUMN instructionPdfUploadedBy TEXT');
     this.db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updatedAt, updatedBy) VALUES ('zebra.autoPrintEnabled', 'true', ?, NULL)").run(new Date().toISOString());
   }
 

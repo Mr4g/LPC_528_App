@@ -30,6 +30,7 @@ export class SplunkBuffer {
       lastError: result.error ?? 'Splunk send failed',
       nextAttemptAt: this.nextAttemptAt(),
     });
+    this.client.setLastStatus?.('buffered', result.code ?? null, result.error ?? 'Splunk send queued');
     console.warn(`[SPLUNK_BUFFER] queued id=${id} testId=${testId ?? ''}`);
   }
 

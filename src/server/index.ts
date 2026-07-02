@@ -177,7 +177,7 @@ app.use('/api/test-session', createTestSessionRouter(testSessionManager));
 app.use('/api/backup', createBackupRouter());
 app.use('/api/zebra', createZebraRouter(database, zebraPrinter));
 app.use('/api/splunk', createSplunkRouter(splunkClient, splunkBuffer));
-app.use('/api/programs', requireAuth, createProgramsRouter({ config, programStarter }));
+app.use('/api/programs', requireAuth, createProgramsRouter({ config, programStarter, programMappingService }));
 app.use('/api/program-mappings', createProgramMappingsRouter(programMappingService));
 app.use('/api/lpc', createLpcRouter({
   config,

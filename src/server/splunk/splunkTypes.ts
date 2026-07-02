@@ -37,6 +37,8 @@ export interface SplunkSendResult {
   skipped?: boolean;
 }
 
+export type LastSplunkStatus = 'sent' | 'buffered' | 'failed' | 'disabled' | 'not_configured';
+
 export interface SplunkRuntimeConfig {
   enabled: boolean;
   url: string;

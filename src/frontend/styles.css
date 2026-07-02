@@ -1961,3 +1961,138 @@ body.theme-dark .card-login-error {
   .rfid-badge { width: 48px; height: 48px; }
   .login-card.operator-login-card { padding: 24px; }
 }
+
+/* Hidden card scan capture and program instruction UI */
+.card-reader-panel {
+  cursor: text;
+}
+
+.card-reader-copy {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.card-reader-copy strong {
+  display: block;
+  color: var(--carrier-text);
+  font-size: 1.05rem;
+  line-height: 1.2;
+}
+
+.card-reader-copy span:not(.card-reader-icon) {
+  display: block;
+  margin-top: 4px;
+  color: var(--carrier-muted);
+  font-size: 0.92rem;
+  font-weight: 650;
+}
+
+.card-reader-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 11px;
+  color: var(--carrier-blue-2);
+  background: rgba(0, 174, 239, 0.09);
+}
+
+.card-scan-hidden-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.connection-online .connection-dot { background: var(--status-ok); box-shadow: 0 0 0 7px rgba(19, 165, 56, 0.14); }
+.connection-stale .connection-dot { background: var(--status-warning); box-shadow: 0 0 0 7px rgba(242, 153, 0, 0.14); }
+.connection-offline .connection-dot { background: var(--status-nok); box-shadow: 0 0 0 7px rgba(217, 48, 37, 0.14); }
+
+.instruction-top-button {
+  min-height: 50px;
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 16px;
+  border: 1px solid rgba(0, 174, 239, 0.22);
+  background: rgba(0, 174, 239, 0.10);
+  color: var(--carrier-blue-2);
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+.instruction-top-button span {
+  font-size: 0.72rem;
+  font-weight: 1000;
+  letter-spacing: 0.05em;
+}
+
+.instruction-top-button strong {
+  font-size: 0.9rem;
+}
+
+.instruction-modal {
+  width: min(980px, 94vw);
+  height: min(86vh, 860px);
+}
+
+.instruction-frame {
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 16px;
+  background: #fff;
+}
+
+.instruction-fallback-link {
+  color: var(--carrier-blue-2);
+  font-weight: 900;
+}
+
+.program-instruction-cell {
+  display: grid;
+  gap: 6px;
+  min-width: 150px;
+}
+
+.program-instruction-cell small {
+  color: var(--carrier-muted);
+}
+
+.table-file-action {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 174, 239, 0.28);
+  color: var(--carrier-blue-2);
+  padding: 6px 10px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.table-file-action input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+body.theme-dark .card-reader-copy strong { color: #e5edf8; }
+body.theme-dark .card-reader-copy span:not(.card-reader-icon),
+body.theme-dark .program-instruction-cell small { color: #9fb0c9; }
+body.theme-dark .instruction-top-button,
+body.theme-dark .card-reader-icon {
+  background: rgba(0, 174, 239, 0.10);
+  border-color: rgba(125, 211, 252, 0.18);
+  color: #7dd3fc;
+}

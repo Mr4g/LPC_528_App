@@ -7,7 +7,10 @@ export function createProgramMappingsRouter(service: ProgramMappingService): Rou
   router.use(requireRole(['admin', 'line_leader']));
 
   router.get('/', (_req, res) => {
-    res.json({ ok: true, mappings: service.list() });
+    res.json({ ok: true, mappings: service.list().map((mapping) => ({
+      ...mapping,
+      instructionPdf: service.getInstructionMetadata(mapping.id),
+    })) });
   });
 
   router.post('/', (req: AuthenticatedRequest, res) => {

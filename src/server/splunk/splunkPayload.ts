@@ -1,3 +1,4 @@
+import os from 'node:os';
 import type { SplunkErrorContext, SplunkHecEnvelope, SplunkResultContext, SplunkRuntimeConfig } from './splunkTypes';
 import type { LpcCurvePoint } from '../../lpc/LpcTestCurveBuffer';
 
@@ -24,16 +25,22 @@ function resultStatus(raw: string): 'OK' | 'NOK' | 'ERROR' | 'UNKNOWN' {
   return 'UNKNOWN';
 }
 
-function mapCurve(points: LpcCurvePoint[], unit: string | null) {
+function mapCurvePoints(points: LpcCurvePoint[]) {
+  return points.map((point, index) => ({
+    t: index,
+    elapsedSec: point.elapsedTimeSec,
+    value: point.pressureMbar,
+    raw: point.segment,
+  }));
+}
+
+function fields(config: SplunkRuntimeConfig) {
   return {
-    pointCount: points.length,
-    unit,
-    points: points.map((point, index) => ({
-      t: index,
-      elapsedSec: point.elapsedTimeSec,
-      value: point.pressureMbar,
-      raw: point.segment,
-    })),
+    workplaceName: config.source,
+    isMachine: 'true',
+    line: 'W16',
+    hostname: os.hostname(),
+    workplace: config.source,
   };
 }
 
@@ -43,22 +50,25 @@ export function buildSplunkResultEnvelope(config: SplunkRuntimeConfig, context: 
   const programText = result.currentTestProgramText ?? result.programText ?? result.program;
   const programNumber = result.currentTestProgram ?? (programText?.startsWith('P') ? Number(programText.slice(1)) : null);
   const matchedKey = result.currentTestBarcode ?? result.barcode;
-  const curve = config.sendCurve ? mapCurve(context.curvePoints, result.leakUnit) : mapCurve([], result.leakUnit);
+  const curvePoints = config.sendCurve ? mapCurvePoints(context.curvePoints) : [];
+  const operatorLogin = result.operatorLogin ?? session?.operatorLogin ?? null;
 
   return {
     time: unixTime(endedAt),
+    sourcetype: config.sourcetype,
     index: config.index,
     source: config.source,
-    sourcetype: config.sourcetype,
     event: {
       eventType: 'lpc_test_result',
+      name: 'LPC.TestFinished',
       device: config.source,
       app: 'lpc-528-app',
       testId: session?.activeTestId ?? null,
       startedAt: session?.startedAt ?? result.currentTestSelectedAt ?? null,
       endedAt,
       durationMs: durationMs(session?.startedAt, endedAt),
-      operatorLogin: result.operatorLogin ?? session?.operatorLogin ?? null,
+      operatorLogin,
+      operatorId: operatorLogin,
       barcode: result.barcode,
       matchedKey,
       programNumber,
@@ -68,26 +78,27 @@ export function buildSplunkResultEnvelope(config: SplunkRuntimeConfig, context: 
       leakValue: result.leakValue,
       leakUnit: result.leakUnit,
       leakText: leakText(result.leakValue, result.leakUnit),
-      lpc: {
-        host: context.config.LPC_HOST,
-        telnetPort: context.config.LPC_PORT,
-        interfaceSelection: Number(context.config.LPC_INTERFACE_SELECTION),
-      },
-      curve,
-      errors: null,
+      curvePointCount: curvePoints.length,
+      curveUnit: result.leakUnit,
+      curvePoints,
+      errorCode: null,
+      errorMessage: null,
     },
+    fields: fields(config),
   };
 }
 
 export function buildSplunkErrorEnvelope(config: SplunkRuntimeConfig, context: SplunkErrorContext): SplunkHecEnvelope {
   const endedAt = context.session.completedAt ?? context.session.timeoutAt ?? new Date().toISOString();
+  const curvePoints = config.sendCurve ? mapCurvePoints(context.curvePoints) : [];
   return {
     time: unixTime(endedAt),
+    sourcetype: config.sourcetype,
     index: config.index,
     source: config.source,
-    sourcetype: config.sourcetype,
     event: {
       eventType: 'lpc_test_result',
+      name: 'LPC.TestFinished',
       device: config.source,
       app: 'lpc-528-app',
       testId: context.session.activeTestId,
@@ -95,6 +106,7 @@ export function buildSplunkErrorEnvelope(config: SplunkRuntimeConfig, context: S
       endedAt,
       durationMs: durationMs(context.session.startedAt, endedAt),
       operatorLogin: context.session.operatorLogin ?? null,
+      operatorId: context.session.operatorLogin ?? null,
       barcode: context.session.barcode,
       matchedKey: context.session.barcode,
       programNumber: context.session.programNumber,
@@ -104,9 +116,12 @@ export function buildSplunkErrorEnvelope(config: SplunkRuntimeConfig, context: S
       leakValue: null,
       leakUnit: null,
       leakText: null,
-      lpc: { host: context.config.LPC_HOST, telnetPort: context.config.LPC_PORT, interfaceSelection: Number(context.config.LPC_INTERFACE_SELECTION) },
-      curve: config.sendCurve ? mapCurve(context.curvePoints, null) : mapCurve([], null),
-      errors: { reason: context.reason, message: context.message },
+      curvePointCount: curvePoints.length,
+      curveUnit: null,
+      curvePoints,
+      errorCode: context.reason,
+      errorMessage: context.message,
     },
+    fields: fields(config),
   };
 }

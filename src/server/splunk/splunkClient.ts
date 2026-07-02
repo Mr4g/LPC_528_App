@@ -56,6 +56,7 @@ export class SplunkClient {
       index: this.config.index,
       source: this.config.source,
       sourcetype: this.config.sourcetype,
+      verifyTls: this.config.verifyTls,
     };
   }
 
@@ -82,8 +83,9 @@ export class SplunkClient {
             resolve({ ok: true, status, durationMs, code });
             return;
           }
-          const error = status >= 200 && status < 300 ? `Splunk HEC error code=${code ?? 'unknown'} text=${parsed?.text ?? responseBody}` : `HTTP ${status}`;
-          console.warn(`[SPLUNK] failed status=${status} error=${error}`);
+          const text = parsed?.text ?? responseBody;
+          const error = status >= 200 && status < 300 ? `Splunk HEC error code=${code ?? 'unknown'} text=${text}` : `HTTP ${status}`;
+          console.warn(`[SPLUNK] failed status=${status} code=${code ?? 'n/a'} text=${text} error=${error}`);
           resolve({ ok: false, status, durationMs, code, error });
         });
       });

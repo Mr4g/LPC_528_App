@@ -39,12 +39,13 @@ describe('buildSplunkResultEnvelope', () => {
       config: { LPC_HOST: '192.0.2.10', LPC_PORT: 23, LPC_INTERFACE_SELECTION: '1' },
     });
     expect(envelope.index).toBe('machinedata_w16');
-    expect(envelope.event).toMatchObject({ barcode: '5901234123457', programNumber: 1, programText: 'P01', resultStatus: 'OK', resultRawStatus: 'ACCEPT', leakValue: 7.253, leakUnit: 'Pa/s', operatorLogin: 'ADM' });
-    expect(envelope.event.curve).toMatchObject({ pointCount: 1, points: [{ t: 0, elapsedSec: 0.1, value: 1, raw: 'raw-stream' }] });
+    expect(envelope).toMatchObject({ index: 'machinedata_w16', source: 'LPC-528-01', sourcetype: '_json' });
+    expect(envelope.event).toMatchObject({ name: 'LPC.TestFinished', barcode: '5901234123457', programNumber: 1, programText: 'P01', resultStatus: 'OK', resultRawStatus: 'ACCEPT', leakValue: 7.253, leakUnit: 'Pa/s', operatorLogin: 'ADM', operatorId: 'ADM', curvePointCount: 1, curveUnit: 'Pa/s', curvePoints: [{ t: 0, elapsedSec: 0.1, value: 1, raw: 'raw-stream' }] });
+    expect(envelope.fields).toMatchObject({ workplaceName: 'LPC-528-01', isMachine: 'true', line: 'W16', workplace: 'LPC-528-01' });
   });
 
   it('sends empty curve as pointCount 0 and points []', () => {
     const envelope = buildSplunkResultEnvelope(config, { result, session: null, curvePoints: [], config: { LPC_HOST: '192.0.2.10', LPC_PORT: 23, LPC_INTERFACE_SELECTION: '1' } });
-    expect(envelope.event.curve).toMatchObject({ pointCount: 0, points: [] });
+    expect(envelope.event).toMatchObject({ curvePointCount: 0, curvePoints: [] });
   });
 });

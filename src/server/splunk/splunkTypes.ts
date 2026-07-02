@@ -25,6 +25,7 @@ export interface SplunkHecEnvelope {
   source: string;
   sourcetype: string;
   event: Record<string, unknown>;
+  fields?: Record<string, string>;
 }
 
 export interface SplunkSendResult {

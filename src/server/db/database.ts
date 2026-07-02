@@ -347,11 +347,13 @@ export class AppDatabase {
       .run(status, attempts, error, nextAttemptAt, new Date().toISOString(), id);
   }
 
-  getSplunkBufferStats(): { pending: number; sent: number; lastError: string | null } {
+  getSplunkBufferStats(): { pending: number; sending: number; sent: number; failed: number; lastError: string | null } {
     const pending = this.count("SELECT COUNT(*) AS count FROM splunk_event_buffer WHERE status = 'pending'");
+    const sending = this.count("SELECT COUNT(*) AS count FROM splunk_event_buffer WHERE status = 'sending'");
     const sent = this.count("SELECT COUNT(*) AS count FROM splunk_event_buffer WHERE status = 'sent'");
+    const failed = this.count("SELECT COUNT(*) AS count FROM splunk_event_buffer WHERE status = 'failed'");
     const row = this.db.prepare("SELECT last_error FROM splunk_event_buffer WHERE last_error IS NOT NULL ORDER BY updated_at DESC LIMIT 1").get() as { last_error?: string } | undefined;
-    return { pending, sent, lastError: row?.last_error ?? null };
+    return { pending, sending, sent, failed, lastError: row?.last_error ?? null };
   }
 
   private migrate(): void {

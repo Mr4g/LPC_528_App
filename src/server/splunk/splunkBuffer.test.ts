@@ -48,4 +48,15 @@ describe('SplunkBuffer', () => {
     await buffer.sendOrQueue(envelope);
     expect(db.getSplunkBufferStats()).toMatchObject({ pending: 1, lastError: 'Splunk HEC URL or token is not configured' });
   });
+
+  it('exposes retry worker status and keeps maxAttempts=0 retryable after failures', async () => {
+    const db = new AppDatabase(':memory:');
+    db.enqueueSplunkEvent({ eventType: 'lpc_test_result', testId: 't1', payloadJson: JSON.stringify(envelope) });
+    const buffer = new SplunkBuffer(db, client({ ok: false, error: 'network' }), config({ bufferMaxAttempts: 0, bufferRetryIntervalMs: 1000 }));
+
+    await buffer.retryPending();
+
+    expect(db.getSplunkBufferStats()).toMatchObject({ pending: 1, failed: 0, lastError: 'network' });
+    expect(buffer.getStatus()).toMatchObject({ retryIntervalMs: 1000, lastRetryAt: expect.any(String), nextRetryAt: expect.any(String) });
+  });
 });

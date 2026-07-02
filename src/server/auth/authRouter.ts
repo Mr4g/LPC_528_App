@@ -12,6 +12,7 @@ export interface AuthRouterOptions {
   resetDefaultAdmin: boolean;
   cardLoginEnabled: boolean;
   testSessionManager?: TestSessionManager;
+  testIdleLogoutMinutes: number;
 }
 
 export function createAuthRouter(authService: AuthService, options: AuthRouterOptions): Router {
@@ -48,6 +49,7 @@ export function createAuthRouter(authService: AuthService, options: AuthRouterOp
     if (!options.cardLoginEnabled) return res.status(404).json({ ok: false, error: 'CARD_LOGIN_DISABLED', message: 'Logowanie kartą jest wyłączone.' });
     const cardUid = typeof req.body?.cardUid === 'string' ? req.body.cardUid : '';
     const result = authService.handleCardAction(cardUid, req.user, options.testSessionManager?.getStatus().locked ?? false);
+    if (req.user && !options.testSessionManager?.getStatus().locked) authService.markTestActivity(req.user.id);
     if (!result.ok) return res.status(result.action === 'TEST_IN_PROGRESS' ? 409 : 404).json({ ok: false, action: result.action, message: result.message });
     if (result.action === 'LOGGED_OUT') {
       clearSessionCookie(res);
@@ -64,7 +66,14 @@ export function createAuthRouter(authService: AuthService, options: AuthRouterOp
   });
 
   router.get('/me', (req: AuthenticatedRequest, res) => {
-    res.json({ ok: true, user: req.user ?? null });
+    if (req.user) authService.markTestActivity(req.user.id);
+    res.json({ ok: true, user: req.user ?? null, idleLogoutMinutes: options.testIdleLogoutMinutes });
+  });
+
+  router.post('/activity', (req: AuthenticatedRequest, res) => {
+    if (!req.user) return res.status(401).json({ ok: false, error: 'AUTH_REQUIRED', message: 'Sesja wygasła. Przyłóż kartę lub zaloguj hasłem.' });
+    if (!options.testSessionManager?.getStatus().locked) authService.markTestActivity(req.user.id);
+    res.json({ ok: true });
   });
 
   router.get('/debug', (_req, res) => {

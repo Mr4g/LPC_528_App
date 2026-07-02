@@ -287,7 +287,7 @@ export class AuthService {
     return `${body}.${signature}`;
   }
 
-  verifySession(token: string | undefined): AuthUser | null {
+  verifySession(token: string | undefined, options: { allowIdleExpired?: boolean } = {}): AuthUser | null {
     if (!token) return null;
     const [body, signature] = token.split('.');
     if (!body || !signature) return null;
@@ -300,7 +300,7 @@ export class AuthService {
     if (payload.exp < Date.now()) return null;
     const user = this.db.findById(payload.id);
     if (!user || !user.isActive) return null;
-    if (this.isSessionIdleExpired(user)) return null;
+    if (!options.allowIdleExpired && this.isSessionIdleExpired(user)) return null;
     return { id: user.id, login: user.login, role: user.role };
   }
 

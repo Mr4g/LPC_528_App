@@ -2112,3 +2112,19 @@ body.theme-dark .card-reader-icon {
   border-color: rgba(125, 211, 252, 0.18);
   color: #7dd3fc;
 }
+
+.login-info-message {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(0, 174, 239, 0.09);
+  border: 1px solid rgba(0, 174, 239, 0.18);
+  color: var(--carrier-blue-2);
+  font-weight: 800;
+}
+
+body.theme-dark .login-info-message {
+  color: #7dd3fc;
+  background: rgba(0, 174, 239, 0.10);
+  border-color: rgba(125, 211, 252, 0.18);
+}

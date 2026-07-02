@@ -76,8 +76,15 @@ interface SplunkStatusPayload {
   workplace: string;
   device: string;
   pending: number;
+  sending?: number;
   sent: number;
+  failed?: number;
   lastError: string | null;
+  bufferEnabled?: boolean;
+  bufferWorkerEnabled?: boolean;
+  retryIntervalMs?: number;
+  lastRetryAt?: string | null;
+  nextRetryAt?: string | null;
   lastSplunkStatus?: 'sent' | 'buffered' | 'failed' | 'disabled' | 'not_configured' | null;
   lastSplunkAt?: string | null;
   lastSplunkErrorCode?: number | null;
@@ -345,7 +352,7 @@ function buildCurveSignature(points: LpcCurvePoint[]): string {
   return `${points.length}:${lastPoint.elapsedTimeSec}:${lastPoint.pressureMbar ?? 'null'}:${lastPoint.segment}`;
 }
 
-function LoginPage(props: { onLoggedIn: (user: AuthUser) => void }) {
+function LoginPage(props: { onLoggedIn: (user: AuthUser) => void; idleMessage?: string | null }) {
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -443,6 +450,7 @@ function LoginPage(props: { onLoggedIn: (user: AuthUser) => void }) {
             </svg>
           </div>
         </div>
+        {props.idleMessage && <p className="login-info-message">{props.idleMessage}</p>}
 
         <section className="login-reader-panel card-reader-panel" aria-label="Karta operatora" onClick={() => cardInputRef.current?.focus()}>
           <div className="card-reader-copy">
@@ -818,8 +826,9 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
         <div className="settings-row">
           <div>
             <div className="settings-row-title">Splunk</div>
-            <div className="settings-row-subtitle">Status: {splunkStatus?.enabled ? 'Włączony' : 'Wyłączony'} · Konfiguracja: {splunkStatus?.configured ? 'OK' : splunkStatus?.urlConfigured ? 'Brak tokena' : 'Brak URL'} · Bufor: {splunkStatus?.pending ?? 0} oczekujących</div>
+            <div className="settings-row-subtitle">Status: {splunkStatus?.enabled ? 'Włączony' : 'Wyłączony'} · Konfiguracja: {splunkStatus?.configured ? 'OK' : splunkStatus?.urlConfigured ? 'Brak tokena' : 'Brak URL'} · Bufor: {splunkStatus?.pending ?? 0} oczekujących · Retry co {Math.round((splunkStatus?.retryIntervalMs ?? 0) / 1000)} s</div>
             <small>Index: {splunkStatus?.index ?? '-'} · Source: {splunkStatus?.source ?? '-'} · Sourcetype: {splunkStatus?.sourcetype ?? '-'} · TLS verify: {String(splunkStatus?.verifyTls ?? '-')}</small>
+            <small>Worker: {splunkStatus?.bufferWorkerEnabled ? 'aktywny' : 'wyłączony'} · Sending: {splunkStatus?.sending ?? 0} · Sent: {splunkStatus?.sent ?? 0} · Failed: {splunkStatus?.failed ?? 0} · Last retry: {splunkStatus?.lastRetryAt ? formatDateTime(splunkStatus.lastRetryAt) : '-'}</small>
             <small>Zakład: {splunkStatus?.site ?? '-'} · Linia: {splunkStatus?.line ?? '-'} · Stanowisko: {splunkStatus?.workplace ?? '-'}</small>
             {splunkStatus?.lastError && <p className="settings-save-status error-text">Ostatni błąd: {splunkStatus.lastError}</p>}
           </div>
@@ -898,6 +907,8 @@ function App() {
   const [currentInstruction, setCurrentInstruction] = useState<ProgramInstructionMeta | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [splunkStatus, setSplunkStatus] = useState<SplunkStatusPayload | null>(null);
+  const [idleLogoutMessage, setIdleLogoutMessage] = useState<string | null>(null);
+  const [idleTimeoutMs, setIdleTimeoutMs] = useState(15 * 60 * 1000);
   const [eventCounters, setEventCounters] = useState({
     streamEvents: 0,
     resultEvents: 0,
@@ -918,6 +929,8 @@ function App() {
   const chartStatusRef = useRef<ChartStatus>(chartStatus);
   const curvePointsRef = useRef<LpcCurvePoint[]>([]);
   const completedCurvePointsRef = useRef<LpcCurvePoint[]>([]);
+  const idleTimerRef = useRef<number | null>(null);
+  const lastActivitySyncRef = useRef(0);
 
   function getLastKnownCurvePoint() {
     const points = curvePointsRef.current.length > 0 ? curvePointsRef.current : completedCurvePointsRef.current;
@@ -954,6 +967,42 @@ function App() {
     }, delayMs);
   }
 
+  async function idleLogout() {
+    if (testSession?.locked) {
+      scheduleIdleTimer(60_000);
+      return;
+    }
+    console.info(`[AUTH_IDLE] logout reason=idle_timeout minutes=${Math.round(idleTimeoutMs / 60000)}`);
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => undefined);
+    setAuthUser(null);
+    setBarcode('');
+    setLastRejected(null);
+    setUserMenuOpen(false);
+    setDiagnosticsOpen(false);
+    setResultsOpen(false);
+    setInstructionOpen(false);
+    setIdleLogoutMessage('Wylogowano z powodu bezczynności.');
+    navigateTo('/login', setRoute);
+  }
+
+  function scheduleIdleTimer(delayMs = idleTimeoutMs) {
+    if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
+    if (!authUser || route === '/login') return;
+    idleTimerRef.current = window.setTimeout(() => void idleLogout(), Math.max(delayMs, 1000));
+  }
+
+  function recordOperatorActivity(syncBackend = true) {
+    if (!authUser || route === '/login') return;
+    scheduleIdleTimer();
+    if (!syncBackend || testSession?.locked) return;
+    const now = Date.now();
+    if (now - lastActivitySyncRef.current < 30_000) return;
+    lastActivitySyncRef.current = now;
+    void fetch('/api/auth/activity', { method: 'POST', credentials: 'include' }).then((response) => {
+      if (response.status === 401) void idleLogout();
+    }).catch(() => undefined);
+  }
+
 
   function resetChartForNewTest() {
     const displayedBeforeReset = curvePoints.length > 0 ? curvePoints : completedCurvePoints;
@@ -971,7 +1020,8 @@ function App() {
   }
 
   async function refreshMe() {
-    const payload = await fetchJson<{ ok: true; user: AuthUser | null }>('/api/auth/me');
+    const payload = await fetchJson<{ ok: true; user: AuthUser | null; idleLogoutMinutes?: number }>('/api/auth/me');
+    if (typeof payload?.idleLogoutMinutes === 'number') setIdleTimeoutMs(Math.max(payload.idleLogoutMinutes, 0) * 60 * 1000);
     setAuthUser(payload?.user ?? null);
     setAuthLoading(false);
     return payload?.user ?? null;
@@ -1057,6 +1107,22 @@ function App() {
   useEffect(() => {
     if (authUser && route === '/operator') focusBarcodeInput(120);
   }, [authUser, route]);
+
+  useEffect(() => {
+    if (!authUser || route === '/login') {
+      if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
+      return;
+    }
+    scheduleIdleTimer();
+    const onActivity = () => recordOperatorActivity(true);
+    window.addEventListener('click', onActivity);
+    window.addEventListener('keydown', onActivity);
+    return () => {
+      window.removeEventListener('click', onActivity);
+      window.removeEventListener('keydown', onActivity);
+      if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
+    };
+  }, [authUser, route, idleTimeoutMs, testSession?.locked]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1482,9 +1548,10 @@ function App() {
 
   if (!authUser || route === '/login') {
     return <LoginPage onLoggedIn={(user) => {
+      setIdleLogoutMessage(null);
       setAuthUser(user);
       navigateTo('/operator', setRoute);
-    }} />;
+    }} idleMessage={idleLogoutMessage} />;
   }
 
   if (route === '/admin/users') {

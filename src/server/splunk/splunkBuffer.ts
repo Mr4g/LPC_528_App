@@ -6,6 +6,9 @@ import type { SplunkHecEnvelope, SplunkRuntimeConfig } from './splunkTypes';
 export class SplunkBuffer {
   private retryHandle: NodeJS.Timeout | null = null;
   private retryRunning = false;
+  private workerEnabled = false;
+  private lastRetryAt: string | null = null;
+  private nextRetryAt: string | null = null;
 
   constructor(
     private readonly database: AppDatabase,
@@ -35,7 +38,14 @@ export class SplunkBuffer {
   }
 
   start(): void {
-    if (!this.config.enabled || !this.config.bufferEnabled) return;
+    if (!this.config.enabled || !this.config.bufferEnabled) {
+      this.workerEnabled = false;
+      console.info('[SPLUNK_BUFFER] worker disabled');
+      return;
+    }
+    this.workerEnabled = true;
+    this.nextRetryAt = new Date(Date.now() + this.config.bufferRetryIntervalMs).toISOString();
+    console.info(`[SPLUNK_BUFFER] worker enabled intervalMs=${this.config.bufferRetryIntervalMs} maxAttempts=${this.config.bufferMaxAttempts}`);
     void this.retryPending();
     this.retryHandle = setInterval(() => void this.retryPending(), this.config.bufferRetryIntervalMs);
   }
@@ -43,25 +53,34 @@ export class SplunkBuffer {
   stop(): void {
     if (this.retryHandle) clearInterval(this.retryHandle);
     this.retryHandle = null;
+    this.workerEnabled = false;
   }
 
   async retryPending(): Promise<{ attempted: number; sent: number; failed: number }> {
-    if (this.retryRunning || !this.config.enabled || !this.config.bufferEnabled || !isSplunkConfigured(this.config)) return { attempted: 0, sent: 0, failed: 0 };
+    if (this.retryRunning || !this.config.enabled || !this.config.bufferEnabled) return { attempted: 0, sent: 0, failed: 0 };
+    this.lastRetryAt = new Date().toISOString();
+    this.nextRetryAt = new Date(Date.now() + this.config.bufferRetryIntervalMs).toISOString();
+    if (!isSplunkConfigured(this.config)) {
+      const pending = this.database.getSplunkBufferStats().pending;
+      console.warn(`[SPLUNK_BUFFER] retry tick pending=${pending} error=Splunk not configured`);
+      return { attempted: 0, sent: 0, failed: pending };
+    }
     this.retryRunning = true;
     let attempted = 0;
     let sent = 0;
     let failed = 0;
     try {
       const pending = this.database.listPendingSplunkEvents(25);
-      console.log(`[SPLUNK_BUFFER] retry started pending=${pending.length}`);
+      console.log(`[SPLUNK_BUFFER] retry tick pending=${pending.length}`);
       for (const record of pending) {
         if (!this.database.markSplunkEventSending(record.id)) continue;
         attempted += 1;
+        console.log(`[SPLUNK_BUFFER] retry sending id=${record.id} attempts=${record.attempts}`);
         const result = await this.client.send(JSON.parse(record.payloadJson) as SplunkHecEnvelope);
         if (result.ok) {
           this.database.markSplunkEventSent(record.id);
           sent += 1;
-          console.log(`[SPLUNK_BUFFER] sent id=${record.id}`);
+          console.log(`[SPLUNK_BUFFER] sent id=${record.id} status=sent`);
         } else {
           failed += 1;
           const error = result.error ?? 'Splunk retry failed';
@@ -76,7 +95,14 @@ export class SplunkBuffer {
   }
 
   getStatus() {
-    return this.database.getSplunkBufferStats();
+    return {
+      ...this.database.getSplunkBufferStats(),
+      bufferEnabled: this.config.bufferEnabled,
+      bufferWorkerEnabled: this.workerEnabled,
+      retryIntervalMs: this.config.bufferRetryIntervalMs,
+      lastRetryAt: this.lastRetryAt,
+      nextRetryAt: this.nextRetryAt,
+    };
   }
 
   private nextAttemptAt(): string {

@@ -27,4 +27,10 @@ describe('operator top bar and PDF modal layout', () => {
     expect(mainSource).toContain('handleCardAction(classified.value)');
     expect(mainSource).not.toContain('handleCardAction(trimmedBarcode)');
   });
+
+  it('has frontend idle logout wiring and activity endpoint sync', () => {
+    expect(mainSource).toContain('[AUTH_IDLE] logout reason=idle_timeout');
+    expect(mainSource).toContain('/api/auth/activity');
+    expect(mainSource).toContain('Wylogowano z powodu bezczynności.');
+  });
 });

@@ -161,7 +161,7 @@ app.use((_req, res, next) => {
   next();
 });
 app.use(express.json());
-app.use(attachAuth(authService));
+app.use(attachAuth(authService, { isTestLocked: () => testSessionManager.getStatus().locked }));
 app.use('/api/auth', createAuthRouter(authService, {
   dbPath: config.SQLITE_DB_PATH,
   defaultAdminLogin: config.DEFAULT_ADMIN_LOGIN,
@@ -170,6 +170,7 @@ app.use('/api/auth', createAuthRouter(authService, {
   resetDefaultAdmin: config.AUTH_RESET_DEFAULT_ADMIN && config.NODE_ENV !== 'production',
   cardLoginEnabled: config.CARD_LOGIN_ENABLED,
   testSessionManager,
+  testIdleLogoutMinutes: config.AUTH_TEST_IDLE_LOGOUT_MINUTES,
 }));
 app.use('/api/users', createUsersRouter(authService));
 app.use('/api/test-results', createTestResultsRouter(database));

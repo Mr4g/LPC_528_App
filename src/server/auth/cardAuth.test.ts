@@ -61,4 +61,14 @@ describe('card UID auth', () => {
     auth.markTestActivity(user.id, new Date().toISOString());
     expect(auth.verifySession(session)?.login).toBe('ABC');
   });
+
+  it('can allow an idle-expired session while an active test is locked', () => {
+    const auth = service(100);
+    const user = auth.createUser({ login: 'ABC', password: 'pass1234', role: 'operator', createdBy: null });
+    const session = auth.createSession({ id: user.id, login: 'ABC', role: 'operator' });
+    auth.markTestActivity(user.id, new Date(Date.now() - 1000).toISOString());
+
+    expect(auth.verifySession(session)).toBeNull();
+    expect(auth.verifySession(session, { allowIdleExpired: true })?.login).toBe('ABC');
+  });
 });

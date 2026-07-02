@@ -1273,8 +1273,10 @@ function App() {
       return;
     }
     if (CARD_UID_REGEX.test(trimmedBarcode)) {
-      const handledAsCard = await handleCardAction(trimmedBarcode);
-      if (handledAsCard) return;
+      setBarcode('');
+      setLastRejected(null);
+      focusBarcodeInput(0);
+      return;
     }
 
     setStatus('scanning');
@@ -1373,7 +1375,6 @@ function App() {
 
   const lastBarcode = lastAccepted?.currentTest.barcode ?? lastResult?.barcode ?? '-';
   const currentProgram = lastAccepted?.currentTest.programText ?? lastResult?.programText ?? '-';
-  const topResultLabel = lastResult ? formatResultLabel(lastResult.result) : '-';
   const startMessage = lastAccepted ? getProgramStartOperatorMessage(lastAccepted.programStart, lastAccepted.currentTest.programText) : statusLabels[status];
   const startOk = lastAccepted?.programStart.success ?? false;
   const compactLpcStatus = getCompactLpcStatus(lpcStatus);
@@ -1472,7 +1473,6 @@ function App() {
         <div className="top-bar-center">
           <div className="top-metric"><span>Program</span><strong>{currentProgram}</strong></div>
           <div className="top-metric"><span>Barcode</span><strong>{lastBarcode}</strong></div>
-          <div className={`top-result ${lastResult ? getResultClass(lastResult.result) : 'status-unknown'}`}><span>Wynik</span><strong>{topResultLabel}</strong></div>
           {currentInstruction?.exists && activeInstructionMappingId && (
             <button type="button" className="instruction-top-button" onClick={() => setInstructionOpen(true)} title={currentInstruction.originalName ?? 'Instrukcja PDF'}>
               <span aria-hidden="true">PDF</span>
@@ -1547,7 +1547,20 @@ function App() {
               autoFocus
               disabled={scanLocked}
               value={scanLocked ? 'Trwa test — poczekaj na wynik' : barcode}
-              onChange={(event) => setBarcode(event.target.value)}
+              onChange={(event) => {
+                const nextValue = event.target.value.trim();
+                if (CARD_UID_REGEX.test(nextValue)) {
+                  setBarcode('');
+                  return;
+                }
+                setBarcode(event.target.value);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && CARD_UID_REGEX.test(event.currentTarget.value.trim())) {
+                  event.preventDefault();
+                  setBarcode('');
+                }
+              }}
               placeholder={scanLocked ? 'Trwa test — poczekaj na wynik' : 'Zeskanuj barcode'}
             />
             {scanLocked && (
@@ -1656,7 +1669,9 @@ function App() {
                 focusBarcodeInput(120);
               }}>×</button>
             </header>
-            <iframe className="instruction-frame" src={`/api/programs/${encodeURIComponent(activeInstructionMappingId)}/instruction/file`} title={`Instrukcja programu ${currentProgram}`} />
+            <div className="pdf-viewer-body">
+              <iframe className="pdf-viewer-frame" src={`/api/programs/${encodeURIComponent(activeInstructionMappingId)}/instruction/file`} title={`Instrukcja programu ${currentProgram}`} />
+            </div>
             <a className="instruction-fallback-link" href={`/api/programs/${encodeURIComponent(activeInstructionMappingId)}/instruction/file`} target="_blank" rel="noreferrer">Otwórz PDF</a>
           </section>
         </div>

@@ -25,6 +25,16 @@ export function createScannerRouter(options: {
 
   router.post('/scan', async (req: AuthenticatedRequest, res) => {
     const rawBarcode = typeof req.body?.barcode === 'string' ? req.body.barcode : '';
+    const normalizedInput = rawBarcode.trim().replace(/[\r\n]/g, '');
+    const cardUidRegex = new RegExp(options.config.CARD_UID_PATTERN);
+    if (cardUidRegex.test(normalizedInput)) {
+      return res.status(400).json({
+        ok: false,
+        code: 'CARD_UID_NOT_BARCODE',
+        error: 'CARD_UID_NOT_BARCODE',
+        message: 'Odczytano kartę operatora. To nie jest barcode produktu.',
+      });
+    }
     const lock = options.testSessionManager?.assertCanStart();
     if (lock && !lock.ok) {
       console.log(`[ACTIVE_TEST] scan rejected reason=TEST_IN_PROGRESS barcode=${rawBarcode}`);

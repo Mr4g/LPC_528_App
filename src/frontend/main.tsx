@@ -71,6 +71,10 @@ interface SplunkStatusPayload {
   source: string;
   sourcetype: string;
   verifyTls: boolean;
+  site: string | null;
+  line: string | null;
+  workplace: string;
+  device: string;
   pending: number;
   sent: number;
   lastError: string | null;
@@ -687,6 +691,7 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
             <div className="settings-row-title">Splunk</div>
             <div className="settings-row-subtitle">Status: {splunkStatus?.enabled ? 'Włączony' : 'Wyłączony'} · Konfiguracja: {splunkStatus?.configured ? 'OK' : splunkStatus?.urlConfigured ? 'Brak tokena' : 'Brak URL'} · Bufor: {splunkStatus?.pending ?? 0} oczekujących</div>
             <small>Index: {splunkStatus?.index ?? '-'} · Source: {splunkStatus?.source ?? '-'} · Sourcetype: {splunkStatus?.sourcetype ?? '-'} · TLS verify: {String(splunkStatus?.verifyTls ?? '-')}</small>
+            <small>Zakład: {splunkStatus?.site ?? '-'} · Linia: {splunkStatus?.line ?? '-'} · Stanowisko: {splunkStatus?.workplace ?? '-'}</small>
             {splunkStatus?.lastError && <p className="settings-save-status error-text">Ostatni błąd: {splunkStatus.lastError}</p>}
           </div>
           <button type="button" disabled={splunkRetrying} onClick={() => void retrySplunkBuffer()}>{splunkRetrying ? 'Wysyłanie...' : 'Wyślij bufor ponownie'}</button>

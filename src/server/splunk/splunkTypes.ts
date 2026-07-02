@@ -44,6 +44,10 @@ export interface SplunkRuntimeConfig {
   index: string;
   source: string;
   sourcetype: string;
+  site: string | null;
+  line: string | null;
+  workplace: string;
+  device: string;
   timeoutMs: number;
   verifyTls: boolean;
   sendResult: boolean;

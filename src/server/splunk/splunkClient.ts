@@ -56,6 +56,10 @@ export class SplunkClient {
       index: this.config.index,
       source: this.config.source,
       sourcetype: this.config.sourcetype,
+      site: this.config.site,
+      line: this.config.line,
+      workplace: this.config.workplace,
+      device: this.config.device,
       verifyTls: this.config.verifyTls,
     };
   }

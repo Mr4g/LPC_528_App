@@ -35,13 +35,15 @@ function mapCurvePoints(points: LpcCurvePoint[]) {
 }
 
 function fields(config: SplunkRuntimeConfig) {
-  return {
-    workplaceName: config.source,
+  return Object.fromEntries(Object.entries({
+    site: config.site,
+    line: config.line,
+    workplace: config.workplace,
+    device: config.device,
+    workplaceName: config.workplace,
     isMachine: 'true',
-    line: 'W16',
     hostname: os.hostname(),
-    workplace: config.source,
-  };
+  }).filter(([, value]) => value !== null && value !== '')) as Record<string, string>;
 }
 
 export function buildSplunkResultEnvelope(config: SplunkRuntimeConfig, context: SplunkResultContext): SplunkHecEnvelope {
@@ -61,7 +63,10 @@ export function buildSplunkResultEnvelope(config: SplunkRuntimeConfig, context: 
     event: {
       eventType: 'lpc_test_result',
       name: 'LPC.TestFinished',
-      device: config.source,
+      site: config.site,
+      line: config.line,
+      workplace: config.workplace,
+      device: config.device,
       app: 'lpc-528-app',
       testId: session?.activeTestId ?? null,
       startedAt: session?.startedAt ?? result.currentTestSelectedAt ?? null,
@@ -99,7 +104,10 @@ export function buildSplunkErrorEnvelope(config: SplunkRuntimeConfig, context: S
     event: {
       eventType: 'lpc_test_result',
       name: 'LPC.TestFinished',
-      device: config.source,
+      site: config.site,
+      line: config.line,
+      workplace: config.workplace,
+      device: config.device,
       app: 'lpc-528-app',
       testId: context.session.activeTestId,
       startedAt: context.session.startedAt,

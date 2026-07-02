@@ -6,7 +6,7 @@ import type { SplunkHecEnvelope, SplunkRuntimeConfig, SplunkSendResult } from '.
 
 const envelope: SplunkHecEnvelope = { time: 1, index: 'i', source: 's', sourcetype: '_json', event: { eventType: 'lpc_test_result', testId: 't1', barcode: 'b', curve: { pointCount: 0 } } };
 function config(patch: Partial<SplunkRuntimeConfig> = {}): SplunkRuntimeConfig {
-  return { enabled: true, url: 'https://splunk.example.local:8088/services/collector', token: 'token-for-test', index: 'i', source: 's', sourcetype: '_json', timeoutMs: 1, verifyTls: true, sendResult: true, sendCurve: true, bufferEnabled: true, bufferRetryIntervalMs: 1, bufferMaxAttempts: 0, ...patch };
+  return { enabled: true, url: 'https://splunk.example.local:8088/services/collector', token: 'token-for-test', index: 'i', source: 's', sourcetype: '_json', site: 'W16', line: 'PWT', workplace: 'LPC-528-01', device: 'LPC-528-01', timeoutMs: 1, verifyTls: true, sendResult: true, sendCurve: true, bufferEnabled: true, bufferRetryIntervalMs: 1, bufferMaxAttempts: 0, ...patch };
 }
 function client(result: SplunkSendResult): SplunkClient {
   return { send: async () => result, getStatus: () => ({ enabled: true, configured: true, urlConfigured: true, tokenConfigured: true, index: 'i', source: 's', sourcetype: '_json' }) } as unknown as SplunkClient;

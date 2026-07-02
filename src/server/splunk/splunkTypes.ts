@@ -31,6 +31,7 @@ export interface SplunkSendResult {
   ok: boolean;
   status?: number;
   durationMs?: number;
+  code?: number;
   error?: string;
   skipped?: boolean;
 }

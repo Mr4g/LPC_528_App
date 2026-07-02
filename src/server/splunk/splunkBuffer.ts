@@ -18,7 +18,7 @@ export class SplunkBuffer {
     const event = envelope.event;
     const testId = typeof event.testId === 'string' ? event.testId : null;
     const pointCount = typeof event.curve === 'object' && event.curve !== null && 'pointCount' in event.curve ? String((event.curve as { pointCount?: unknown }).pointCount) : '0';
-    console.log(`[SPLUNK] send result testId=${testId ?? ''} barcode=${String(event.barcode ?? '')} pointCount=${pointCount}`);
+    console.log(`[SPLUNK] sending testId=${testId ?? ''} pointCount=${pointCount}`);
 
     const result = await this.client.send(envelope);
     if (result.ok) return;

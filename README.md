@@ -767,3 +767,17 @@ CARD_UID_PATTERN=^\d{8}$
 CARD_SCAN_IDLE_MS=200
 AUTH_TEST_IDLE_LOGOUT_MINUTES=15
 ```
+
+## Splunk HEC troubleshooting
+
+Dla JSON Event Endpoint aplikacja używa `/services/collector/event`. Jeśli w `.env` podasz URL kończący się na `/services/collector`, klient znormalizuje go do `/services/collector/event`; jeśli podasz już `/services/collector/event`, URL nie zostanie zdublowany.
+
+Splunk HEC dostaje pojedynczy JSON envelope w ciele requestu (`Content-Type: application/json`), z `index`, `source` i `sourcetype` na top-level oraz danymi testu wewnątrz pola `event`. Token trzymaj wyłącznie w `.env` i nie commituj go.
+
+Jeśli Splunk w środowisku dev/test ma certyfikat self-signed, ustaw lokalnie:
+
+```env
+SPLUNK_VERIFY_TLS=false
+```
+
+To działa jak `curl -k`, ale tylko dla klienta Splunk. Produkcyjnie preferowane jest dodanie certyfikatu CA Splunka do zaufanych i pozostawienie `SPLUNK_VERIFY_TLS=true`.

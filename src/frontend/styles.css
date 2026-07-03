@@ -2128,3 +2128,183 @@ body.theme-dark .login-info-message {
   background: rgba(0, 174, 239, 0.10);
   border-color: rgba(125, 211, 252, 0.18);
 }
+
+/* IPC 100% zoom compaction: keep operator screen readable without browser zoom hacks. */
+.app-shell {
+  height: 100vh;
+  min-height: 100vh;
+  gap: 14px;
+  padding: 14px;
+  overflow: hidden;
+}
+
+.top-bar {
+  gap: 12px;
+}
+
+.top-bar-center {
+  gap: 12px;
+}
+
+.brand-block,
+.top-metric,
+.top-result,
+.connection-badge {
+  min-height: 70px;
+  padding: 12px 16px;
+  border-radius: 18px;
+}
+
+.diagnostics-button,
+.instruction-top-button {
+  min-height: 70px;
+  border-radius: 18px;
+  padding-inline: 18px;
+}
+
+.top-metric strong,
+.top-result strong {
+  font-size: clamp(22px, 1.7vw, 34px);
+}
+
+.top-result strong {
+  font-size: clamp(30px, 2.35vw, 44px);
+}
+
+.operator-grid {
+  gap: 14px;
+  grid-template-columns: minmax(290px, 0.82fr) minmax(520px, 1.72fr) minmax(360px, 1.04fr);
+  min-height: 0;
+}
+
+.panel {
+  padding: 18px;
+  border-radius: 18px;
+}
+
+.panel-header {
+  margin-bottom: 14px;
+}
+
+.panel-header strong {
+  font-size: clamp(22px, 1.7vw, 34px);
+}
+
+.scan-header {
+  margin-bottom: 14px;
+}
+
+.scan-summary {
+  gap: 10px;
+  padding: 14px;
+}
+
+.scan-summary div,
+.metric-card {
+  padding: 12px;
+  border-radius: 16px;
+}
+
+.chart-wrap {
+  border-radius: 18px;
+  gap: 6px;
+  padding-bottom: 6px;
+}
+
+.pressure-chart {
+  min-height: 320px;
+}
+
+.pressure-chart text {
+  font-size: 20px;
+}
+
+.chart-legend {
+  padding: 0 16px 0;
+  min-height: 22px;
+  font-size: 12px;
+}
+
+.result-column {
+  grid-template-rows: auto minmax(190px, 1fr);
+  gap: 12px;
+}
+
+.last-result-panel,
+.history-panel,
+.results-preview {
+  border-radius: 18px;
+  padding: 14px;
+}
+
+.result-status {
+  border-radius: 18px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.result-status span {
+  font-size: 13px;
+}
+
+.result-status strong {
+  font-size: clamp(42px, 3.8vw, 72px);
+}
+
+.result-data-grid {
+  gap: 6px;
+}
+
+.result-data-grid div {
+  grid-template-columns: 112px 1fr;
+  gap: 8px;
+  padding-bottom: 5px;
+}
+
+.result-data-grid span {
+  font-size: clamp(10px, 0.72vw, 12px);
+}
+
+.result-data-grid strong {
+  font-size: clamp(15px, 0.95vw, 20px);
+}
+
+.main-measurement strong {
+  font-size: clamp(18px, 1.15vw, 24px);
+}
+
+.results-preview {
+  gap: 10px;
+}
+
+.results-cta {
+  min-height: 64px;
+  border-radius: 18px;
+  padding: 12px 16px;
+}
+
+.results-cta strong {
+  font-size: clamp(18px, 1.15vw, 24px);
+}
+
+.results-cta span,
+.results-preview-hint {
+  font-size: 11px;
+}
+
+.results-preview-table {
+  font-size: clamp(11px, 0.68vw, 13px);
+}
+
+.results-preview-table th,
+.results-preview-table td {
+  padding: 6px 8px;
+  max-width: 150px;
+}
+
+@media (max-width: 980px) {
+  .app-shell {
+    height: auto;
+    overflow-y: auto;
+  }
+}

@@ -31,3 +31,7 @@ export function isIgnoredLpcLine(raw: string): boolean {
 export function containsResultFrameSignature(raw: string): boolean {
   return /\bC\d{2}\s+N\d+\s+P\d{2}\b/.test(normalizeLpcLine(raw));
 }
+
+export function isStopStreamingLine(raw: string): boolean {
+  return /^\S+\s+X\s+Stop Streaming$/i.test(normalizeLpcLine(raw));
+}

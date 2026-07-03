@@ -164,7 +164,10 @@ interface TestSessionState {
   operatorUserId: string | null;
   operatorLogin: string | null;
   startedAt: string | null;
+  firstLpcDataAt?: string | null;
+  lastLpcDataAt?: string | null;
   lastStreamAt: string | null;
+  finalResultAt?: string | null;
   completedAt: string | null;
   timeoutAt: string | null;
   message: string | null;
@@ -498,6 +501,19 @@ function LoginPage(props: { onLoggedIn: (user: AuthUser) => void; idleMessage?: 
   );
 }
 
+function userRoleLabel(role: UserRole): string {
+  if (role === 'admin') return 'Admin';
+  if (role === 'line_leader') return 'Line Leader';
+  return 'Operator';
+}
+
+function canDeleteUserInUi(actor: AuthUser, target: PublicUser, activeAdminCount: number): boolean {
+  if (actor.id === target.id) return false;
+  if (actor.role === 'admin') return !(target.role === 'admin' && target.isActive && activeAdminCount <= 1);
+  if (actor.role === 'line_leader') return target.role === 'operator';
+  return false;
+}
+
 function UsersPage(props: { user: AuthUser; onBack: () => void }) {
   const [users, setUsers] = useState<PublicUser[]>([]);
   const [login, setLogin] = useState('');
@@ -535,7 +551,7 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
       body: JSON.stringify({ login: normalizedLogin, password, role, cardUid: cardUid.trim() || undefined }),
     });
     const payload = (await response.json()) as { ok: boolean; message?: string };
-    setMessage(response.ok ? 'Użytkownik dodany.' : payload.message ?? 'Nie udało się dodać użytkownika.');
+    setMessage(response.ok ? 'Użytkownik został dodany.' : payload.message ?? 'Nie udało się dodać użytkownika.');
     if (response.ok) {
       setLogin('');
       setPassword('');
@@ -543,6 +559,14 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
       setCardUid('');
       await loadUsers();
     }
+  }
+
+  async function deleteUser(id: string) {
+    if (!window.confirm('Usunąć użytkownika?')) return;
+    const response = await fetch(`/api/users/${id}`, { method: 'DELETE', credentials: 'include' });
+    const payload = (await response.json()) as { ok: boolean; message?: string };
+    setMessage(response.ok ? 'Użytkownik został usunięty.' : payload.message ?? 'Brak uprawnień do tej operacji.');
+    await loadUsers();
   }
 
   async function userAction(id: string, action: 'enable' | 'disable') {
@@ -589,9 +613,10 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
       <form className="user-form" onSubmit={createUser}>
         <input value={login} onChange={(event) => setLogin(event.target.value.toUpperCase())} placeholder="Login" />
         <input className="auth-input" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Hasło tymczasowe" />
-        <select value={role} onChange={(event) => setRole(event.target.value as UserRole)} disabled={props.user.role !== 'admin'}>
-          <option value="operator">operator</option>
-          {props.user.role === 'admin' && <option value="line_leader">line_leader</option>}
+        <select value={role} onChange={(event) => setRole(event.target.value as UserRole)}>
+          <option value="operator">Operator</option>
+          <option value="line_leader">Line Leader</option>
+          {props.user.role === 'admin' && <option value="admin">Admin</option>}
         </select>
         <input value={cardUid} onChange={(event) => setCardUid(normalizeCardScanInput(event.target.value))} onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault(); }} placeholder="Przyłóż kartę (opcjonalnie)" inputMode="numeric" />
         {cardUid && <span className="settings-save-status ok-text">Karta odczytana: {maskCardUid(cardUid)}</span>}
@@ -602,10 +627,13 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
         <table>
           <thead><tr><th>Login</th><th>Rola</th><th>Status</th><th>Karta</th><th>Utworzono</th><th>Ostatnie logowanie</th><th>Akcje</th></tr></thead>
           <tbody>
-            {users.map((item) => (
+            {users.map((item) => {
+              const activeAdminCount = users.filter((user) => user.role === 'admin' && user.isActive).length;
+              const deleteAllowed = canDeleteUserInUi(props.user, item, activeAdminCount);
+              return (
               <tr key={item.id}>
                 <td>{item.login}</td>
-                <td>{item.role}</td>
+                <td>{userRoleLabel(item.role)}</td>
                 <td>{item.isActive ? 'aktywny' : 'nieaktywny'}</td>
                 <td>{item.cardMask ?? '-'}</td>
                 <td>{formatDateTime(item.createdAt)}</td>
@@ -615,9 +643,14 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
                   <button type="button" onClick={() => void changeCard(item.id)}>Zmień kartę</button>
                   {item.cardMask && <button type="button" onClick={() => void removeCard(item.id)}>Usuń kartę</button>}
                   <button type="button" onClick={() => void userAction(item.id, item.isActive ? 'disable' : 'enable')}>{item.isActive ? 'Dezaktywuj' : 'Aktywuj'}</button>
+                  {deleteAllowed ? (
+                    <button type="button" onClick={() => void deleteUser(item.id)}>Usuń</button>
+                  ) : (
+                    <button type="button" disabled title={props.user.id === item.id ? 'Nie możesz usunąć własnego konta.' : 'Brak uprawnień'}>Usuń</button>
+                  )}
                 </td>
               </tr>
-            ))}
+            );})}
           </tbody>
         </table>
       </section>

@@ -134,7 +134,7 @@ export class LpcLineProcessor {
 
         const streamPayload = {
           ...streamPoint,
-          pressureMbar: streamPoint.pressureValue === null ? null : streamPoint.pressureValue * 1000,
+          pressureMbar: streamPoint.pressureMbar,
           curvePoint,
         };
         this.emit('lpc:stream', streamPayload);

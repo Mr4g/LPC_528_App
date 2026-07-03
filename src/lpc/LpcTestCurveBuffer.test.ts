@@ -16,6 +16,7 @@ function streamPoint(elapsedTimeSec: number, pressureValue = 0.123): LpcStreamPo
     remainingTimeSec: 10,
     pressureValue,
     pressureUnit: 'bar',
+    pressureMbar: pressureValue * 1000,
     raw: '',
     normalized: '',
   };

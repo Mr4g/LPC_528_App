@@ -1,5 +1,6 @@
 import React, { FormEvent, useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
+import { getLatestEstimatedLeakTrend, normalizeEstimatedLeakWindowPoints } from '../shared/estimatedLeakTrend';
 import type { BarcodeScan, CurrentTest, LpcResult, LpcStreamPoint, ProgramStartRequest, ProgramStartResult } from '../shared/types';
 import { formatDateTime, formatMeasurement, formatNumber, formatResultLabel, getConnectionLabel, getResultClass } from './formatters';
 import { LastResultPanel } from './components/LastResultPanel';
@@ -110,6 +111,10 @@ interface LpcCurvePoint {
   pressureBar: number | null;
   pressureMbar: number | null;
   segment: string;
+  liveLeakValue?: number | null;
+  liveLeakUnit?: string | null;
+  RL?: number | null;
+  RL_unit?: string | null;
 }
 
 interface EnrichedLpcResult extends LpcResult {
@@ -233,7 +238,10 @@ const statusLabels: Record<OperatorStatus, string> = {
   'start-error': 'Błąd startu programu',
 };
 
-const showDiagnostics = ((import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SHOW_DIAGNOSTICS ?? 'false') === 'true';
+const frontendEnv = (import.meta as unknown as { env?: Record<string, string> }).env ?? {};
+const showDiagnostics = (frontendEnv.VITE_SHOW_DIAGNOSTICS ?? 'false') === 'true';
+const estimatedLeakRateEnabled = (frontendEnv.LPC_ENABLE_ESTIMATED_LEAK_RATE ?? 'false') === 'true';
+const estimatedLeakWindowPoints = normalizeEstimatedLeakWindowPoints(frontendEnv.LPC_ESTIMATED_LEAK_WINDOW_POINTS, 10);
 const LOGIN_REGEX = /^[A-Za-z]{3,5}$/;
 const CARD_UID_REGEX = /^\d{8}$/;
 const CARD_SCAN_IDLE_MS = 200;
@@ -348,6 +356,15 @@ function getCompactSplunkLabel(status: SplunkStatusPayload | null): string {
   }
 }
 
+
+function getSegmentDisplay(segment: string | null | undefined): string {
+  return segment?.trim() || '-';
+}
+
+function isMeasurementSegment(segment: string | null | undefined): boolean {
+  const normalized = segment?.trim().toUpperCase();
+  return normalized === 'EXH' || normalized === 'DPT';
+}
 
 function buildCurveSignature(points: LpcCurvePoint[]): string {
   const lastPoint = points.at(-1);
@@ -1251,6 +1268,10 @@ function App() {
           pressureBar: payload.pressureValue,
           pressureMbar: payload.pressureMbar,
           segment: payload.segment,
+          liveLeakValue: payload.liveLeakValue ?? null,
+          liveLeakUnit: payload.liveLeakUnit ?? null,
+          RL: payload.RL ?? payload.liveLeakValue ?? null,
+          RL_unit: payload.RL_unit ?? payload.liveLeakUnit ?? null,
         }]);
       });
 
@@ -1522,6 +1543,11 @@ function App() {
   const activeInstructionMappingId = lastAccepted?.currentTest.mappingId ?? null;
   const instructionAvailable = Boolean(currentInstruction?.exists && activeInstructionMappingId);
   const displayedCurvePoints = curvePoints.length > 0 ? curvePoints : completedCurvePoints;
+  const estimatedLeakTrendPaPerSec = estimatedLeakRateEnabled
+    ? getLatestEstimatedLeakTrend(displayedCurvePoints, estimatedLeakWindowPoints)
+    : null;
+  const liveSegment = getSegmentDisplay(lastStream?.segment);
+  const isProperMeasurement = isMeasurementSegment(lastStream?.segment);
   const scanLocked = Boolean(testSession?.locked);
   const scanStatusText = scanLocked ? 'Trwa test — poczekaj na wynik' : (status === 'program-selected' && lastAccepted ? `${lastAccepted.currentTest.programText} wybrany` : statusLabels[status]);
   const activeTestHelper = scanLocked ? [testSession?.programText, testSession?.barcode].filter(Boolean).join(' / ') : '';
@@ -1754,16 +1780,23 @@ function App() {
         <section className="panel live-panel">
           <div className="panel-header">
             <span>Live test</span>
-            <strong>{lastStream ? lastStream.segment : 'Oczekiwanie na dane LPC'}</strong>
+            <strong>{lastStream ? liveSegment : 'Oczekiwanie na dane LPC'}</strong>
+            {isProperMeasurement && <span className="phase-badge">Pomiar właściwy</span>}
           </div>
           <div className="metrics-grid">
             <div className="metric-card"><span>Program</span><strong>{currentProgram}</strong></div>
             <div className="metric-card"><span>Barcode</span><strong>{lastBarcode}</strong></div>
-            <div className="metric-card"><span>Segment</span><strong>{lastStream?.segment ?? '-'}</strong></div>
+            <div className="metric-card"><span>Segment</span><strong>{liveSegment}</strong>{isProperMeasurement && <small className="metric-hint">Pomiar właściwy</small>}</div>
             <div className="metric-card"><span>Elapsed</span><strong>{formatNumber(lastStream?.elapsedTimeSec, 2)} s</strong></div>
-            <div className="metric-card"><span>Remaining</span><strong>{formatNumber(lastStream?.remainingTimeSec, 2)} s</strong></div>
-            <div className="metric-card"><span>Pressure [bar]</span><strong>{formatNumber(lastStream?.pressureValue, 5)}</strong></div>
-            <div className="metric-card emphasis"><span>Pressure [mbar]</span><strong>{formatNumber(lastStream?.pressureMbar, 2)}</strong></div>
+            <div className="metric-card"><span>Czas do końca fazy</span><strong>{formatNumber(lastStream?.remainingTimeSec, 2)} s</strong></div>
+            <div className="metric-card emphasis"><span>Ciśnienie [mbar]</span><strong>{formatNumber(lastStream?.pressureMbar, 2)}</strong></div>
+            {(lastStream?.liveLeakValue ?? null) !== null && (
+              <div className="metric-card leak-live"><span>RL [Pa/s]</span><strong>{formatMeasurement(lastStream?.liveLeakValue, lastStream?.liveLeakUnit, 3)}</strong><small className="metric-hint">Live z ramki S / DPT</small></div>
+            )}
+            {estimatedLeakRateEnabled && (
+              <div className="metric-card estimated"><span>Szacowany trend [Pa/s]</span><strong>{formatNumber(estimatedLeakTrendPaPerSec, 3)}</strong><small className="metric-hint">Trend ciśnienia, nie wynik RL</small></div>
+            )}
+            <div className="metric-card"><span>Finalny RL</span><strong>{formatMeasurement((finalMarkerResult?.leakValue ?? chartFinalResult?.leakValue), (finalMarkerResult?.leakUnit ?? chartFinalResult?.leakUnit))}</strong></div>
           </div>
 
           <PressureChart points={displayedCurvePoints} lastResult={finalMarkerResult?.result ?? chartFinalResult} />

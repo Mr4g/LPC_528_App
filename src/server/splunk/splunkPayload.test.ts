@@ -41,12 +41,12 @@ describe('buildSplunkResultEnvelope', () => {
     const envelope = buildSplunkResultEnvelope(config, {
       result,
       session: { ok: true, status: 'running', locked: true, activeTestId: 'test-1', barcode: '5901234123457', programNumber: 1, programText: 'P01', operatorUserId: 'user-1', operatorLogin: 'ADM', startedAt: '2026-06-30T10:00:00.000Z', firstLpcDataAt: null, lastLpcDataAt: null, lastStreamAt: null, finalResultAt: null, completedAt: null, timeoutAt: null, message: null },
-      curvePoints: [{ elapsedTimeSec: 0.1, remainingTimeSec: 1, pressureBar: 0.001, pressureMbar: 1, segment: 'raw-stream' }],
+      curvePoints: [{ elapsedTimeSec: 54.65, remainingTimeSec: 1.35, pressureBar: 5.990978, pressureMbar: 5990.978, segment: 'DPT', liveLeakValue: 3.788533, liveLeakUnit: 'Pa/s', RL: 3.788533, RL_unit: 'Pa/s' }],
       config: appConfig,
     });
     expect(envelope.index).toBe('machinedata_w16');
     expect(envelope).toMatchObject({ index: 'machinedata_w16', source: 'LPC-528-01', sourcetype: '_json' });
-    expect(envelope.event).toMatchObject({ name: 'LPC.TestFinished', site: 'W16', line: 'PWT', workplace: 'LPC-528-01', device: 'LPC-528-01', barcode: '5901234123457', programNumber: 1, programText: 'P01', resultStatus: 'OK', resultRawStatus: 'ACCEPT', leakValue: 7.253, leakUnit: 'Pa/s', operatorLogin: 'ADM', operatorId: 'ADM', curvePointCount: 1, curveUnit: 'Pa/s', curvePoints: [{ t: 0, elapsedSec: 0.1, value: 1, raw: 'raw-stream' }] });
+    expect(envelope.event).toMatchObject({ name: 'LPC.TestFinished', site: 'W16', line: 'PWT', workplace: 'LPC-528-01', device: 'LPC-528-01', barcode: '5901234123457', programNumber: 1, programText: 'P01', resultStatus: 'OK', resultRawStatus: 'ACCEPT', leakValue: 7.253, leakUnit: 'Pa/s', operatorLogin: 'ADM', operatorId: 'ADM', curvePointCount: 1, curveUnit: 'Pa/s', curvePoints: [{ t: 0, elapsedSec: 54.65, remainingTimeSec: 1.35, value: 5990.978, pressureBar: 5.990978, pressureMbar: 5990.978, raw: 'DPT', segment: 'DPT', liveLeakValue: 3.788533, liveLeakUnit: 'Pa/s', RL: 3.788533, RL_unit: 'Pa/s' }] });
     expect(envelope.fields).toMatchObject({ site: 'W16', line: 'PWT', workplace: 'LPC-528-01', device: 'LPC-528-01' });
   });
 

@@ -2,10 +2,15 @@ import type { LpcStreamPoint } from '../shared/types';
 import { isIgnoredLpcLine } from './lpcFrameFilters';
 import { normalizeLpcLine } from './normalizeLpcLine';
 
-const STREAM_REGEX = /^(\S+)\s+S\s+(C\d{2}),(P\d{2}),([^,]+),ET\s+([-+]?\d+(?:[.,]\d+)?)\s+sec,T\s+([-+]?\d+(?:[.,]\d+)?)\s+sec,P\s+([-+]?\d+(?:[.,]\d+)?)\s+([a-zA-Z]+)$/;
+const STREAM_REGEX = /^(\S+)\s+S\s+(C\d+),(P\d+),([^,]+),ET\s+([-+]?\d+(?:[.,]\d+)?)\s+sec,T\s+([-+]?\d+(?:[.,]\d+)?)\s+sec,P\s+([-+]?\d+(?:[.,]\d+)?)\s+(\S+)(?:,RL\s+([-+]?\d+(?:[.,]\d+)?)\s+(\S+))?$/;
 
 function parseDecimal(value: string): number {
   return Number(value.replace(',', '.'));
+}
+
+function normalizeLeakUnit(unit: string | undefined): string | null {
+  if (!unit) return null;
+  return unit.toLowerCase() === 'pa/s' ? 'Pa/s' : unit;
 }
 
 export function parseLpcStream(raw: string): LpcStreamPoint | null {
@@ -15,7 +20,10 @@ export function parseLpcStream(raw: string): LpcStreamPoint | null {
   const match = normalized.match(STREAM_REGEX);
   if (!match) return null;
 
-  const [, messageId, channel, program, segment, elapsedTime, remainingTime, pressureValue, pressureUnit] = match;
+  const [, messageId, channel, program, segment, elapsedTime, remainingTime, pressureValue, pressureUnit, liveLeakValue, liveLeakUnit] = match;
+  const parsedPressureValue = parseDecimal(pressureValue);
+  const parsedLiveLeakValue = liveLeakValue === undefined ? null : parseDecimal(liveLeakValue);
+  const normalizedLiveLeakUnit = normalizeLeakUnit(liveLeakUnit);
 
   return {
     source: 'LPC-528',
@@ -28,8 +36,13 @@ export function parseLpcStream(raw: string): LpcStreamPoint | null {
     segment,
     elapsedTimeSec: parseDecimal(elapsedTime),
     remainingTimeSec: parseDecimal(remainingTime),
-    pressureValue: parseDecimal(pressureValue),
+    pressureValue: parsedPressureValue,
     pressureUnit,
+    pressureMbar: pressureUnit.toLowerCase() === 'bar' ? parsedPressureValue * 1000 : null,
+    liveLeakValue: parsedLiveLeakValue,
+    liveLeakUnit: normalizedLiveLeakUnit,
+    RL: parsedLiveLeakValue,
+    RL_unit: normalizedLiveLeakUnit,
     raw,
     normalized,
   };

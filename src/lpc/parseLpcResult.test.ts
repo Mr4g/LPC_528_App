@@ -71,3 +71,39 @@ describe('normalizeLpcLine', () => {
     expect(normalizeLpcLine('\r  C01\tN1  →  P05   R--  \r')).toBe('C01 N1 P05 R--');
   });
 });
+
+describe('parseLpcResult format 2', () => {
+  it('parses short R result frame without allResultInformation', () => {
+    const result = parseLpcResult('2BFC030 R C01 P17 15:34:00.830 07/03/26 0000293998 SB -', 2);
+
+    expect(result).toMatchObject({
+      lpcMessageId: '2BFC030',
+      lpcMessageType: 'R',
+      lpcChannel: 'C01',
+      lpcProgram: 17,
+      lpcProgramText: 'P17',
+      lpcTesterTime: '15:34:00.830',
+      lpcTesterDate: '07/03/26',
+      lpcUniqueId: '0000293998',
+      lpcProgramEvaluation: 'SB',
+      lpcSpcFlag: '-',
+      lpcAllResultInformation: null,
+      resultRawStatus: 'SB',
+      result: 'UNKNOWN',
+      resultFrameFormat: 2,
+    });
+  });
+
+  it('parses optional allResultInformation', () => {
+    const result = parseLpcResult('2BFC030 R C01 P17 15:34:00.830 07/03/26 0000293998 SB - ALL RESULT INFORMATION TEXT', 2);
+
+    expect(result).toMatchObject({
+      lpcAllResultInformation: 'ALL RESULT INFORMATION TEXT',
+      resultRawStatus: 'SB',
+    });
+  });
+
+  it('does not parse short R result frame when format 1 is selected', () => {
+    expect(parseLpcResult('2BFC030 R C01 P17 15:34:00.830 07/03/26 0000293998 SB -', 1)).toBeNull();
+  });
+});

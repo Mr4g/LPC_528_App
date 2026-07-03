@@ -6,7 +6,7 @@ import type { ResultHistoryStore } from './ResultHistoryStore';
 import type { AppDatabase } from '../server/db/database';
 import type { AuthService } from '../server/auth/authService';
 import type { TestSessionManager } from '../server/test-session/testSessionManager';
-import { isIgnoredLpcLine, isInterfaceSelectionPrompt } from './lpcFrameFilters';
+import { isIgnoredLpcLine, isInterfaceSelectionPrompt, isStopStreamingLine } from './lpcFrameFilters';
 import { normalizeLpcLine } from './normalizeLpcLine';
 import { parseLpcResult } from './parseLpcResult';
 import { parseLpcStream } from './parseLpcStream';
@@ -69,7 +69,7 @@ export interface LpcLineProcessorOptions {
   zebraPrintOnResult?: boolean;
   splunkBuffer?: SplunkBuffer;
   splunkConfig?: SplunkRuntimeConfig;
-  config?: Pick<AppConfig, 'LPC_HOST' | 'LPC_PORT' | 'LPC_INTERFACE_SELECTION'>;
+  config?: Pick<AppConfig, 'LPC_HOST' | 'LPC_PORT' | 'LPC_INTERFACE_SELECTION' | 'LPC_RESULT_FRAME_FORMAT'>;
 }
 
 export class LpcLineProcessor {
@@ -115,6 +115,14 @@ export class LpcLineProcessor {
         return diagnostic;
       }
 
+      if (isStopStreamingLine(rawLine)) {
+        console.log('[LPC_STREAM] stop_streaming received');
+        diagnostic.reason = 'stop-streaming';
+        this.storeRawLine(diagnostic);
+        this.debugLog('IGNORED LINE reason', diagnostic.reason);
+        return diagnostic;
+      }
+
       const streamPoint = parseLpcStream(rawLine);
       if (streamPoint) {
         const curvePoint = this.options.curveBuffer.addStreamPoint(streamPoint);
@@ -138,7 +146,7 @@ export class LpcLineProcessor {
         return diagnostic;
       }
 
-      const result = parseLpcResult(rawLine);
+      const result = parseLpcResult(rawLine, this.options.config?.LPC_RESULT_FRAME_FORMAT ?? 1);
       if (result) {
         const enrichedResult = this.attachCurrentTest(result);
         const activeSessionBeforeComplete = this.options.testSessionManager?.getStatus() ?? null;
@@ -146,7 +154,7 @@ export class LpcLineProcessor {
         this.options.database?.insertTestResult(enrichedResult, this.options.testSessionManager?.getActiveTestId() ?? null);
         this.options.lastResultStore?.set(enrichedResult);
         this.options.resultHistoryStore?.add(enrichedResult);
-        this.options.testSessionManager?.complete(enrichedResult.result);
+        this.options.testSessionManager?.complete(enrichedResult.resultRawStatus ?? enrichedResult.result);
         this.options.authService?.markTestActivity(activeSessionBeforeComplete?.operatorUserId);
         void this.autoPrint(enrichedResult);
         this.sendSplunkResult(enrichedResult, activeSessionBeforeComplete, completedCurve.points);

@@ -114,7 +114,7 @@ export class TestSessionManager {
 
   complete(status?: string): void {
     const now = new Date().toISOString();
-    console.log(`[ACTIVE_TEST] final_result_received testId=${this.state.activeTestId} status=${status ?? 'UNKNOWN'}`);
+    console.log(`[ACTIVE_TEST] final_result_received testId=${this.state.activeTestId} rawStatus=${status ?? 'UNKNOWN'}`);
     console.log(`[ACTIVE_TEST] ended reason=final_result testId=${this.state.activeTestId}`);
     this.clearTimeoutCheck();
     this.state = { ...this.state, status: 'completed', locked: false, finalResultAt: now, completedAt: now, message: 'Test zakończony' };

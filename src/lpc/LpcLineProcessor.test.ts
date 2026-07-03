@@ -22,7 +22,7 @@ function currentTest(): CurrentTest {
   };
 }
 
-function createProcessor() {
+function createProcessor(patch: Partial<ConstructorParameters<typeof LpcLineProcessor>[0]> = {}) {
   const emitted: Array<{ event: string; payload: unknown }> = [];
   const io = { emit: vi.fn((event: string, payload: unknown) => emitted.push({ event, payload })) };
   const tcpClient = { send: vi.fn() };
@@ -41,6 +41,7 @@ function createProcessor() {
     interfaceSelection: '1',
     currentTestMaxAgeMs: 600000,
     debugLines: false,
+    ...patch,
   });
 
   return { processor, emitted, tcpClient, currentTestStore, curveBuffer, lastResultStore, resultHistoryStore };
@@ -116,6 +117,44 @@ describe('LpcLineProcessor', () => {
       operatorLogin: 'ABC',
       operatorRole: 'operator',
     });
+  });
+
+
+
+  it('treats stop streaming as ignored and waits for final result', () => {
+    const { processor, emitted } = createProcessor({ config: { LPC_HOST: '192.0.2.10', LPC_PORT: 23, LPC_INTERFACE_SELECTION: '1', LPC_RESULT_FRAME_FORMAT: 2 } });
+
+    processor.processLine('A5FB010 X Stop Streaming');
+
+    expect(processor.getRawLines().at(-1)).toMatchObject({ parsedAs: 'ignored', reason: 'stop-streaming' });
+    expect(emitted.some((item) => item.event === 'test:completed')).toBe(false);
+    expect(processor.getPipelineStatus()).toMatchObject({ resultCount: 0 });
+  });
+
+  it('keeps format 2 stream frames as stream and not final result', () => {
+    const { processor, emitted } = createProcessor({ config: { LPC_HOST: '192.0.2.10', LPC_PORT: 23, LPC_INTERFACE_SELECTION: '1', LPC_RESULT_FRAME_FORMAT: 2 } });
+
+    const diagnostic = processor.processLine('2BFA034	S	C01,P17,EXH,ET 25.25 sec,T 0.05 sec,P 0.000187 bar');
+
+    expect(diagnostic.parsedAs).toBe('stream');
+    expect(emitted.some((item) => item.event === 'lpc:stream')).toBe(true);
+    expect(emitted.some((item) => item.event === 'test:completed')).toBe(false);
+    const streamPayload = emitted.find((item) => item.event === 'lpc:stream')?.payload as { pressureUnit?: string; pressureMbar?: number; normalized?: string; raw?: string } | undefined;
+    expect(streamPayload).toMatchObject({ pressureUnit: 'bar', pressureMbar: 0.187 });
+  });
+
+  it('completes active test from format 2 short R frame', () => {
+    const testSessionManager = { getStatus: vi.fn(() => null), getActiveTestId: vi.fn(() => 'test-1'), complete: vi.fn(), markLpcData: vi.fn() };
+    const { processor, emitted, lastResultStore } = createProcessor({
+      testSessionManager: testSessionManager as never,
+      config: { LPC_HOST: '192.0.2.10', LPC_PORT: 23, LPC_INTERFACE_SELECTION: '1', LPC_RESULT_FRAME_FORMAT: 2 },
+    });
+
+    processor.processLine('2BFC030 R C01 P17 15:34:00.830 07/03/26 0000293998 SB -');
+
+    expect(testSessionManager.complete).toHaveBeenCalledWith('SB');
+    expect(emitted.some((item) => item.event === 'test:completed')).toBe(true);
+    expect(lastResultStore.get()).toMatchObject({ result: 'UNKNOWN', resultRawStatus: 'SB', lpcUniqueId: '0000293998' });
   });
 
   it('does not throw for garbage lines', () => {

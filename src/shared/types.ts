@@ -55,7 +55,24 @@ export interface LpcResult {
   operatorLogin?: string | null;
   operatorRole?: string | null;
   labelPrintMode?: LabelPrintMode;
+  resultFrameFormat?: 1 | 2;
+  resultRawStatus?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  lpcMessageId?: string | null;
+  lpcMessageType?: string | null;
+  lpcChannel?: string | null;
+  lpcChannelNumber?: number | null;
+  lpcProgram?: number | null;
+  lpcProgramText?: string | null;
+  lpcTesterTime?: string | null;
+  lpcTesterDate?: string | null;
+  lpcUniqueId?: string | null;
+  lpcProgramEvaluation?: string | null;
+  lpcSpcFlag?: string | null;
+  lpcAllResultInformation?: string | null;
 }
+
 
 export interface LpcStreamPoint {
   source: string;
@@ -96,6 +113,7 @@ export interface CurrentTest {
   labelPrintMode?: LabelPrintMode;
 }
 
+
 export interface ProgramStartResult {
   attempted: boolean;
   success: boolean;
@@ -125,3 +143,4 @@ export interface ProgramStartRequest {
   operatorRole?: string;
   labelPrintMode?: LabelPrintMode;
 }
+

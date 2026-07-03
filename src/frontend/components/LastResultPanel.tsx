@@ -1,6 +1,12 @@
 import type { LpcResult } from '../../shared/types';
 import { formatMeasurement, formatNumber, getResultClass, getResultDisplayLabel } from '../formatters';
 
+function getResultLabel(result: LpcResult): string {
+  if (result.result === 'UNKNOWN' && result.resultRawStatus) return `Wynik LPC: ${result.resultRawStatus}`;
+  return getResultDisplayLabel(result.result);
+}
+
+
 const measurementKeys = ['RL', 'Pt', 'EDC', 'PL', 'LLR', 'HLR', 'FPR'] as const;
 
 export function LastResultPanel({ result }: { result: LpcResult | null }) {
@@ -8,7 +14,7 @@ export function LastResultPanel({ result }: { result: LpcResult | null }) {
     <section className="last-result-panel">
       <div className={`result-status ${result ? getResultClass(result.result) : 'status-unknown'}`}>
         <span>Ostatni wynik</span>
-        <strong>{result ? getResultDisplayLabel(result.result) : '-'}</strong>
+        <strong>{result ? getResultLabel(result) : '-'}</strong>
       </div>
       {result ? (
         <div className="result-data-grid">

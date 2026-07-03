@@ -34,13 +34,15 @@ const result: EnrichedLpcResult = {
   operatorLogin: 'ADM', operatorRole: 'operator',
 };
 
+const appConfig = { LPC_HOST: '192.0.2.10', LPC_PORT: 23, LPC_INTERFACE_SELECTION: '1', LPC_RESULT_FRAME_FORMAT: 1 as const };
+
 describe('buildSplunkResultEnvelope', () => {
   it('includes test metadata, operator and full curve point package', () => {
     const envelope = buildSplunkResultEnvelope(config, {
       result,
       session: { ok: true, status: 'running', locked: true, activeTestId: 'test-1', barcode: '5901234123457', programNumber: 1, programText: 'P01', operatorUserId: 'user-1', operatorLogin: 'ADM', startedAt: '2026-06-30T10:00:00.000Z', firstLpcDataAt: null, lastLpcDataAt: null, lastStreamAt: null, finalResultAt: null, completedAt: null, timeoutAt: null, message: null },
       curvePoints: [{ elapsedTimeSec: 0.1, remainingTimeSec: 1, pressureBar: 0.001, pressureMbar: 1, segment: 'raw-stream' }],
-      config: { LPC_HOST: '192.0.2.10', LPC_PORT: 23, LPC_INTERFACE_SELECTION: '1' },
+      config: appConfig,
     });
     expect(envelope.index).toBe('machinedata_w16');
     expect(envelope).toMatchObject({ index: 'machinedata_w16', source: 'LPC-528-01', sourcetype: '_json' });
@@ -49,7 +51,49 @@ describe('buildSplunkResultEnvelope', () => {
   });
 
   it('sends empty curve as pointCount 0 and points []', () => {
-    const envelope = buildSplunkResultEnvelope(config, { result, session: null, curvePoints: [], config: { LPC_HOST: '192.0.2.10', LPC_PORT: 23, LPC_INTERFACE_SELECTION: '1' } });
+    const envelope = buildSplunkResultEnvelope(config, { result, session: null, curvePoints: [], config: appConfig });
     expect(envelope.event).toMatchObject({ curvePointCount: 0, curvePoints: [] });
+  });
+
+  it('includes format 2 LPC fields and does not report timeout for short R frame', () => {
+    const shortResult: EnrichedLpcResult = {
+      ...result,
+      result: 'UNKNOWN',
+      value: 'UNKNOWN',
+      resultFrameFormat: 2,
+      resultRawStatus: 'SB',
+      messageId: '2BFC030',
+      messageType: 'R',
+      channel: 'C01',
+      program: 'P17',
+      programText: 'P17',
+      testerTime: '15:34:00.830',
+      testerDate: '07/03/26',
+      uniqueId: '0000293998',
+      programEvaluation: 'SB',
+      spcFlag: '-',
+      lpcMessageId: '2BFC030',
+      lpcMessageType: 'R',
+      lpcChannel: 'C01',
+      lpcProgram: 17,
+      lpcProgramText: 'P17',
+      lpcTesterTime: '15:34:00.830',
+      lpcTesterDate: '07/03/26',
+      lpcUniqueId: '0000293998',
+      lpcProgramEvaluation: 'SB',
+      lpcSpcFlag: '-',
+      lpcAllResultInformation: null,
+    };
+    const envelope = buildSplunkResultEnvelope(config, { result: shortResult, session: null, curvePoints: [], config: { ...appConfig, LPC_RESULT_FRAME_FORMAT: 2 } });
+
+    expect(envelope.event).toMatchObject({
+      resultStatus: 'UNKNOWN',
+      resultRawStatus: 'SB',
+      lpcResultFrameFormat: 2,
+      lpcUniqueId: '0000293998',
+      lpcProgramEvaluation: 'SB',
+      errorCode: null,
+    });
+    expect(envelope.event).not.toMatchObject({ resultRawStatus: 'TIMEOUT' });
   });
 });

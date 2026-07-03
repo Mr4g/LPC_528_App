@@ -58,6 +58,7 @@ const envSchema = z.object({
   LPC_AUTO_SELECT_INTERFACE: z.coerce.boolean().default(true),
   LPC_DEBUG_LINES: z.coerce.boolean().default(false),
   LPC_DEBUG_PIPELINE: z.coerce.boolean().default(false),
+  LPC_RESULT_FRAME_FORMAT: z.coerce.number().int().refine((value) => value === 1 || value === 2, 'LPC_RESULT_FRAME_FORMAT must be 1 or 2').default(1),
   CURRENT_TEST_MAX_AGE_MS: z.coerce.number().int().positive().default(600000),
   ACTIVE_TEST_TIMEOUT_MS: z.coerce.number().int().positive().default(180000),
   ACTIVE_TEST_NO_DATA_WARNING_MS: z.coerce.number().int().positive().default(15000),

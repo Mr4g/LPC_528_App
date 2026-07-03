@@ -16,6 +16,7 @@ export function parseLpcStream(raw: string): LpcStreamPoint | null {
   if (!match) return null;
 
   const [, messageId, channel, program, segment, elapsedTime, remainingTime, pressureValue, pressureUnit] = match;
+  const parsedPressureValue = parseDecimal(pressureValue);
 
   return {
     source: 'LPC-528',
@@ -28,8 +29,9 @@ export function parseLpcStream(raw: string): LpcStreamPoint | null {
     segment,
     elapsedTimeSec: parseDecimal(elapsedTime),
     remainingTimeSec: parseDecimal(remainingTime),
-    pressureValue: parseDecimal(pressureValue),
+    pressureValue: parsedPressureValue,
     pressureUnit,
+    pressureMbar: pressureUnit.toLowerCase() === 'bar' ? parsedPressureValue * 1000 : null,
     raw,
     normalized,
   };

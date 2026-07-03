@@ -46,6 +46,8 @@ const envSchema = z.object({
   LPC_INTERFACE_SELECTION: z.string().min(1).default('1'),
   LPC_STREAM_BUFFER_LIMIT: z.coerce.number().int().positive().default(1000),
   LPC_MIN_ELAPSED_STEP_SEC: z.coerce.number().nonnegative().default(0.1),
+  LPC_ENABLE_ESTIMATED_LEAK_RATE: z.coerce.boolean().default(false),
+  LPC_ESTIMATED_LEAK_WINDOW_POINTS: z.coerce.number().int().positive().default(10),
   LPC_AUTO_CONNECT: z.coerce.boolean().default(true),
   LPC_RECONNECT_ENABLED: z.coerce.boolean().default(true),
   LPC_RECONNECT_DELAY_MS: z.coerce.number().int().positive().default(15000),

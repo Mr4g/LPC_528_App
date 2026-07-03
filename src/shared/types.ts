@@ -87,6 +87,7 @@ export interface LpcStreamPoint {
   remainingTimeSec: number | null;
   pressureValue: number | null;
   pressureUnit: string | null;
+  pressureMbar: number | null;
   raw: string;
   normalized: string;
 }

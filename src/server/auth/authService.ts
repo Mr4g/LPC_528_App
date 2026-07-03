@@ -246,6 +246,10 @@ export class AuthService {
     return { ok: true, user: { id: user.id, login: user.login, role: user.role } };
   }
 
+  countActiveAdmins(): number {
+    return this.db.countActiveAdminUsers();
+  }
+
   listUsers(): PublicUser[] {
     return this.db.listUsers().map((user) => this.toPublicUser(user));
   }

@@ -10,6 +10,34 @@ function isUserRole(value: unknown): value is UserRole {
   return value === 'operator' || value === 'line_leader' || value === 'admin';
 }
 
+export function canCreateUser(actorRole: UserRole, targetRole: UserRole): boolean {
+  if (actorRole === 'admin') return true;
+  if (actorRole === 'line_leader') return targetRole === 'line_leader' || targetRole === 'operator';
+  return false;
+}
+
+export type DeleteUserPermission =
+  | { ok: true }
+  | { ok: false; code: 'CANNOT_DELETE_SELF' | 'CANNOT_DELETE_LAST_ADMIN' | 'INSUFFICIENT_ROLE'; message: string };
+
+export function canDeleteUser(
+  actorRole: UserRole,
+  targetRole: UserRole,
+  actorId: string,
+  targetId: string,
+  options: { targetIsActive?: boolean; activeAdminCount?: number } = {},
+): DeleteUserPermission {
+  if (actorId === targetId) return { ok: false, code: 'CANNOT_DELETE_SELF', message: 'Nie możesz usunąć własnego konta.' };
+  if (actorRole === 'admin') {
+    if (targetRole === 'admin' && options.targetIsActive !== false && (options.activeAdminCount ?? 0) <= 1) {
+      return { ok: false, code: 'CANNOT_DELETE_LAST_ADMIN', message: 'Nie można usunąć ostatniego administratora.' };
+    }
+    return { ok: true };
+  }
+  if (actorRole === 'line_leader' && targetRole === 'operator') return { ok: true };
+  return { ok: false, code: 'INSUFFICIENT_ROLE', message: 'Brak uprawnień do usunięcia tego użytkownika.' };
+}
+
 export function canManageTarget(actorRole: UserRole, targetRole: UserRole): boolean {
   if (actorRole === 'admin') return targetRole !== 'admin';
   if (actorRole === 'line_leader') return targetRole === 'operator';
@@ -21,11 +49,7 @@ export function createUsersRouter(authService: AuthService): Router {
   router.use(requireRole(MANAGER_ROLES));
 
   router.get('/', (req: AuthenticatedRequest, res) => {
-    const users = authService.listUsers().filter((user) => {
-      if (req.user?.role === 'line_leader') return user.role === 'operator';
-      return user.role !== 'admin';
-    });
-    res.json({ ok: true, users });
+    res.json({ ok: true, users: authService.listUsers() });
   });
 
   router.post('/', (req: AuthenticatedRequest, res) => {
@@ -37,7 +61,10 @@ export function createUsersRouter(authService: AuthService): Router {
     if (!isUserRole(role)) return res.status(400).json({ ok: false, error: 'INVALID_ROLE', message: 'Nieprawidłowa rola.' });
     if (!validateOperatorLogin(login)) return res.status(400).json({ ok: false, error: 'INVALID_LOGIN', message: 'Skrót musi mieć 3–5 liter A-Z, bez cyfr i znaków specjalnych.' });
     if (password.length < 4) return res.status(400).json({ ok: false, error: 'INVALID_PASSWORD', message: 'Hasło musi mieć minimum 4 znaki.' });
-    if (!canManageTarget(req.user?.role ?? 'operator', role)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Brak uprawnień do utworzenia tej roli.' });
+    if (!canCreateUser(req.user?.role ?? 'operator', role)) {
+      const message = req.user?.role === 'line_leader' && role === 'admin' ? 'Line Leader nie może tworzyć administratorów.' : 'Brak uprawnień do tej operacji.';
+      return res.status(403).json({ ok: false, code: 'INSUFFICIENT_ROLE', error: 'FORBIDDEN', message });
+    }
 
     try {
       const user = authService.createUser({ login, password, role, createdBy: req.user?.login ?? null });
@@ -47,6 +74,19 @@ export function createUsersRouter(authService: AuthService): Router {
       const message = error instanceof CardAssignmentError ? error.message : error instanceof Error ? error.message : 'Nie udało się dodać użytkownika.';
       return res.status(400).json({ ok: false, error: error instanceof CardAssignmentError ? error.code : 'CREATE_USER_FAILED', message });
     }
+  });
+
+
+  router.delete('/:id', (req: AuthenticatedRequest, res) => {
+    const target = authService.getUserById(String(req.params.id));
+    if (!target) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
+    const permission = canDeleteUser(req.user?.role ?? 'operator', target.role, req.user?.id ?? '', target.id, {
+      targetIsActive: target.isActive,
+      activeAdminCount: authService.countActiveAdmins(),
+    });
+    if (!permission.ok) return res.status(403).json({ ok: false, code: permission.code, error: permission.code, message: permission.message });
+    const user = authService.setActive(target.id, false);
+    return user ? res.json({ ok: true, user }) : res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
   });
 
   router.patch('/:id', (req: AuthenticatedRequest, res) => {

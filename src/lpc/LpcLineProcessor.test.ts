@@ -122,7 +122,7 @@ describe('LpcLineProcessor', () => {
 
 
   it('treats stop streaming as ignored and waits for final result', () => {
-    const { processor, emitted } = createProcessor({ config: { LPC_HOST: '192.0.2.10', LPC_PORT: 23, LPC_INTERFACE_SELECTION: '1', LPC_RESULT_FRAME_FORMAT: 2 } });
+    const { processor, emitted } = createProcessor({ config: { LPC_HOST: '192.0.2.10', LPC_PORT: 23, LPC_INTERFACE_SELECTION: '1', LPC_RESULT_FRAME_FORMAT: 2, LPC_RESULT_OK_CODES: 'A,OK,PASS,ACCEPT,GOOD,GUT', LPC_RESULT_NOK_CODES: 'SB,NOK,FAIL,REJECT,BAD,FEHLER' } });
 
     processor.processLine('A5FB010 X Stop Streaming');
 
@@ -132,7 +132,7 @@ describe('LpcLineProcessor', () => {
   });
 
   it('keeps format 2 stream frames as stream and not final result', () => {
-    const { processor, emitted } = createProcessor({ config: { LPC_HOST: '192.0.2.10', LPC_PORT: 23, LPC_INTERFACE_SELECTION: '1', LPC_RESULT_FRAME_FORMAT: 2 } });
+    const { processor, emitted } = createProcessor({ config: { LPC_HOST: '192.0.2.10', LPC_PORT: 23, LPC_INTERFACE_SELECTION: '1', LPC_RESULT_FRAME_FORMAT: 2, LPC_RESULT_OK_CODES: 'A,OK,PASS,ACCEPT,GOOD,GUT', LPC_RESULT_NOK_CODES: 'SB,NOK,FAIL,REJECT,BAD,FEHLER' } });
 
     const diagnostic = processor.processLine('2BFA034	S	C01,P17,EXH,ET 25.25 sec,T 0.05 sec,P 0.000187 bar');
 
@@ -147,14 +147,14 @@ describe('LpcLineProcessor', () => {
     const testSessionManager = { getStatus: vi.fn(() => null), getActiveTestId: vi.fn(() => 'test-1'), complete: vi.fn(), markLpcData: vi.fn() };
     const { processor, emitted, lastResultStore } = createProcessor({
       testSessionManager: testSessionManager as never,
-      config: { LPC_HOST: '192.0.2.10', LPC_PORT: 23, LPC_INTERFACE_SELECTION: '1', LPC_RESULT_FRAME_FORMAT: 2 },
+      config: { LPC_HOST: '192.0.2.10', LPC_PORT: 23, LPC_INTERFACE_SELECTION: '1', LPC_RESULT_FRAME_FORMAT: 2, LPC_RESULT_OK_CODES: 'A,OK,PASS,ACCEPT,GOOD,GUT', LPC_RESULT_NOK_CODES: 'SB,NOK,FAIL,REJECT,BAD,FEHLER' },
     });
 
     processor.processLine('2BFC030 R C01 P17 15:34:00.830 07/03/26 0000293998 SB -');
 
     expect(testSessionManager.complete).toHaveBeenCalledWith('SB');
     expect(emitted.some((item) => item.event === 'test:completed')).toBe(true);
-    expect(lastResultStore.get()).toMatchObject({ result: 'UNKNOWN', resultRawStatus: 'SB', lpcUniqueId: '0000293998' });
+    expect(lastResultStore.get()).toMatchObject({ result: 'REJECT', resultRawStatus: 'SB', lpcUniqueId: '0000293998' });
   });
 
   it('does not throw for garbage lines', () => {

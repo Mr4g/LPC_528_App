@@ -69,7 +69,7 @@ export interface LpcLineProcessorOptions {
   zebraPrintOnResult?: boolean;
   splunkBuffer?: SplunkBuffer;
   splunkConfig?: SplunkRuntimeConfig;
-  config?: Pick<AppConfig, 'LPC_HOST' | 'LPC_PORT' | 'LPC_INTERFACE_SELECTION' | 'LPC_RESULT_FRAME_FORMAT'>;
+  config?: Pick<AppConfig, 'LPC_HOST' | 'LPC_PORT' | 'LPC_INTERFACE_SELECTION' | 'LPC_RESULT_FRAME_FORMAT' | 'LPC_RESULT_OK_CODES' | 'LPC_RESULT_NOK_CODES'>;
 }
 
 export class LpcLineProcessor {
@@ -146,7 +146,10 @@ export class LpcLineProcessor {
         return diagnostic;
       }
 
-      const result = parseLpcResult(rawLine, this.options.config?.LPC_RESULT_FRAME_FORMAT ?? 1);
+      const result = parseLpcResult(rawLine, this.options.config?.LPC_RESULT_FRAME_FORMAT ?? 1, {
+        okCodes: this.options.config?.LPC_RESULT_OK_CODES.split(','),
+        nokCodes: this.options.config?.LPC_RESULT_NOK_CODES.split(','),
+      });
       if (result) {
         const enrichedResult = this.attachCurrentTest(result);
         const activeSessionBeforeComplete = this.options.testSessionManager?.getStatus() ?? null;

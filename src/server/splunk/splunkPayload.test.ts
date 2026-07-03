@@ -34,7 +34,7 @@ const result: EnrichedLpcResult = {
   operatorLogin: 'ADM', operatorRole: 'operator',
 };
 
-const appConfig = { LPC_HOST: '192.0.2.10', LPC_PORT: 23, LPC_INTERFACE_SELECTION: '1', LPC_RESULT_FRAME_FORMAT: 1 as const };
+const appConfig = { LPC_HOST: '192.0.2.10', LPC_PORT: 23, LPC_INTERFACE_SELECTION: '1', LPC_RESULT_FRAME_FORMAT: 1 as const, LPC_RESULT_OK_CODES: 'A,OK,PASS,ACCEPT,GOOD,GUT', LPC_RESULT_NOK_CODES: 'SB,NOK,FAIL,REJECT,BAD,FEHLER' };
 
 describe('buildSplunkResultEnvelope', () => {
   it('includes test metadata, operator and full curve point package', () => {
@@ -58,10 +58,10 @@ describe('buildSplunkResultEnvelope', () => {
   it('includes format 2 LPC fields and does not report timeout for short R frame', () => {
     const shortResult: EnrichedLpcResult = {
       ...result,
-      result: 'UNKNOWN',
-      value: 'UNKNOWN',
+      result: 'ACCEPT',
+      value: 'ACCEPT',
       resultFrameFormat: 2,
-      resultRawStatus: 'SB',
+      resultRawStatus: 'A',
       messageId: '2BFC030',
       messageType: 'R',
       channel: 'C01',
@@ -70,7 +70,7 @@ describe('buildSplunkResultEnvelope', () => {
       testerTime: '15:34:00.830',
       testerDate: '07/03/26',
       uniqueId: '0000293998',
-      programEvaluation: 'SB',
+      programEvaluation: 'A',
       spcFlag: '-',
       lpcMessageId: '2BFC030',
       lpcMessageType: 'R',
@@ -80,18 +80,21 @@ describe('buildSplunkResultEnvelope', () => {
       lpcTesterTime: '15:34:00.830',
       lpcTesterDate: '07/03/26',
       lpcUniqueId: '0000293998',
-      lpcProgramEvaluation: 'SB',
+      lpcProgramEvaluation: 'A',
       lpcSpcFlag: '-',
       lpcAllResultInformation: null,
     };
     const envelope = buildSplunkResultEnvelope(config, { result: shortResult, session: null, curvePoints: [], config: { ...appConfig, LPC_RESULT_FRAME_FORMAT: 2 } });
 
     expect(envelope.event).toMatchObject({
-      resultStatus: 'UNKNOWN',
-      resultRawStatus: 'SB',
+      resultStatus: 'OK',
+      resultRawStatus: 'A',
       lpcResultFrameFormat: 2,
       lpcUniqueId: '0000293998',
-      lpcProgramEvaluation: 'SB',
+      lpcProgramEvaluation: 'A',
+      leakValue: 7.253,
+      RL: 7.253,
+      Pt: null,
       errorCode: null,
     });
     expect(envelope.event).not.toMatchObject({ resultRawStatus: 'TIMEOUT' });

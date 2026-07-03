@@ -16,6 +16,10 @@ describe('ZebraPrinter', () => {
     expect(zpl).not.toContain('^GB');
   });
 
+  it('allows ok_only printing for format 2 evaluation A after parser maps it to ACCEPT', () => {
+    expect(shouldPrintForResult('ACCEPT', 'ok_only')).toBe(true);
+  });
+
   it('applies labelPrintMode rules', () => {
     expect(shouldPrintForResult('ACCEPT', 'ok_only')).toBe(true);
     expect(shouldPrintForResult('REJECT', 'ok_only')).toBe(false);

@@ -63,7 +63,7 @@ export interface SplunkResultContext {
   result: EnrichedLpcResult;
   session: TestSessionState | null;
   curvePoints: LpcCurvePoint[];
-  config: Pick<AppConfig, 'LPC_HOST' | 'LPC_PORT' | 'LPC_INTERFACE_SELECTION' | 'LPC_RESULT_FRAME_FORMAT'>;
+  config: Pick<AppConfig, 'LPC_HOST' | 'LPC_PORT' | 'LPC_INTERFACE_SELECTION' | 'LPC_RESULT_FRAME_FORMAT' | 'LPC_RESULT_OK_CODES' | 'LPC_RESULT_NOK_CODES'>;
 }
 
 export interface SplunkErrorContext {
@@ -71,5 +71,5 @@ export interface SplunkErrorContext {
   reason: string;
   message: string | null;
   curvePoints: LpcCurvePoint[];
-  config: Pick<AppConfig, 'LPC_HOST' | 'LPC_PORT' | 'LPC_INTERFACE_SELECTION' | 'LPC_RESULT_FRAME_FORMAT'>;
+  config: Pick<AppConfig, 'LPC_HOST' | 'LPC_PORT' | 'LPC_INTERFACE_SELECTION' | 'LPC_RESULT_FRAME_FORMAT' | 'LPC_RESULT_OK_CODES' | 'LPC_RESULT_NOK_CODES'>;
 }

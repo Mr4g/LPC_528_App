@@ -6,6 +6,10 @@ export interface LpcCurvePoint {
   pressureBar: number | null;
   pressureMbar: number | null;
   segment: string;
+  liveLeakValue?: number | null;
+  liveLeakUnit?: string | null;
+  RL?: number | null;
+  RL_unit?: string | null;
 }
 
 export interface LpcCurveSummary {
@@ -57,6 +61,17 @@ export class LpcTestCurveBuffer {
       pressureMbar: pressureBar === null ? null : pressureBar * 1000,
       segment: point.segment,
     };
+
+    const liveLeakValue = point.liveLeakValue ?? point.RL ?? null;
+    const liveLeakUnit = point.liveLeakUnit ?? point.RL_unit ?? null;
+    if (liveLeakValue !== null) {
+      curvePoint.liveLeakValue = liveLeakValue;
+      curvePoint.RL = liveLeakValue;
+    }
+    if (liveLeakUnit !== null) {
+      curvePoint.liveLeakUnit = liveLeakUnit;
+      curvePoint.RL_unit = liveLeakUnit;
+    }
 
     this.points.push(curvePoint);
     this.lastStoredElapsedTimeSec = point.elapsedTimeSec;

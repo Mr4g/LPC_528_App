@@ -29,8 +29,16 @@ function mapCurvePoints(points: LpcCurvePoint[]) {
   return points.map((point, index) => ({
     t: index,
     elapsedSec: point.elapsedTimeSec,
+    remainingTimeSec: point.remainingTimeSec,
     value: point.pressureMbar,
+    pressureBar: point.pressureBar,
+    pressureMbar: point.pressureMbar,
     raw: point.segment,
+    segment: point.segment,
+    liveLeakValue: point.liveLeakValue ?? null,
+    liveLeakUnit: point.liveLeakUnit ?? null,
+    RL: point.RL ?? point.liveLeakValue ?? null,
+    RL_unit: point.RL_unit ?? point.liveLeakUnit ?? null,
   }));
 }
 

@@ -59,6 +59,19 @@ describe('LpcLineProcessor', () => {
     expect(processor.getPipelineStatus()).toMatchObject({ streamCount: 1 });
   });
 
+
+
+  it('parses DPT stream with live RL instead of ignoring it as a missing result frame', () => {
+    const { processor, emitted, curveBuffer } = createProcessor();
+    const diagnostic = processor.processLine('B89C045 S C01,P17,DPT,ET 54.65 sec,T 1.35 sec,P 5.990978 bar,RL 3.788533 pa/s');
+
+    expect(diagnostic).toMatchObject({ parsedAs: 'stream' });
+    expect(diagnostic.reason).not.toBe('missing-result-frame-pattern');
+    expect(processor.getPipelineStatus()).toMatchObject({ streamCount: 1 });
+    expect(curveBuffer.getPoints()[0]).toMatchObject({ segment: 'DPT', liveLeakValue: 3.788533, liveLeakUnit: 'Pa/s', RL: 3.788533, RL_unit: 'Pa/s' });
+    expect(emitted.find((item) => item.event === 'lpc:stream')?.payload).toMatchObject({ segment: 'DPT', pressureMbar: 5990.978, liveLeakValue: 3.788533, liveLeakUnit: 'Pa/s' });
+  });
+
   it('recognizes result, stores it and emits completion events', () => {
     const { processor, emitted, lastResultStore, resultHistoryStore } = createProcessor();
 

@@ -13,11 +13,13 @@ describe('operator estimated leak UI wiring', () => {
   it('labels live pressure and final RL separately', () => {
     expect(mainSource).toContain('Ciśnienie [mbar]');
     expect(mainSource).toContain('Finalny RL');
+    expect(mainSource).toContain('RL [Pa/s]');
+    expect(mainSource).toContain('Live z ramki S / DPT');
     expect(mainSource).toContain('Trend ciśnienia, nie wynik RL');
   });
 
   it('shows the EXH phase as proper measurement and remaining phase time', () => {
-    expect(mainSource).toContain("segment?.trim().toUpperCase() === 'EXH'");
+    expect(mainSource).toContain("normalized === 'EXH' || normalized === 'DPT'");
     expect(mainSource).toContain('Pomiar właściwy');
     expect(mainSource).toContain('Czas do końca fazy');
   });

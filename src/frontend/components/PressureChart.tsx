@@ -7,6 +7,10 @@ export interface PressureChartPoint {
   remainingTimeSec?: number | null;
   pressureBar?: number | null;
   segment?: string;
+  liveLeakValue?: number | null;
+  liveLeakUnit?: string | null;
+  RL?: number | null;
+  RL_unit?: string | null;
 }
 
 interface PressureChartProps {
@@ -39,6 +43,10 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
   const yScale = (y: number) => plot.bottom - ((y - minY) / yRange) * (plot.bottom - plot.top);
   const polyline = validPoints.map((point) => `${xScale(point.elapsedTimeSec)},${yScale(point.pressureMbar)}`).join(' ');
   const finalPoint = validPoints.at(-1) ?? null;
+  const latestLiveLeakPoint = [...points].reverse().find((point) => point.liveLeakValue !== null && point.liveLeakValue !== undefined) ?? null;
+  const latestLiveLeakLabel = latestLiveLeakPoint
+    ? `RL ${formatMeasurement(latestLiveLeakPoint.liveLeakValue, latestLiveLeakPoint.liveLeakUnit, 3)}`
+    : null;
   const finalClass = lastResult ? getResultBadgeClass(lastResult.result).replace('status-', 'chart-result-') : 'chart-result-unknown';
   const resultLabel = lastResult ? getResultDisplayLabel(lastResult.result) : null;
   const measurementLabel = lastResult ? `${lastResult.leakType ?? ''} ${formatMeasurement(lastResult.leakValue, lastResult.leakUnit)}`.trim() : null;
@@ -106,6 +114,7 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
         <span><i className="legend-line" /> linia ciśnienia</span>
         <span><i className="legend-dot" /> punkt końcowy testu</span>
         <span><i className={`legend-result ${finalClass}`} /> wynik końcowy</span>
+        {latestLiveLeakLabel && <span className="legend-live-rl">{latestLiveLeakPoint?.segment} {latestLiveLeakLabel}</span>}
       </div>
     </div>
   );

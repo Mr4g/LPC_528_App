@@ -88,6 +88,10 @@ export interface LpcStreamPoint {
   pressureValue: number | null;
   pressureUnit: string | null;
   pressureMbar: number | null;
+  liveLeakValue?: number | null;
+  liveLeakUnit?: string | null;
+  RL?: number | null;
+  RL_unit?: string | null;
   raw: string;
   normalized: string;
 }

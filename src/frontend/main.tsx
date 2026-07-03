@@ -111,6 +111,10 @@ interface LpcCurvePoint {
   pressureBar: number | null;
   pressureMbar: number | null;
   segment: string;
+  liveLeakValue?: number | null;
+  liveLeakUnit?: string | null;
+  RL?: number | null;
+  RL_unit?: string | null;
 }
 
 interface EnrichedLpcResult extends LpcResult {
@@ -358,7 +362,8 @@ function getSegmentDisplay(segment: string | null | undefined): string {
 }
 
 function isMeasurementSegment(segment: string | null | undefined): boolean {
-  return segment?.trim().toUpperCase() === 'EXH';
+  const normalized = segment?.trim().toUpperCase();
+  return normalized === 'EXH' || normalized === 'DPT';
 }
 
 function buildCurveSignature(points: LpcCurvePoint[]): string {
@@ -1263,6 +1268,10 @@ function App() {
           pressureBar: payload.pressureValue,
           pressureMbar: payload.pressureMbar,
           segment: payload.segment,
+          liveLeakValue: payload.liveLeakValue ?? null,
+          liveLeakUnit: payload.liveLeakUnit ?? null,
+          RL: payload.RL ?? payload.liveLeakValue ?? null,
+          RL_unit: payload.RL_unit ?? payload.liveLeakUnit ?? null,
         }]);
       });
 
@@ -1781,6 +1790,9 @@ function App() {
             <div className="metric-card"><span>Elapsed</span><strong>{formatNumber(lastStream?.elapsedTimeSec, 2)} s</strong></div>
             <div className="metric-card"><span>Czas do końca fazy</span><strong>{formatNumber(lastStream?.remainingTimeSec, 2)} s</strong></div>
             <div className="metric-card emphasis"><span>Ciśnienie [mbar]</span><strong>{formatNumber(lastStream?.pressureMbar, 2)}</strong></div>
+            {(lastStream?.liveLeakValue ?? null) !== null && (
+              <div className="metric-card leak-live"><span>RL [Pa/s]</span><strong>{formatMeasurement(lastStream?.liveLeakValue, lastStream?.liveLeakUnit, 3)}</strong><small className="metric-hint">Live z ramki S / DPT</small></div>
+            )}
             {estimatedLeakRateEnabled && (
               <div className="metric-card estimated"><span>Szacowany trend [Pa/s]</span><strong>{formatNumber(estimatedLeakTrendPaPerSec, 3)}</strong><small className="metric-hint">Trend ciśnienia, nie wynik RL</small></div>
             )}

@@ -10,6 +10,10 @@ export interface UserRecord {
   updatedAt: string;
   lastLoginAt: string | null;
   createdBy: string | null;
+  cardUidHash: string | null;
+  cardUidLast4: string | null;
+  cardAssignedAt: string | null;
+  lastTestAt: string | null;
 }
 
 export interface PublicUser {
@@ -21,6 +25,9 @@ export interface PublicUser {
   updatedAt: string;
   lastLoginAt: string | null;
   createdBy: string | null;
+  cardUidLast4: string | null;
+  cardMask: string | null;
+  lastTestAt: string | null;
 }
 
 export interface AuthUser {

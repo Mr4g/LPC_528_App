@@ -5,6 +5,7 @@ import Database, { type Database as BetterSqliteDatabase } from 'better-sqlite3'
 import type { UserRecord } from '../auth/types';
 import type { ProgramMappingRecord } from '../../programs/programMappingStore';
 import type { LpcResult } from '../../shared/types';
+import type { SplunkBufferStatus, SplunkEventBufferRecord } from '../splunk/splunkTypes';
 
 export interface TestResultQuery {
   limit?: number;
@@ -23,6 +24,7 @@ export interface StoredTestSession {
   barcode: string | null;
   programNumber: number | null;
   programText: string | null;
+  operatorUserId: string | null;
   operatorLogin: string | null;
   startedAt: string | null;
   completedAt: string | null;
@@ -54,6 +56,10 @@ function rowToUser(row: Record<string, unknown>): UserRecord {
     updatedAt: String(row.updatedAt),
     lastLoginAt: row.lastLoginAt === null ? null : String(row.lastLoginAt),
     createdBy: row.createdBy === null ? null : String(row.createdBy),
+    cardUidHash: row.card_uid_hash === null || row.card_uid_hash === undefined ? null : String(row.card_uid_hash),
+    cardUidLast4: row.card_uid_last4 === null || row.card_uid_last4 === undefined ? null : String(row.card_uid_last4),
+    cardAssignedAt: row.card_assigned_at === null || row.card_assigned_at === undefined ? null : String(row.card_assigned_at),
+    lastTestAt: row.last_test_at === null || row.last_test_at === undefined ? null : String(row.last_test_at),
   };
 }
 
@@ -71,6 +77,12 @@ function rowToProgramMapping(row: Record<string, unknown>): ProgramMappingRecord
     updatedAt: String(row.updatedAt),
     createdBy: row.createdBy === null ? null : String(row.createdBy),
     updatedBy: row.updatedBy === null ? null : String(row.updatedBy),
+    instructionPdfStoredName: row.instructionPdfStoredName === null || row.instructionPdfStoredName === undefined ? null : String(row.instructionPdfStoredName),
+    instructionPdfOriginalName: row.instructionPdfOriginalName === null || row.instructionPdfOriginalName === undefined ? null : String(row.instructionPdfOriginalName),
+    instructionPdfMimeType: row.instructionPdfMimeType === null || row.instructionPdfMimeType === undefined ? null : String(row.instructionPdfMimeType),
+    instructionPdfSizeBytes: row.instructionPdfSizeBytes === null || row.instructionPdfSizeBytes === undefined ? null : Number(row.instructionPdfSizeBytes),
+    instructionPdfUploadedAt: row.instructionPdfUploadedAt === null || row.instructionPdfUploadedAt === undefined ? null : String(row.instructionPdfUploadedAt),
+    instructionPdfUploadedBy: row.instructionPdfUploadedBy === null || row.instructionPdfUploadedBy === undefined ? null : String(row.instructionPdfUploadedBy),
   };
 }
 
@@ -81,12 +93,30 @@ function rowToSession(row: Record<string, unknown>): StoredTestSession {
     barcode: row.barcode === null ? null : String(row.barcode),
     programNumber: row.programNumber === null ? null : Number(row.programNumber),
     programText: row.programText === null ? null : String(row.programText),
+    operatorUserId: row.operatorUserId === null || row.operatorUserId === undefined ? null : String(row.operatorUserId),
     operatorLogin: row.operatorLogin === null ? null : String(row.operatorLogin),
     startedAt: row.startedAt === null ? null : String(row.startedAt),
     completedAt: row.completedAt === null ? null : String(row.completedAt),
     lastStreamAt: row.lastStreamAt === null ? null : String(row.lastStreamAt),
     timeoutAt: row.timeoutAt === null ? null : String(row.timeoutAt),
     message: row.message === null ? null : String(row.message),
+  };
+}
+
+
+function rowToSplunkBuffer(row: Record<string, unknown>): SplunkEventBufferRecord {
+  return {
+    id: Number(row.id),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    nextAttemptAt: row.next_attempt_at === null ? null : String(row.next_attempt_at),
+    sentAt: row.sent_at === null ? null : String(row.sent_at),
+    attempts: Number(row.attempts),
+    lastError: row.last_error === null ? null : String(row.last_error),
+    status: row.status as SplunkBufferStatus,
+    eventType: String(row.event_type),
+    testId: row.test_id === null ? null : String(row.test_id),
+    payloadJson: String(row.payload_json),
   };
 }
 
@@ -189,18 +219,19 @@ export class AppDatabase {
   listUsers(): UserRecord[] { return (this.db.prepare('SELECT * FROM users ORDER BY login ASC').all() as Record<string, unknown>[]).map(rowToUser); }
   findByLogin(login: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE login = ?').get(login) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
   findById(id: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
+  findByCardUidHash(hash: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE card_uid_hash = ? AND isActive = 1').get(hash) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
 
   insertUser(user: UserRecord): void {
-    this.db.prepare(`INSERT INTO users (id, login, passwordHash, role, isActive, createdAt, updatedAt, lastLoginAt, createdBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(user.id, user.login, user.passwordHash, user.role, user.isActive, user.createdAt, user.updatedAt, user.lastLoginAt, user.createdBy);
+    this.db.prepare(`INSERT INTO users (id, login, passwordHash, role, isActive, createdAt, updatedAt, lastLoginAt, createdBy, card_uid_hash, card_uid_last4, card_assigned_at, last_test_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(user.id, user.login, user.passwordHash, user.role, user.isActive, user.createdAt, user.updatedAt, user.lastLoginAt, user.createdBy, user.cardUidHash, user.cardUidLast4, user.cardAssignedAt, user.lastTestAt);
   }
 
   updateUser(id: string, patch: Partial<UserRecord>): UserRecord | null {
     const existing = this.findById(id);
     if (!existing) return null;
     const next = { ...existing, ...patch };
-    this.db.prepare(`UPDATE users SET login = ?, passwordHash = ?, role = ?, isActive = ?, createdAt = ?, updatedAt = ?, lastLoginAt = ?, createdBy = ? WHERE id = ?`)
-      .run(next.login, next.passwordHash, next.role, next.isActive, next.createdAt, next.updatedAt, next.lastLoginAt, next.createdBy, id);
+    this.db.prepare(`UPDATE users SET login = ?, passwordHash = ?, role = ?, isActive = ?, createdAt = ?, updatedAt = ?, lastLoginAt = ?, createdBy = ?, card_uid_hash = ?, card_uid_last4 = ?, card_assigned_at = ?, last_test_at = ? WHERE id = ?`)
+      .run(next.login, next.passwordHash, next.role, next.isActive, next.createdAt, next.updatedAt, next.lastLoginAt, next.createdBy, next.cardUidHash, next.cardUidLast4, next.cardAssignedAt, next.lastTestAt, id);
     return this.findById(id);
   }
 
@@ -209,16 +240,16 @@ export class AppDatabase {
   findProgramMappingById(id: string): ProgramMappingRecord | null { const row = this.db.prepare('SELECT * FROM program_mappings WHERE id = ?').get(id) as Record<string, unknown> | undefined; return row ? rowToProgramMapping(row) : null; }
 
   insertProgramMapping(mapping: ProgramMappingRecord): void {
-    this.db.prepare(`INSERT INTO program_mappings (id, barcodePattern, programNumber, programText, description, isActive, matchType, labelPrintMode, createdAt, updatedAt, createdBy, updatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(mapping.id, mapping.barcodePattern, mapping.programNumber, mapping.programText, mapping.description, boolToInt(mapping.isActive), mapping.matchType, mapping.labelPrintMode, mapping.createdAt, mapping.updatedAt, mapping.createdBy, mapping.updatedBy);
+    this.db.prepare(`INSERT INTO program_mappings (id, barcodePattern, programNumber, programText, description, isActive, matchType, labelPrintMode, createdAt, updatedAt, createdBy, updatedBy, instructionPdfStoredName, instructionPdfOriginalName, instructionPdfMimeType, instructionPdfSizeBytes, instructionPdfUploadedAt, instructionPdfUploadedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(mapping.id, mapping.barcodePattern, mapping.programNumber, mapping.programText, mapping.description, boolToInt(mapping.isActive), mapping.matchType, mapping.labelPrintMode, mapping.createdAt, mapping.updatedAt, mapping.createdBy, mapping.updatedBy, mapping.instructionPdfStoredName, mapping.instructionPdfOriginalName, mapping.instructionPdfMimeType, mapping.instructionPdfSizeBytes, mapping.instructionPdfUploadedAt, mapping.instructionPdfUploadedBy);
   }
 
   updateProgramMapping(id: string, patch: Partial<ProgramMappingRecord>): ProgramMappingRecord | null {
     const existing = this.findProgramMappingById(id);
     if (!existing) return null;
     const next = { ...existing, ...patch };
-    this.db.prepare(`UPDATE program_mappings SET barcodePattern = ?, programNumber = ?, programText = ?, description = ?, isActive = ?, matchType = ?, labelPrintMode = ?, createdAt = ?, updatedAt = ?, createdBy = ?, updatedBy = ? WHERE id = ?`)
-      .run(next.barcodePattern, next.programNumber, next.programText, next.description, boolToInt(next.isActive), next.matchType, next.labelPrintMode, next.createdAt, next.updatedAt, next.createdBy, next.updatedBy, id);
+    this.db.prepare(`UPDATE program_mappings SET barcodePattern = ?, programNumber = ?, programText = ?, description = ?, isActive = ?, matchType = ?, labelPrintMode = ?, createdAt = ?, updatedAt = ?, createdBy = ?, updatedBy = ?, instructionPdfStoredName = ?, instructionPdfOriginalName = ?, instructionPdfMimeType = ?, instructionPdfSizeBytes = ?, instructionPdfUploadedAt = ?, instructionPdfUploadedBy = ? WHERE id = ?`)
+      .run(next.barcodePattern, next.programNumber, next.programText, next.description, boolToInt(next.isActive), next.matchType, next.labelPrintMode, next.createdAt, next.updatedAt, next.createdBy, next.updatedBy, next.instructionPdfStoredName, next.instructionPdfOriginalName, next.instructionPdfMimeType, next.instructionPdfSizeBytes, next.instructionPdfUploadedAt, next.instructionPdfUploadedBy, id);
     return this.findProgramMappingById(id);
   }
 
@@ -266,17 +297,63 @@ export class AppDatabase {
   }
 
   upsertTestSession(session: StoredTestSession): void {
-    this.db.prepare(`INSERT INTO test_sessions (id, status, barcode, programNumber, programText, operatorLogin, startedAt, completedAt, lastStreamAt, timeoutAt, message)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET status = excluded.status, barcode = excluded.barcode, programNumber = excluded.programNumber, programText = excluded.programText,
+    this.db.prepare(`INSERT INTO test_sessions (id, status, barcode, programNumber, programText, operatorUserId, operatorLogin, startedAt, completedAt, lastStreamAt, timeoutAt, message)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET status = excluded.status, barcode = excluded.barcode, programNumber = excluded.programNumber, programText = excluded.programText, operatorUserId = excluded.operatorUserId,
       operatorLogin = excluded.operatorLogin, startedAt = excluded.startedAt, completedAt = excluded.completedAt, lastStreamAt = excluded.lastStreamAt,
       timeoutAt = excluded.timeoutAt, message = excluded.message`)
-      .run(session.id, session.status, session.barcode, session.programNumber, session.programText, session.operatorLogin, session.startedAt, session.completedAt, session.lastStreamAt, session.timeoutAt, session.message);
+      .run(session.id, session.status, session.barcode, session.programNumber, session.programText, session.operatorUserId, session.operatorLogin, session.startedAt, session.completedAt, session.lastStreamAt, session.timeoutAt, session.message);
   }
 
   getLatestTestSession(): StoredTestSession | null {
     const row = this.db.prepare('SELECT * FROM test_sessions ORDER BY COALESCE(startedAt, completedAt, timeoutAt) DESC LIMIT 1').get() as Record<string, unknown> | undefined;
     return row ? rowToSession(row) : null;
+  }
+
+
+  enqueueSplunkEvent(input: { eventType: string; testId: string | null; payloadJson: string; lastError?: string | null; nextAttemptAt?: string | null }): number {
+    const now = new Date().toISOString();
+    const info = this.db.prepare(`INSERT INTO splunk_event_buffer (created_at, updated_at, next_attempt_at, sent_at, attempts, last_error, status, event_type, test_id, payload_json)
+      VALUES (?, ?, ?, NULL, 0, ?, 'pending', ?, ?, ?)`)
+      .run(now, now, input.nextAttemptAt ?? null, input.lastError ?? null, input.eventType, input.testId, input.payloadJson);
+    return Number(info.lastInsertRowid);
+  }
+
+  listPendingSplunkEvents(limit = 25): SplunkEventBufferRecord[] {
+    const now = new Date().toISOString();
+    const rows = this.db.prepare(`SELECT * FROM splunk_event_buffer
+      WHERE status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+      ORDER BY created_at ASC LIMIT ?`).all(now, limit) as Record<string, unknown>[];
+    return rows.map(rowToSplunkBuffer);
+  }
+
+  markSplunkEventSending(id: number): boolean {
+    const info = this.db.prepare("UPDATE splunk_event_buffer SET status = 'sending', updated_at = ? WHERE id = ? AND status = 'pending'")
+      .run(new Date().toISOString(), id);
+    return info.changes > 0;
+  }
+
+  markSplunkEventSent(id: number): void {
+    const now = new Date().toISOString();
+    this.db.prepare("UPDATE splunk_event_buffer SET status = 'sent', sent_at = ?, updated_at = ?, last_error = NULL WHERE id = ?")
+      .run(now, now, id);
+  }
+
+  markSplunkEventFailed(id: number, error: string, nextAttemptAt: string | null, maxAttempts: number): void {
+    const row = this.db.prepare('SELECT attempts FROM splunk_event_buffer WHERE id = ?').get(id) as { attempts?: number } | undefined;
+    const attempts = Number(row?.attempts ?? 0) + 1;
+    const status = maxAttempts > 0 && attempts >= maxAttempts ? 'failed' : 'pending';
+    this.db.prepare('UPDATE splunk_event_buffer SET status = ?, attempts = ?, last_error = ?, next_attempt_at = ?, updated_at = ? WHERE id = ?')
+      .run(status, attempts, error, nextAttemptAt, new Date().toISOString(), id);
+  }
+
+  getSplunkBufferStats(): { pending: number; sending: number; sent: number; failed: number; lastError: string | null } {
+    const pending = this.count("SELECT COUNT(*) AS count FROM splunk_event_buffer WHERE status = 'pending'");
+    const sending = this.count("SELECT COUNT(*) AS count FROM splunk_event_buffer WHERE status = 'sending'");
+    const sent = this.count("SELECT COUNT(*) AS count FROM splunk_event_buffer WHERE status = 'sent'");
+    const failed = this.count("SELECT COUNT(*) AS count FROM splunk_event_buffer WHERE status = 'failed'");
+    const row = this.db.prepare("SELECT last_error FROM splunk_event_buffer WHERE last_error IS NOT NULL ORDER BY updated_at DESC LIMIT 1").get() as { last_error?: string } | undefined;
+    return { pending, sending, sent, failed, lastError: row?.last_error ?? null };
   }
 
   private migrate(): void {
@@ -290,13 +367,30 @@ export class AppDatabase {
       CREATE INDEX IF NOT EXISTS idx_test_results_operatorLogin ON test_results(operatorLogin);
       CREATE INDEX IF NOT EXISTS idx_test_results_result ON test_results(result);
       CREATE INDEX IF NOT EXISTS idx_test_results_programText ON test_results(programText);
-      CREATE TABLE IF NOT EXISTS test_sessions (id TEXT PRIMARY KEY, status TEXT NOT NULL, barcode TEXT, programNumber INTEGER, programText TEXT, operatorLogin TEXT, startedAt TEXT, completedAt TEXT, lastStreamAt TEXT, timeoutAt TEXT, message TEXT);
+      CREATE TABLE IF NOT EXISTS test_sessions (id TEXT PRIMARY KEY, status TEXT NOT NULL, barcode TEXT, programNumber INTEGER, programText TEXT, operatorUserId TEXT, operatorLogin TEXT, startedAt TEXT, completedAt TEXT, lastStreamAt TEXT, timeoutAt TEXT, message TEXT);
       CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT NULL);
+      CREATE TABLE IF NOT EXISTS splunk_event_buffer (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, next_attempt_at TEXT, sent_at TEXT, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, status TEXT NOT NULL DEFAULT 'pending', event_type TEXT NOT NULL, test_id TEXT, payload_json TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS idx_splunk_event_buffer_status_next ON splunk_event_buffer(status, next_attempt_at);
+      CREATE INDEX IF NOT EXISTS idx_splunk_event_buffer_test_id ON splunk_event_buffer(test_id);
     `);
+    const userColumns = this.db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
+    const addUserColumn = (name: string, sql: string) => { if (!userColumns.some((column) => column.name === name)) this.db.prepare(sql).run(); };
+    addUserColumn('card_uid_hash', 'ALTER TABLE users ADD COLUMN card_uid_hash TEXT');
+    addUserColumn('card_uid_last4', 'ALTER TABLE users ADD COLUMN card_uid_last4 TEXT');
+    addUserColumn('card_assigned_at', 'ALTER TABLE users ADD COLUMN card_assigned_at TEXT');
+    addUserColumn('last_test_at', 'ALTER TABLE users ADD COLUMN last_test_at TEXT');
+    const sessionColumns = this.db.prepare('PRAGMA table_info(test_sessions)').all() as Array<{ name: string }>;
+    if (!sessionColumns.some((column) => column.name === 'operatorUserId')) this.db.prepare('ALTER TABLE test_sessions ADD COLUMN operatorUserId TEXT').run();
+    this.db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_card_uid_hash ON users(card_uid_hash) WHERE card_uid_hash IS NOT NULL').run();
     const programColumns = this.db.prepare('PRAGMA table_info(program_mappings)').all() as Array<{ name: string }>;
-    if (!programColumns.some((column) => column.name === 'labelPrintMode')) {
-      this.db.prepare("ALTER TABLE program_mappings ADD COLUMN labelPrintMode TEXT NOT NULL DEFAULT 'ok_only'").run();
-    }
+    const addProgramColumn = (name: string, sql: string) => { if (!programColumns.some((column) => column.name === name)) this.db.prepare(sql).run(); };
+    addProgramColumn('labelPrintMode', "ALTER TABLE program_mappings ADD COLUMN labelPrintMode TEXT NOT NULL DEFAULT 'ok_only'");
+    addProgramColumn('instructionPdfStoredName', 'ALTER TABLE program_mappings ADD COLUMN instructionPdfStoredName TEXT');
+    addProgramColumn('instructionPdfOriginalName', 'ALTER TABLE program_mappings ADD COLUMN instructionPdfOriginalName TEXT');
+    addProgramColumn('instructionPdfMimeType', 'ALTER TABLE program_mappings ADD COLUMN instructionPdfMimeType TEXT');
+    addProgramColumn('instructionPdfSizeBytes', 'ALTER TABLE program_mappings ADD COLUMN instructionPdfSizeBytes INTEGER');
+    addProgramColumn('instructionPdfUploadedAt', 'ALTER TABLE program_mappings ADD COLUMN instructionPdfUploadedAt TEXT');
+    addProgramColumn('instructionPdfUploadedBy', 'ALTER TABLE program_mappings ADD COLUMN instructionPdfUploadedBy TEXT');
     this.db.prepare("INSERT OR IGNORE INTO app_settings (key, value, updatedAt, updatedBy) VALUES ('zebra.autoPrintEnabled', 'true', ?, NULL)").run(new Date().toISOString());
   }
 

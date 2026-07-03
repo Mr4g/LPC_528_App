@@ -4,6 +4,7 @@ import type { CurrentTestStore } from '../scanner/currentTestStore';
 import type { LastResultStore } from './LastResultStore';
 import type { ResultHistoryStore } from './ResultHistoryStore';
 import type { AppDatabase } from '../server/db/database';
+import type { AuthService } from '../server/auth/authService';
 import type { TestSessionManager } from '../server/test-session/testSessionManager';
 import { isIgnoredLpcLine, isInterfaceSelectionPrompt } from './lpcFrameFilters';
 import { normalizeLpcLine } from './normalizeLpcLine';
@@ -12,6 +13,10 @@ import { parseLpcStream } from './parseLpcStream';
 import type { LpcTcpClient } from './LpcTcpClient';
 import { LpcTestCurveBuffer } from './LpcTestCurveBuffer';
 import { shouldPrintForResult, type ZebraPrinter } from '../zebra/ZebraPrinter';
+import type { SplunkBuffer } from '../server/splunk/splunkBuffer';
+import { buildSplunkResultEnvelope } from '../server/splunk/splunkPayload';
+import type { SplunkRuntimeConfig } from '../server/splunk/splunkTypes';
+import type { AppConfig } from '../config';
 
 export type LpcParsedAs = 'stream' | 'result' | 'ignored' | 'error';
 
@@ -57,10 +62,14 @@ export interface LpcLineProcessorOptions {
   debugPipeline?: boolean;
   maxRawLines?: number;
   database?: AppDatabase;
+  authService?: AuthService;
   testSessionManager?: TestSessionManager;
   zebraPrinter?: ZebraPrinter;
   zebraEnabled?: boolean;
   zebraPrintOnResult?: boolean;
+  splunkBuffer?: SplunkBuffer;
+  splunkConfig?: SplunkRuntimeConfig;
+  config?: Pick<AppConfig, 'LPC_HOST' | 'LPC_PORT' | 'LPC_INTERFACE_SELECTION'>;
 }
 
 export class LpcLineProcessor {
@@ -132,12 +141,16 @@ export class LpcLineProcessor {
       const result = parseLpcResult(rawLine);
       if (result) {
         const enrichedResult = this.attachCurrentTest(result);
+        const activeSessionBeforeComplete = this.options.testSessionManager?.getStatus() ?? null;
+        const completedCurve = this.options.curveBuffer.completeAndClear();
         console.log(`[ACTIVE_TEST] final_result_received status=${enrichedResult.result}`);
         this.options.database?.insertTestResult(enrichedResult, this.options.testSessionManager?.getActiveTestId() ?? null);
         this.options.lastResultStore?.set(enrichedResult);
         this.options.resultHistoryStore?.add(enrichedResult);
         this.options.testSessionManager?.complete();
+        this.options.authService?.markTestActivity(activeSessionBeforeComplete?.operatorUserId);
         void this.autoPrint(enrichedResult);
+        this.sendSplunkResult(enrichedResult, activeSessionBeforeComplete, completedCurve.points);
         this.lastResultAt = receivedAt;
         this.resultCount += 1;
         diagnostic.parsedAs = 'result';
@@ -147,7 +160,6 @@ export class LpcLineProcessor {
         this.emit('lpc:result', enrichedResult);
         this.emit('test:completed', enrichedResult);
         this.emit('lpc:results-updated', { results: history });
-        const completedCurve = this.options.curveBuffer.completeAndClear();
         this.emit('lpc:curve-completed', {
           result: enrichedResult,
           points: completedCurve.points,
@@ -217,6 +229,12 @@ export class LpcLineProcessor {
       program: currentTest.programText,
       programText: currentTest.programText,
     };
+  }
+
+  private sendSplunkResult(result: EnrichedLpcResult, session: ReturnType<TestSessionManager['getStatus']> | null, curvePoints: ReturnType<LpcTestCurveBuffer['getPoints']>): void {
+    if (!this.options.splunkBuffer || !this.options.splunkConfig || !this.options.config || !this.options.splunkConfig.sendResult) return;
+    const envelope = buildSplunkResultEnvelope(this.options.splunkConfig, { result, session, curvePoints, config: this.options.config });
+    void this.options.splunkBuffer.sendOrQueue(envelope).catch((error) => console.warn('[SPLUNK] failed status=internal error=' + (error instanceof Error ? error.message : 'unknown')));
   }
 
   private async autoPrint(result: EnrichedLpcResult): Promise<void> {

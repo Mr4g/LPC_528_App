@@ -744,3 +744,40 @@ Wtedy skrypt wypisuje:
 ```text
 DRY_RUN: Program P01 validated, not sent to LPC
 ```
+
+## Logowanie kartą RFID/NFC USB HID
+
+Aplikacja obsługuje czytnik kart działający jako klawiatura USB HID, np. **ELATEC TWN4 MIFARE NFC USB**. Po przyłożeniu karty czytnik wpisuje UID tak jak klawiatura i zatwierdza Enterem, np. `05389148`.
+
+- Karta jest domyślną metodą logowania operatora.
+- Logowanie hasłem zostaje jako fallback i każdy użytkownik nadal ma hasło backupowe.
+- UID karty jest traktowany jako string, więc zera wiodące zostają zachowane.
+- Pełny UID nie jest zapisywany w SQLite; aplikacja zapisuje HMAC-SHA256 z `AUTH_SESSION_SECRET` oraz końcówkę `card_uid_last4` do maski typu `****9148`.
+- Jedna karta może należeć tylko do jednego użytkownika dzięki unikalnemu indeksowi na `card_uid_hash` dla wartości niepustych.
+- Ta sama znana karta przyłożona podczas zalogowania wylogowuje użytkownika.
+- Inna znana karta przyłożona podczas zalogowania przełącza sesję na właściciela tej karty.
+- Podczas aktywnego testu zmiana operatora, przełączenie i wylogowanie kartą są blokowane.
+- Po `AUTH_TEST_IDLE_LOGOUT_MINUTES` minutach od zakończenia ostatniego testu backend wymaga ponownego logowania kartą albo hasłem; kliknięcia w UI nie resetują tego timeoutu.
+
+Konfiguracja w `.env`:
+
+```env
+CARD_LOGIN_ENABLED=true
+CARD_UID_PATTERN=^\d{8}$
+CARD_SCAN_IDLE_MS=200
+AUTH_TEST_IDLE_LOGOUT_MINUTES=15
+```
+
+## Splunk HEC troubleshooting
+
+Dla JSON Event Endpoint aplikacja używa `/services/collector/event`. Jeśli w `.env` podasz URL kończący się na `/services/collector`, klient znormalizuje go do `/services/collector/event`; jeśli podasz już `/services/collector/event`, URL nie zostanie zdublowany.
+
+Splunk HEC dostaje pojedynczy JSON envelope w ciele requestu (`Content-Type: application/json`), z `index`, `source` i `sourcetype` na top-level oraz danymi testu wewnątrz pola `event`. Token trzymaj wyłącznie w `.env` i nie commituj go.
+
+Jeśli Splunk w środowisku dev/test ma certyfikat self-signed, ustaw lokalnie:
+
+```env
+SPLUNK_VERIFY_TLS=false
+```
+
+To działa jak `curl -k`, ale tylko dla klienta Splunk. Produkcyjnie preferowane jest dodanie certyfikatu CA Splunka do zaufanych i pozostawienie `SPLUNK_VERIFY_TLS=true`.

@@ -18,6 +18,20 @@ export interface ProgramMappingRecord {
   updatedAt: string;
   createdBy: string | null;
   updatedBy: string | null;
+  instructionPdfStoredName: string | null;
+  instructionPdfOriginalName: string | null;
+  instructionPdfMimeType: string | null;
+  instructionPdfSizeBytes: number | null;
+  instructionPdfUploadedAt: string | null;
+  instructionPdfUploadedBy: string | null;
+}
+
+export interface ProgramInstructionMetadata {
+  exists: boolean;
+  originalName: string | null;
+  uploadedAt: string | null;
+  uploadedBy: string | null;
+  sizeBytes: number | null;
 }
 
 export interface ProgramMappingInput {
@@ -125,6 +139,12 @@ export class ProgramMappingService {
       updatedAt: now,
       createdBy: actorLogin,
       updatedBy: actorLogin,
+      instructionPdfStoredName: null,
+      instructionPdfOriginalName: null,
+      instructionPdfMimeType: null,
+      instructionPdfSizeBytes: null,
+      instructionPdfUploadedAt: null,
+      instructionPdfUploadedBy: null,
     };
     this.database.insertProgramMapping(mapping);
     return mapping;
@@ -145,6 +165,44 @@ export class ProgramMappingService {
   setActive(id: string, isActive: boolean, actorLogin: string | null): ProgramMappingRecord | null {
     return this.database.updateProgramMapping(id, {
       isActive,
+      updatedAt: new Date().toISOString(),
+      updatedBy: actorLogin,
+    });
+  }
+
+  getInstructionMetadata(id: string): ProgramInstructionMetadata | null {
+    const mapping = this.database.findProgramMappingById(id);
+    if (!mapping) return null;
+    return {
+      exists: Boolean(mapping.instructionPdfStoredName),
+      originalName: mapping.instructionPdfOriginalName,
+      uploadedAt: mapping.instructionPdfUploadedAt,
+      uploadedBy: mapping.instructionPdfUploadedBy,
+      sizeBytes: mapping.instructionPdfSizeBytes,
+    };
+  }
+
+  setInstructionPdf(id: string, input: { storedName: string; originalName: string; mimeType: string; sizeBytes: number; uploadedBy: string | null }): ProgramMappingRecord | null {
+    return this.database.updateProgramMapping(id, {
+      instructionPdfStoredName: input.storedName,
+      instructionPdfOriginalName: input.originalName,
+      instructionPdfMimeType: input.mimeType,
+      instructionPdfSizeBytes: input.sizeBytes,
+      instructionPdfUploadedAt: new Date().toISOString(),
+      instructionPdfUploadedBy: input.uploadedBy,
+      updatedAt: new Date().toISOString(),
+      updatedBy: input.uploadedBy,
+    });
+  }
+
+  removeInstructionPdf(id: string, actorLogin: string | null): ProgramMappingRecord | null {
+    return this.database.updateProgramMapping(id, {
+      instructionPdfStoredName: null,
+      instructionPdfOriginalName: null,
+      instructionPdfMimeType: null,
+      instructionPdfSizeBytes: null,
+      instructionPdfUploadedAt: null,
+      instructionPdfUploadedBy: null,
       updatedAt: new Date().toISOString(),
       updatedBy: actorLogin,
     });

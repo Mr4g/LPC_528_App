@@ -51,10 +51,10 @@ export function clearSessionCookie(res: Response): void {
   res.clearCookie(cookieOptions.name, { path: '/', sameSite: cookieOptions.sameSite, secure: cookieOptions.secure });
 }
 
-export function attachAuth(authService: AuthService) {
+export function attachAuth(authService: AuthService, options: { isTestLocked?: () => boolean } = {}) {
   return (req: AuthenticatedRequest, _res: Response, next: NextFunction) => {
     const token = parseCookie(req.headers.cookie, cookieOptions.name);
-    const user = authService.verifySession(token);
+    const user = authService.verifySession(token, { allowIdleExpired: options.isTestLocked?.() ?? false });
     if (user) req.user = user;
     next();
   };

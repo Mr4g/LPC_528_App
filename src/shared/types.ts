@@ -90,6 +90,7 @@ export interface CurrentTest {
   mappingId?: string | null;
   matchType?: 'exact' | 'contains' | null;
   selectedAt: string;
+  operatorUserId?: string;
   operatorLogin?: string;
   operatorRole?: string;
   labelPrintMode?: LabelPrintMode;
@@ -119,6 +120,7 @@ export interface ProgramStartRequest {
   mappingId?: string | null;
   matchType?: 'exact' | 'contains' | null;
   selectedAt: string;
+  operatorUserId?: string;
   operatorLogin?: string;
   operatorRole?: string;
   labelPrintMode?: LabelPrintMode;

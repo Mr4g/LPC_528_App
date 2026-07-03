@@ -1,6 +1,19 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
+
+export function parseEnvBool(value: string | undefined, defaultValue: boolean): boolean {
+  if (value == null || value.trim() === '') return defaultValue;
+  const normalized = value.trim().toLowerCase();
+  if (['true', '1', 'yes', 'y', 'on'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'n', 'off'].includes(normalized)) return false;
+  return defaultValue;
+}
+
+function envBool(defaultValue: boolean) {
+  return z.preprocess((value) => typeof value === 'string' ? parseEnvBool(value, defaultValue) : value, z.boolean()).default(defaultValue);
+}
+
 const barcodeProgramMapSchema = z.preprocess((value: unknown) => {
   if (typeof value !== 'string') return value;
 
@@ -21,6 +34,10 @@ const envSchema = z.object({
   AUTH_COOKIE_SAME_SITE: z.enum(['lax', 'strict', 'none']).default('lax'),
   AUTH_RESET_DEFAULT_ADMIN: z.coerce.boolean().default(false),
   AUTH_DEBUG: z.coerce.boolean().default(false),
+  AUTH_TEST_IDLE_LOGOUT_MINUTES: z.coerce.number().nonnegative().default(15),
+  CARD_LOGIN_ENABLED: z.coerce.boolean().default(true),
+  CARD_UID_PATTERN: z.string().min(1).default('^\\d{8}$'),
+  CARD_SCAN_IDLE_MS: z.coerce.number().int().positive().default(200),
   DEFAULT_ADMIN_LOGIN: z.string().regex(/^[A-Za-z]{3,5}$/).default('ADM'),
   DEFAULT_ADMIN_PASSWORD: z.string().min(4).default('admin123'),
   SQLITE_DB_PATH: z.string().min(1).default('data/lpc_app.sqlite'),
@@ -48,15 +65,28 @@ const envSchema = z.object({
   PROGRAM_START_MODE: z.enum(['mock', 'script']).default('mock'),
   PROGRAM_START_COMMAND: z.string().min(1).default('python3'),
   PROGRAM_START_SCRIPT_PATH: z.string().default(''),
+  PROGRAM_INSTRUCTION_UPLOAD_DIR: z.string().min(1).default('data/uploads/program-instructions'),
   LPC_EIP_HOST: z.string().default(''),
   LPC_EIP_PORT: z.coerce.number().int().positive().default(44818),
   EIP_DRY_RUN: z.coerce.boolean().default(false),
   BARCODE_PROGRAM_MAP: barcodeProgramMapSchema,
-  SPLUNK_HEC_URL: z.string().url().optional().or(z.literal('')),
-  SPLUNK_HEC_TOKEN: z.string().optional().or(z.literal('')),
-  SPLUNK_INDEX: z.string().min(1).default('lpc528'),
-  SPLUNK_SOURCE: z.string().min(1).default('lpc-528-app'),
-  SPLUNK_SOURCETYPE: z.string().min(1).default('lpc:result'),
+  SPLUNK_ENABLED: z.coerce.boolean().default(false),
+  SPLUNK_HEC_URL: z.string().url().optional().or(z.literal('')).default(''),
+  SPLUNK_HEC_TOKEN: z.string().optional().or(z.literal('')).default(''),
+  SPLUNK_INDEX: z.string().min(1).default('machinedata_w16'),
+  SPLUNK_SOURCE: z.string().min(1).default('LPC-528-01'),
+  SPLUNK_SOURCETYPE: z.string().min(1).default('_json'),
+  SPLUNK_SITE: z.string().optional().or(z.literal('')).default(''),
+  SPLUNK_LINE: z.string().optional().or(z.literal('')).default(''),
+  SPLUNK_WORKPLACE: z.string().optional().or(z.literal('')).default(''),
+  SPLUNK_DEVICE: z.string().optional().or(z.literal('')).default(''),
+  SPLUNK_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  SPLUNK_VERIFY_TLS: envBool(true),
+  SPLUNK_SEND_RESULT: z.coerce.boolean().default(true),
+  SPLUNK_SEND_CURVE: z.coerce.boolean().default(true),
+  SPLUNK_BUFFER_ENABLED: z.coerce.boolean().default(true),
+  SPLUNK_BUFFER_RETRY_INTERVAL_MS: z.coerce.number().int().positive().default(30000),
+  SPLUNK_BUFFER_MAX_ATTEMPTS: z.coerce.number().int().nonnegative().default(0),
   ZEBRA_HOST: z.string().min(1),
   ZEBRA_PORT: z.coerce.number().int().positive().default(9100),
   ZEBRA_ENABLED: z.coerce.boolean().default(true),

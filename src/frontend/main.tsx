@@ -61,6 +61,36 @@ interface LpcStatusPayload {
   socketWritable?: boolean;
 }
 
+interface SplunkStatusPayload {
+  ok: true;
+  enabled: boolean;
+  configured: boolean;
+  urlConfigured: boolean;
+  tokenConfigured: boolean;
+  index: string;
+  source: string;
+  sourcetype: string;
+  verifyTls: boolean;
+  site: string | null;
+  line: string | null;
+  workplace: string;
+  device: string;
+  pending: number;
+  sending?: number;
+  sent: number;
+  failed?: number;
+  lastError: string | null;
+  bufferEnabled?: boolean;
+  bufferWorkerEnabled?: boolean;
+  retryIntervalMs?: number;
+  lastRetryAt?: string | null;
+  nextRetryAt?: string | null;
+  lastSplunkStatus?: 'sent' | 'buffered' | 'failed' | 'disabled' | 'not_configured' | null;
+  lastSplunkAt?: string | null;
+  lastSplunkErrorCode?: number | null;
+  lastSplunkErrorText?: string | null;
+}
+
 interface LpcPortCheckPayload {
   ok: true;
   host: string;
@@ -118,6 +148,7 @@ declare global {
 }
 
 type OperatorStatus = 'ready' | 'scanning' | 'program-selected' | 'no-mapping' | 'start-error';
+type ClassifiedScan = { type: 'card'; value: string } | { type: 'barcode'; value: string } | { type: 'invalid'; value: string };
 type UserRole = 'operator' | 'line_leader' | 'admin';
 type ChartStatus = 'waiting' | 'live' | 'completed';
 type TestSessionStatus = 'idle' | 'program_selected' | 'starting' | 'running' | 'waiting_for_result' | 'completed' | 'timeout' | 'error';
@@ -130,6 +161,7 @@ interface TestSessionState {
   barcode: string | null;
   programNumber: number | null;
   programText: string | null;
+  operatorUserId: string | null;
   operatorLogin: string | null;
   startedAt: string | null;
   lastStreamAt: string | null;
@@ -168,6 +200,15 @@ interface ProgramMappingRecord {
   updatedAt: string;
   createdBy: string | null;
   updatedBy: string | null;
+  instructionPdf?: ProgramInstructionMeta;
+}
+
+interface ProgramInstructionMeta {
+  exists: boolean;
+  originalName: string | null;
+  uploadedAt: string | null;
+  uploadedBy: string | null;
+  sizeBytes: number | null;
 }
 
 interface PublicUser extends AuthUser {
@@ -176,6 +217,9 @@ interface PublicUser extends AuthUser {
   updatedAt: string;
   lastLoginAt: string | null;
   createdBy: string | null;
+  cardUidLast4: string | null;
+  cardMask: string | null;
+  lastTestAt: string | null;
 }
 
 const statusLabels: Record<OperatorStatus, string> = {
@@ -188,6 +232,17 @@ const statusLabels: Record<OperatorStatus, string> = {
 
 const showDiagnostics = ((import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SHOW_DIAGNOSTICS ?? 'false') === 'true';
 const LOGIN_REGEX = /^[A-Za-z]{3,5}$/;
+const CARD_UID_REGEX = /^\d{8}$/;
+const CARD_SCAN_IDLE_MS = 200;
+function normalizeCardScanInput(value: string): string { return value.trim().replace(/[\r\n]/g, ''); }
+function maskCardUid(value: string): string { return `****${value.slice(-4)}`; }
+
+function classifyScan(raw: string): ClassifiedScan {
+  const value = raw.trim().replace(/[\r\n]/g, '');
+  if (!value || value.length < 3) return { type: 'invalid', value };
+  if (CARD_UID_REGEX.test(value)) return { type: 'card', value };
+  return { type: 'barcode', value };
+}
 
 function getInitialRoute(): string {
   return ['/login', '/admin/users', '/admin/programs'].includes(window.location.pathname) ? window.location.pathname : '/operator';
@@ -237,6 +292,10 @@ async function fetchTestSessionStatus(): Promise<TestSessionState | null> {
   return fetchJson<TestSessionState>('/api/test-session/status');
 }
 
+async function fetchSplunkStatus(): Promise<SplunkStatusPayload | null> {
+  return fetchJson<SplunkStatusPayload>('/api/splunk/status');
+}
+
 async function fetchLpcRuntimeState(): Promise<{
   lastResult: EnrichedLpcResult | null;
   results: EnrichedLpcResult[];
@@ -261,6 +320,31 @@ function getSafeLpcConnectionLabel(status: LpcStatusPayload | null): string {
   return getConnectionLabel(status.status, safeConnected);
 }
 
+type CompactLpcStatus = 'online' | 'stale' | 'offline';
+
+function getCompactLpcStatus(status: LpcStatusPayload | null): { label: string; state: CompactLpcStatus } {
+  if (!status || !status.connected || status.status === 'disconnected' || status.socketDestroyed === true || status.socketWritable === false) {
+    return { label: 'LPC offline', state: 'offline' };
+  }
+  if (status.staleConnectionDetectedAt || status.lastError) return { label: 'Brak danych', state: 'stale' };
+  return { label: 'LPC online', state: 'online' };
+}
+
+function getCompactSplunkLabel(status: SplunkStatusPayload | null): string {
+  if (!status || !status.enabled) return 'Splunk OFF';
+  switch (status.lastSplunkStatus) {
+    case 'sent': return 'Splunk OK';
+    case 'buffered': return 'Splunk bufor';
+    case 'failed':
+    case 'not_configured':
+      return 'Splunk błąd';
+    case 'disabled':
+      return 'Splunk OFF';
+    default:
+      return status.configured ? 'Splunk OK' : 'Splunk błąd';
+  }
+}
+
 
 function buildCurveSignature(points: LpcCurvePoint[]): string {
   const lastPoint = points.at(-1);
@@ -268,10 +352,47 @@ function buildCurveSignature(points: LpcCurvePoint[]): string {
   return `${points.length}:${lastPoint.elapsedTimeSec}:${lastPoint.pressureMbar ?? 'null'}:${lastPoint.segment}`;
 }
 
-function LoginPage(props: { onLoggedIn: (user: AuthUser) => void }) {
+function LoginPage(props: { onLoggedIn: (user: AuthUser) => void; idleMessage?: string | null }) {
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const idleTimerRef = useRef<number | null>(null);
+  const loginInputRef = useRef<HTMLInputElement | null>(null);
+  const cardInputRef = useRef<HTMLInputElement | null>(null);
+  const cardBufferRef = useRef('');
+
+  async function submitCard(uidInput: string) {
+    const cardUid = normalizeCardScanInput(uidInput);
+    if (!cardUid) return;
+    cardBufferRef.current = '';
+    if (cardInputRef.current) cardInputRef.current.value = '';
+    if (!CARD_UID_REGEX.test(cardUid)) {
+      setError('Nieznana karta. Przyłóż przypisaną kartę lub zaloguj hasłem.');
+      window.setTimeout(() => cardInputRef.current?.focus(), 0);
+      return;
+    }
+    const response = await fetch('/api/auth/card-login', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cardUid }),
+    });
+    const payload = (await response.json()) as { ok: boolean; user?: AuthUser; message?: string; error?: string };
+    if (!response.ok || !payload.user) {
+      setError(payload.message ?? payload.error ?? 'Nieznana karta. Przyłóż przypisaną kartę lub zaloguj hasłem.');
+      window.setTimeout(() => cardInputRef.current?.focus(), 0);
+      return;
+    }
+    setError(null);
+    props.onLoggedIn(payload.user);
+  }
+
+  function onCardInput(value: string) {
+    cardBufferRef.current = value;
+    if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = window.setTimeout(() => void submitCard(value), CARD_SCAN_IDLE_MS);
+  }
 
   async function submitLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -299,18 +420,80 @@ function LoginPage(props: { onLoggedIn: (user: AuthUser) => void }) {
     props.onLoggedIn(payload.user);
   }
 
+  function togglePasswordLogin() {
+    setPasswordVisible((visible) => {
+      const next = !visible;
+      if (next) window.setTimeout(() => loginInputRef.current?.focus(), 120);
+      else window.setTimeout(() => cardInputRef.current?.focus(), 120);
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    if (!passwordVisible) cardInputRef.current?.focus();
+  }, [passwordVisible]);
+
   return (
     <main className="login-shell">
-      <form className="login-card" onSubmit={submitLogin}>
-        <span className="eyebrow">LPC-528</span>
-        <h1>Logowanie operatora</h1>
-        <label>Login / skrót osobowy</label>
-        <input className="auth-input" autoFocus value={login} onChange={(event) => setLogin(event.target.value.toUpperCase())} placeholder="Login" />
-        <label>Hasło</label>
-        <input className="auth-input" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Hasło" />
-        {error && <p className="login-error">{error}</p>}
-        <button type="submit">Zaloguj</button>
-      </form>
+      <div className="login-card operator-login-card">
+        <div className="login-hero">
+          <div>
+            <span className="eyebrow">LPC-528</span>
+            <h1>Przyłóż kartę <span>operatora</span></h1>
+            <p>Czytnik ELATEC TWN4 wpisuje UID automatycznie i zatwierdza Enterem.</p>
+          </div>
+          <div className="rfid-badge" aria-hidden="true">
+            <svg viewBox="0 0 48 48" role="img" focusable="false">
+              <rect x="8" y="12" width="32" height="24" rx="6" />
+              <path d="M16 21h10M16 28h16" />
+              <path d="M34 18c3 3 3 9 0 12M39 15c5 5 5 15 0 20" />
+            </svg>
+          </div>
+        </div>
+        {props.idleMessage && <p className="login-info-message">{props.idleMessage}</p>}
+
+        <section className="login-reader-panel card-reader-panel" aria-label="Karta operatora" onClick={() => cardInputRef.current?.focus()}>
+          <div className="card-reader-copy">
+            <span className="card-reader-icon" aria-hidden="true">▣</span>
+            <div>
+              <strong>Przyłóż kartę operatora</strong>
+              <span>Przyłóż kartę do czytnika ELATEC TWN4.</span>
+            </div>
+          </div>
+          <input
+            id="cardUidInput"
+            ref={cardInputRef}
+            className="card-scan-hidden-input"
+            autoFocus={!passwordVisible}
+            defaultValue=""
+            onChange={(event) => onCardInput(event.target.value)}
+            onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void submitCard(cardBufferRef.current); } }}
+            inputMode="numeric"
+            autoComplete="off"
+            aria-label="Ukryty odczyt karty operatora"
+          />
+          {error && <p className="login-error card-login-error">{error}</p>}
+        </section>
+
+        <button type="button" className="password-toggle-button" onClick={togglePasswordLogin} aria-expanded={passwordVisible}>Nie masz karty? Zaloguj hasłem</button>
+        {passwordVisible && (
+          <form className="password-fallback" onSubmit={submitLogin}>
+            <div className="password-panel-header">
+              <strong>Logowanie hasłem</strong>
+              <span>Wpisz login i hasło, aby zalogować operatora.</span>
+            </div>
+            <div className="password-field-stack">
+              <label htmlFor="passwordLoginInput">Login / skrót osobowy</label>
+              <input id="passwordLoginInput" ref={loginInputRef} className="auth-input" value={login} onChange={(event) => setLogin(event.target.value.toUpperCase())} placeholder="Login" />
+            </div>
+            <div className="password-field-stack">
+              <label htmlFor="passwordInput">Hasło</label>
+              <input id="passwordInput" className="auth-input" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Hasło" />
+            </div>
+            <button type="submit" className="password-submit-button">Zaloguj hasłem</button>
+          </form>
+        )}
+      </div>
     </main>
   );
 }
@@ -320,6 +503,7 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<UserRole>('operator');
+  const [cardUid, setCardUid] = useState('');
   const [message, setMessage] = useState<string | null>(null);
 
   async function loadUsers() {
@@ -348,7 +532,7 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ login: normalizedLogin, password, role }),
+      body: JSON.stringify({ login: normalizedLogin, password, role, cardUid: cardUid.trim() || undefined }),
     });
     const payload = (await response.json()) as { ok: boolean; message?: string };
     setMessage(response.ok ? 'Użytkownik dodany.' : payload.message ?? 'Nie udało się dodać użytkownika.');
@@ -356,12 +540,28 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
       setLogin('');
       setPassword('');
       setRole('operator');
+      setCardUid('');
       await loadUsers();
     }
   }
 
   async function userAction(id: string, action: 'enable' | 'disable') {
     await fetch(`/api/users/${id}/${action}`, { method: 'PATCH', credentials: 'include' });
+    await loadUsers();
+  }
+
+  async function changeCard(id: string) {
+    const uid = window.prompt('Przyłóż kartę albo wpisz UID (np. 05389148)');
+    if (!uid) return;
+    const response = await fetch(`/api/users/${id}/card`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cardUid: uid }) });
+    const payload = (await response.json()) as { ok: boolean; message?: string };
+    setMessage(response.ok ? `Karta odczytana: ${maskCardUid(normalizeCardScanInput(uid))}` : payload.message ?? 'Nie udało się przypisać karty.');
+    await loadUsers();
+  }
+
+  async function removeCard(id: string) {
+    if (!window.confirm('Usunąć kartę użytkownika?')) return;
+    await fetch(`/api/users/${id}/card`, { method: 'DELETE', credentials: 'include' });
     await loadUsers();
   }
 
@@ -393,22 +593,27 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
           <option value="operator">operator</option>
           {props.user.role === 'admin' && <option value="line_leader">line_leader</option>}
         </select>
+        <input value={cardUid} onChange={(event) => setCardUid(normalizeCardScanInput(event.target.value))} onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault(); }} placeholder="Przyłóż kartę (opcjonalnie)" inputMode="numeric" />
+        {cardUid && <span className="settings-save-status ok-text">Karta odczytana: {maskCardUid(cardUid)}</span>}
         <button type="submit">Dodaj użytkownika</button>
       </form>
       {message && <p className="login-error">{message}</p>}
       <section className="users-table-wrap">
         <table>
-          <thead><tr><th>Login</th><th>Rola</th><th>Status</th><th>Utworzono</th><th>Ostatnie logowanie</th><th>Akcje</th></tr></thead>
+          <thead><tr><th>Login</th><th>Rola</th><th>Status</th><th>Karta</th><th>Utworzono</th><th>Ostatnie logowanie</th><th>Akcje</th></tr></thead>
           <tbody>
             {users.map((item) => (
               <tr key={item.id}>
                 <td>{item.login}</td>
                 <td>{item.role}</td>
                 <td>{item.isActive ? 'aktywny' : 'nieaktywny'}</td>
+                <td>{item.cardMask ?? '-'}</td>
                 <td>{formatDateTime(item.createdAt)}</td>
                 <td>{formatDateTime(item.lastLoginAt)}</td>
                 <td>
                   <button type="button" onClick={() => void resetPassword(item.id)}>Resetuj hasło</button>
+                  <button type="button" onClick={() => void changeCard(item.id)}>Zmień kartę</button>
+                  {item.cardMask && <button type="button" onClick={() => void removeCard(item.id)}>Usuń kartę</button>}
                   <button type="button" onClick={() => void userAction(item.id, item.isActive ? 'disable' : 'enable')}>{item.isActive ? 'Dezaktywuj' : 'Aktywuj'}</button>
                 </td>
               </tr>
@@ -432,11 +637,24 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
   const [labelPrintMode, setLabelPrintMode] = useState<'ok_only' | 'ok_and_nok'>('ok_only');
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(true);
   const [zebraSaveStatus, setZebraSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [splunkStatus, setSplunkStatus] = useState<SplunkStatusPayload | null>(null);
+  const [splunkRetrying, setSplunkRetrying] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   async function loadMappings() {
     const payload = await fetchJson<{ ok: true; mappings: ProgramMappingRecord[] }>('/api/program-mappings');
-    if (payload?.mappings) setMappings(payload.mappings);
+    if (payload?.mappings) {
+      setMappings(payload.mappings.map((mapping) => ({
+        ...mapping,
+        instructionPdf: mapping.instructionPdf ?? {
+          exists: Boolean((mapping as unknown as { instructionPdfStoredName?: string | null }).instructionPdfStoredName),
+          originalName: (mapping as unknown as { instructionPdfOriginalName?: string | null }).instructionPdfOriginalName ?? null,
+          uploadedAt: (mapping as unknown as { instructionPdfUploadedAt?: string | null }).instructionPdfUploadedAt ?? null,
+          uploadedBy: (mapping as unknown as { instructionPdfUploadedBy?: string | null }).instructionPdfUploadedBy ?? null,
+          sizeBytes: (mapping as unknown as { instructionPdfSizeBytes?: number | null }).instructionPdfSizeBytes ?? null,
+        },
+      })));
+    }
   }
 
   async function loadZebraSettings() {
@@ -444,9 +662,15 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
     if (payload) setAutoPrintEnabled(payload.autoPrintEnabled);
   }
 
+  async function loadSplunkStatus() {
+    const payload = await fetchJson<SplunkStatusPayload>('/api/splunk/status');
+    if (payload) setSplunkStatus(payload);
+  }
+
   useEffect(() => {
     void loadMappings();
     void loadZebraSettings();
+    void loadSplunkStatus();
   }, []);
 
   function resetForm() {
@@ -512,6 +736,33 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
     }
   }
 
+  async function retrySplunkBuffer() {
+    setSplunkRetrying(true);
+    try {
+      await fetch('/api/splunk/retry-buffer', { method: 'POST', credentials: 'include' });
+      await loadSplunkStatus();
+    } finally {
+      setSplunkRetrying(false);
+    }
+  }
+
+  async function uploadInstruction(mapping: ProgramMappingRecord, file: File | null) {
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await fetch(`/api/programs/${encodeURIComponent(mapping.id)}/instruction`, { method: 'POST', credentials: 'include', body: formData });
+    const payload = (await response.json()) as { ok: boolean; message?: string };
+    setMessage(response.ok ? 'Instrukcja PDF zapisana' : payload.message ?? 'Nie udało się zapisać PDF');
+    await loadMappings();
+  }
+
+  async function removeInstruction(mapping: ProgramMappingRecord) {
+    if (!window.confirm('Czy usunąć instrukcję PDF z programu?')) return;
+    await fetch(`/api/programs/${encodeURIComponent(mapping.id)}/instruction`, { method: 'DELETE', credentials: 'include' });
+    setMessage('Instrukcja PDF usunięta');
+    await loadMappings();
+  }
+
   async function toggleMapping(mapping: ProgramMappingRecord) {
     if (mapping.isActive && !window.confirm('Czy dezaktywować to mapowanie?')) return;
     await fetch(`/api/program-mappings/${mapping.id}/${mapping.isActive ? 'disable' : 'enable'}`, { method: 'PATCH', credentials: 'include' });
@@ -571,9 +822,22 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
         {zebraSaveStatus === 'saved' && <p className="settings-save-status ok-text">Zapisano</p>}
         {zebraSaveStatus === 'error' && <p className="settings-save-status error-text">Nie udało się zmienić ustawienia</p>}
       </section>
+      <section className="settings-card">
+        <div className="settings-row">
+          <div>
+            <div className="settings-row-title">Splunk</div>
+            <div className="settings-row-subtitle">Status: {splunkStatus?.enabled ? 'Włączony' : 'Wyłączony'} · Konfiguracja: {splunkStatus?.configured ? 'OK' : splunkStatus?.urlConfigured ? 'Brak tokena' : 'Brak URL'} · Bufor: {splunkStatus?.pending ?? 0} oczekujących · Retry co {Math.round((splunkStatus?.retryIntervalMs ?? 0) / 1000)} s</div>
+            <small>Index: {splunkStatus?.index ?? '-'} · Source: {splunkStatus?.source ?? '-'} · Sourcetype: {splunkStatus?.sourcetype ?? '-'} · TLS verify: {String(splunkStatus?.verifyTls ?? '-')}</small>
+            <small>Worker: {splunkStatus?.bufferWorkerEnabled ? 'aktywny' : 'wyłączony'} · Sending: {splunkStatus?.sending ?? 0} · Sent: {splunkStatus?.sent ?? 0} · Failed: {splunkStatus?.failed ?? 0} · Last retry: {splunkStatus?.lastRetryAt ? formatDateTime(splunkStatus.lastRetryAt) : '-'}</small>
+            <small>Zakład: {splunkStatus?.site ?? '-'} · Linia: {splunkStatus?.line ?? '-'} · Stanowisko: {splunkStatus?.workplace ?? '-'}</small>
+            {splunkStatus?.lastError && <p className="settings-save-status error-text">Ostatni błąd: {splunkStatus.lastError}</p>}
+          </div>
+          <button type="button" disabled={splunkRetrying} onClick={() => void retrySplunkBuffer()}>{splunkRetrying ? 'Wysyłanie...' : 'Wyślij bufor ponownie'}</button>
+        </div>
+      </section>
       <section className="users-table-wrap">
         <table>
-          <thead><tr><th>Barcode / pattern</th><th>Typ</th><th>Program</th><th>Druk</th><th>Opis</th><th>Status</th><th>UpdatedAt</th><th>Akcje</th></tr></thead>
+          <thead><tr><th>Barcode / pattern</th><th>Typ</th><th>Program</th><th>Druk</th><th>Opis</th><th>Instrukcja PDF</th><th>Status</th><th>UpdatedAt</th><th>Akcje</th></tr></thead>
           <tbody>
             {mappings.map((mapping) => (
               <tr key={mapping.id}>
@@ -582,6 +846,17 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
                 <td>{mapping.programText}</td>
                 <td>{mapping.labelPrintMode === 'ok_and_nok' ? 'OK i NOK' : 'Tylko OK'}</td>
                 <td title={mapping.description ?? ''}>{mapping.description ?? '-'}</td>
+                <td>
+                  <div className="program-instruction-cell">
+                    <span>{mapping.instructionPdf?.exists ? mapping.instructionPdf.originalName : 'Brak PDF'}</span>
+                    {mapping.instructionPdf?.uploadedAt && <small>{formatDateTime(mapping.instructionPdf.uploadedAt)} · {mapping.instructionPdf.uploadedBy ?? '-'}</small>}
+                    <label className="table-file-action">
+                      {mapping.instructionPdf?.exists ? 'Zmień PDF' : 'Dodaj PDF'}
+                      <input type="file" accept="application/pdf,.pdf" onChange={(event) => void uploadInstruction(mapping, event.target.files?.[0] ?? null)} />
+                    </label>
+                    {mapping.instructionPdf?.exists && <button type="button" onClick={() => void removeInstruction(mapping)}>Usuń PDF</button>}
+                  </div>
+                </td>
                 <td>{mapping.isActive ? 'aktywny' : 'nieaktywny'}</td>
                 <td>{formatDateTime(mapping.updatedAt)}</td>
                 <td>
@@ -628,7 +903,12 @@ function App() {
   const [programStartTestResponse, setProgramStartTestResponse] = useState<string | null>(null);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [resultsOpen, setResultsOpen] = useState(false);
+  const [instructionOpen, setInstructionOpen] = useState(false);
+  const [currentInstruction, setCurrentInstruction] = useState<ProgramInstructionMeta | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [splunkStatus, setSplunkStatus] = useState<SplunkStatusPayload | null>(null);
+  const [idleLogoutMessage, setIdleLogoutMessage] = useState<string | null>(null);
+  const [idleTimeoutMs, setIdleTimeoutMs] = useState(15 * 60 * 1000);
   const [eventCounters, setEventCounters] = useState({
     streamEvents: 0,
     resultEvents: 0,
@@ -637,9 +917,11 @@ function App() {
     curveCompletedEvents: 0,
   });
   const barcodeInputRef = useRef<HTMLInputElement | null>(null);
+  const scanBufferRef = useRef('');
   const routeRef = useRef(route);
   const diagnosticsOpenRef = useRef(diagnosticsOpen);
   const resultsOpenRef = useRef(resultsOpen);
+  const instructionOpenRef = useRef(instructionOpen);
   const userMenuOpenRef = useRef(userMenuOpen);
   const ignoreCompletedCurveUntilNewStreamRef = useRef(ignoreCompletedCurveUntilNewStream);
   const hasLiveCurveRef = useRef(false);
@@ -647,6 +929,8 @@ function App() {
   const chartStatusRef = useRef<ChartStatus>(chartStatus);
   const curvePointsRef = useRef<LpcCurvePoint[]>([]);
   const completedCurvePointsRef = useRef<LpcCurvePoint[]>([]);
+  const idleTimerRef = useRef<number | null>(null);
+  const lastActivitySyncRef = useRef(0);
 
   function getLastKnownCurvePoint() {
     const points = curvePointsRef.current.length > 0 ? curvePointsRef.current : completedCurvePointsRef.current;
@@ -668,7 +952,7 @@ function App() {
   function focusBarcodeInput(delayMs = 0) {
     window.setTimeout(() => {
       const input = barcodeInputRef.current;
-      if (!input || routeRef.current !== '/operator' || diagnosticsOpenRef.current || resultsOpenRef.current || userMenuOpenRef.current) return;
+      if (!input || routeRef.current !== '/operator' || diagnosticsOpenRef.current || resultsOpenRef.current || instructionOpenRef.current || userMenuOpenRef.current) return;
 
       const activeElement = document.activeElement as HTMLElement | null;
       const activeTag = activeElement?.tagName.toLowerCase();
@@ -681,6 +965,42 @@ function App() {
 
       input.focus({ preventScroll: true });
     }, delayMs);
+  }
+
+  async function idleLogout() {
+    if (testSession?.locked) {
+      scheduleIdleTimer(60_000);
+      return;
+    }
+    console.info(`[AUTH_IDLE] logout reason=idle_timeout minutes=${Math.round(idleTimeoutMs / 60000)}`);
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => undefined);
+    setAuthUser(null);
+    setBarcode('');
+    setLastRejected(null);
+    setUserMenuOpen(false);
+    setDiagnosticsOpen(false);
+    setResultsOpen(false);
+    setInstructionOpen(false);
+    setIdleLogoutMessage('Wylogowano z powodu bezczynności.');
+    navigateTo('/login', setRoute);
+  }
+
+  function scheduleIdleTimer(delayMs = idleTimeoutMs) {
+    if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
+    if (!authUser || route === '/login') return;
+    idleTimerRef.current = window.setTimeout(() => void idleLogout(), Math.max(delayMs, 1000));
+  }
+
+  function recordOperatorActivity(syncBackend = true) {
+    if (!authUser || route === '/login') return;
+    scheduleIdleTimer();
+    if (!syncBackend || testSession?.locked) return;
+    const now = Date.now();
+    if (now - lastActivitySyncRef.current < 30_000) return;
+    lastActivitySyncRef.current = now;
+    void fetch('/api/auth/activity', { method: 'POST', credentials: 'include' }).then((response) => {
+      if (response.status === 401) void idleLogout();
+    }).catch(() => undefined);
   }
 
 
@@ -700,7 +1020,8 @@ function App() {
   }
 
   async function refreshMe() {
-    const payload = await fetchJson<{ ok: true; user: AuthUser | null }>('/api/auth/me');
+    const payload = await fetchJson<{ ok: true; user: AuthUser | null; idleLogoutMinutes?: number }>('/api/auth/me');
+    if (typeof payload?.idleLogoutMinutes === 'number') setIdleTimeoutMs(Math.max(payload.idleLogoutMinutes, 0) * 60 * 1000);
     setAuthUser(payload?.user ?? null);
     setAuthLoading(false);
     return payload?.user ?? null;
@@ -721,6 +1042,26 @@ function App() {
     if (nextStatus) setLpcStatus(nextStatus);
   }
 
+  async function refreshSplunkStatus() {
+    const nextStatus = await fetchSplunkStatus();
+    if (nextStatus) setSplunkStatus(nextStatus);
+  }
+
+  async function loadInstructionForMapping(mappingId?: string | null) {
+    if (!mappingId) {
+      setCurrentInstruction(null);
+      return;
+    }
+    const payload = await fetchJson<ProgramInstructionMeta & { ok: true }>(`/api/programs/${encodeURIComponent(mappingId)}/instruction`);
+    setCurrentInstruction(payload ? {
+      exists: payload.exists,
+      originalName: payload.originalName,
+      uploadedAt: payload.uploadedAt,
+      uploadedBy: payload.uploadedBy,
+      sizeBytes: payload.sizeBytes,
+    } : null);
+  }
+
   useEffect(() => {
     routeRef.current = route;
   }, [route]);
@@ -732,6 +1073,10 @@ function App() {
   useEffect(() => {
     resultsOpenRef.current = resultsOpen;
   }, [resultsOpen]);
+
+  useEffect(() => {
+    instructionOpenRef.current = instructionOpen;
+  }, [instructionOpen]);
 
   useEffect(() => {
     persistTheme(theme);
@@ -764,6 +1109,22 @@ function App() {
   }, [authUser, route]);
 
   useEffect(() => {
+    if (!authUser || route === '/login') {
+      if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
+      return;
+    }
+    scheduleIdleTimer();
+    const onActivity = () => recordOperatorActivity(true);
+    window.addEventListener('click', onActivity);
+    window.addEventListener('keydown', onActivity);
+    return () => {
+      window.removeEventListener('click', onActivity);
+      window.removeEventListener('keydown', onActivity);
+      if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
+    };
+  }, [authUser, route, idleTimeoutMs, testSession?.locked]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && resultsOpen) {
         setResultsOpen(false);
@@ -776,6 +1137,7 @@ function App() {
 
   useEffect(() => {
     void refreshLpcStatus();
+    void refreshSplunkStatus();
     void fetchTestSessionStatus().then((payload) => {
       if (payload) setTestSession(payload);
     });
@@ -800,7 +1162,11 @@ function App() {
     };
     refreshRuntimeState();
     const runtimePoll = window.setInterval(refreshRuntimeState, 1000);
-    return () => window.clearInterval(runtimePoll);
+    const splunkPoll = window.setInterval(() => void refreshSplunkStatus(), 5000);
+    return () => {
+      window.clearInterval(runtimePoll);
+      window.clearInterval(splunkPoll);
+    };
   }, []);
 
   useEffect(() => {
@@ -816,6 +1182,7 @@ function App() {
         setLastRejected(null);
         setStatus(payload.programStart.success ? 'program-selected' : 'start-error');
         if (payload.activeTest) setTestSession(payload.activeTest);
+        void loadInstructionForMapping(payload.currentTest.mappingId);
         if (payload.programStart.success && !hasLiveCurveRef.current) resetChartForNewTest();
       });
 
@@ -875,6 +1242,7 @@ function App() {
         setChartFinalResult(payload);
         setFinalMarkerResult(buildFinalMarker(payload, getLastKnownCurvePoint()));
         setResultHistory((results) => mergeResultIntoHistory(results, payload, 50));
+        void refreshSplunkStatus();
         focusBarcodeInput(180);
       });
 
@@ -903,6 +1271,7 @@ function App() {
         setChartFinalResult(payload);
         setFinalMarkerResult(buildFinalMarker(payload, getLastKnownCurvePoint()));
         setResultHistory((results) => mergeResultIntoHistory(results, payload, 50));
+        void refreshSplunkStatus();
         focusBarcodeInput(220);
       });
 
@@ -932,25 +1301,64 @@ function App() {
     };
   }, []);
 
-  async function submitScan(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function handleCardAction(cardUid: string): Promise<boolean> {
+    setBarcode('');
+    scanBufferRef.current = '';
+    const response = await fetch('/api/auth/card-action', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cardUid }) });
+    const payload = (await response.json()) as { ok: boolean; action?: 'LOGIN' | 'LOGGED_OUT' | 'SWITCHED_USER' | 'UNKNOWN_CARD' | 'TEST_IN_PROGRESS'; message?: string; user?: AuthUser | null };
+    if (payload.action === 'UNKNOWN_CARD') {
+      setLastRejected({ barcode: '', error: 'NO_MAPPING', message: 'Nieznana karta operatora.' });
+      focusBarcodeInput(0);
+      return true;
+    }
+    if (payload.action === 'LOGGED_OUT') {
+      setAuthUser(null);
+      setBarcode('');
+      navigateTo('/login', setRoute);
+      return true;
+    }
+    if (payload.user) {
+      setAuthUser(payload.user);
+      setBarcode('');
+      setLastRejected({ barcode: '', error: 'NO_MAPPING', message: `Zalogowano operatora: ${payload.user.login}` });
+      focusBarcodeInput(100);
+      return true;
+    }
+    if (payload.message) {
+      setLastRejected({ barcode: '', error: 'TEST_IN_PROGRESS', errorCode: 'TEST_IN_PROGRESS', message: testSession?.locked ? 'Test w toku. Zmiana operatora możliwa po zakończeniu testu.' : payload.message, activeTest: testSession ?? undefined });
+      setBarcode('');
+      focusBarcodeInput(0);
+      return true;
+    }
+    return false;
+  }
+
+  async function submitBarcodeScan(rawScan: string) {
     if (!authUser) {
       navigateTo('/login', setRoute);
       return;
     }
-    const trimmedBarcode = barcode.trim();
+    const classified = classifyScan(rawScan);
+    if (classified.type === 'invalid') {
+      setBarcode('');
+      setLastRejected({ barcode: '', error: 'NO_MAPPING', message: 'Nieprawidłowy skan.' });
+      focusBarcodeInput(0);
+      return;
+    }
+    if (classified.type === 'card') {
+      await handleCardAction(classified.value);
+      return;
+    }
+    const trimmedBarcode = classified.value;
+    setBarcode(trimmedBarcode);
     if (testSession?.locked) {
       setLastRejected({
-        barcode: trimmedBarcode,
+        barcode: '',
         error: 'TEST_IN_PROGRESS',
         errorCode: 'TEST_IN_PROGRESS',
         message: testSession.message ?? 'Test w toku — poczekaj na wynik',
         activeTest: testSession,
       });
-      return;
-    }
-    if (!trimmedBarcode) {
-      focusBarcodeInput(0);
       return;
     }
 
@@ -991,7 +1399,31 @@ function App() {
     setBarcode('');
     setStatus(payload.programStart.success ? 'program-selected' : 'start-error');
     if (payload.activeTest) setTestSession(payload.activeTest);
+    await loadInstructionForMapping(payload.currentTest.mappingId);
     if (!payload.programStart.success) focusBarcodeInput(0);
+  }
+
+  async function submitScan(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await submitBarcodeScan(barcode || scanBufferRef.current);
+  }
+
+  async function completeBufferedScan(rawScan: string) {
+    scanBufferRef.current = '';
+    const classified = classifyScan(rawScan);
+    if (classified.type === 'card') {
+      setBarcode('');
+      await handleCardAction(classified.value);
+      return;
+    }
+    if (classified.type === 'barcode') {
+      setBarcode(classified.value);
+      await submitBarcodeScan(classified.value);
+      return;
+    }
+    setBarcode('');
+    setLastRejected({ barcode: '', error: 'NO_MAPPING', message: 'Nieprawidłowy skan.' });
+    focusBarcodeInput(0);
   }
 
   async function lpcAction(action: 'connect' | 'disconnect') {
@@ -1049,11 +1481,13 @@ function App() {
 
   const lastBarcode = lastAccepted?.currentTest.barcode ?? lastResult?.barcode ?? '-';
   const currentProgram = lastAccepted?.currentTest.programText ?? lastResult?.programText ?? '-';
-  const topResultLabel = lastResult ? formatResultLabel(lastResult.result) : '-';
   const startMessage = lastAccepted ? getProgramStartOperatorMessage(lastAccepted.programStart, lastAccepted.currentTest.programText) : statusLabels[status];
   const startOk = lastAccepted?.programStart.success ?? false;
-  const connectionLabel = getSafeLpcConnectionLabel(lpcStatus);
-  const connectionClass = lpcStatus?.lastError ? 'connection-error' : `connection-${lpcStatus?.status ?? 'idle'}`;
+  const compactLpcStatus = getCompactLpcStatus(lpcStatus);
+  const splunkCompactLabel = getCompactSplunkLabel(splunkStatus);
+  const connectionClass = `connection-${compactLpcStatus.state}`;
+  const activeInstructionMappingId = lastAccepted?.currentTest.mappingId ?? null;
+  const instructionAvailable = Boolean(currentInstruction?.exists && activeInstructionMappingId);
   const displayedCurvePoints = curvePoints.length > 0 ? curvePoints : completedCurvePoints;
   const scanLocked = Boolean(testSession?.locked);
   const scanStatusText = scanLocked ? 'Trwa test — poczekaj na wynik' : (status === 'program-selected' && lastAccepted ? `${lastAccepted.currentTest.programText} wybrany` : statusLabels[status]);
@@ -1114,9 +1548,10 @@ function App() {
 
   if (!authUser || route === '/login') {
     return <LoginPage onLoggedIn={(user) => {
+      setIdleLogoutMessage(null);
       setAuthUser(user);
       navigateTo('/operator', setRoute);
-    }} />;
+    }} idleMessage={idleLogoutMessage} />;
   }
 
   if (route === '/admin/users') {
@@ -1146,14 +1581,23 @@ function App() {
         <div className="top-bar-center">
           <div className="top-metric"><span>Program</span><strong>{currentProgram}</strong></div>
           <div className="top-metric"><span>Barcode</span><strong>{lastBarcode}</strong></div>
-          <div className={`top-result ${lastResult ? getResultClass(lastResult.result) : 'status-unknown'}`}><span>Wynik</span><strong>{topResultLabel}</strong></div>
+          <button
+            type="button"
+            className="instruction-top-button"
+            disabled={!instructionAvailable}
+            onClick={() => { if (instructionAvailable) setInstructionOpen(true); }}
+            title={instructionAvailable ? currentInstruction?.originalName ?? 'Instrukcja PDF' : 'Brak instrukcji PDF dla programu'}
+          >
+            <span aria-hidden="true">PDF</span>
+            <strong>{instructionAvailable ? 'Instrukcja' : 'Brak PDF'}</strong>
+          </button>
         </div>
         <div className="top-bar-actions">
           <div className={`connection-badge ${connectionClass}`}>
             <span className="connection-dot" />
             <div>
-              <strong>{connectionLabel}</strong>
-              <small>{lpcStatus ? `${lpcStatus.host}:${lpcStatus.port}` : 'LPC status...'}</small>
+              <strong>{compactLpcStatus.label}</strong>
+              <small>{splunkCompactLabel}</small>
               {lpcStatus?.nextReconnectAt && <small>Ponowna próba: {formatDateTime(lpcStatus.nextReconnectAt)}</small>}
               {lpcStatus?.lastError && <small className="connection-error-text">{lpcStatus.lastError}</small>}
             </div>
@@ -1215,7 +1659,35 @@ function App() {
               autoFocus
               disabled={scanLocked}
               value={scanLocked ? 'Trwa test — poczekaj na wynik' : barcode}
-              onChange={(event) => setBarcode(event.target.value)}
+              onChange={(event) => {
+                if (scanLocked) return;
+                const classified = classifyScan(event.target.value);
+                if (classified.type === 'card') {
+                  setBarcode('');
+                  return;
+                }
+                if (classified.type === 'barcode') setBarcode(event.target.value);
+              }}
+              onKeyDown={(event) => {
+                if (scanLocked) return;
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  const pendingScan = scanBufferRef.current || event.currentTarget.value;
+                  void completeBufferedScan(pendingScan);
+                  return;
+                }
+                if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
+                  event.preventDefault();
+                  scanBufferRef.current += event.key;
+                }
+              }}
+              onPaste={(event) => {
+                event.preventDefault();
+                if (scanLocked) return;
+                const pasted = event.clipboardData.getData('text');
+                scanBufferRef.current = pasted;
+                void completeBufferedScan(pasted);
+              }}
               placeholder={scanLocked ? 'Trwa test — poczekaj na wynik' : 'Zeskanuj barcode'}
             />
             {scanLocked && (
@@ -1301,6 +1773,33 @@ function App() {
             <div className="results-modal-table">
               {resultsTable}
             </div>
+          </section>
+        </div>
+      )}
+
+      {instructionOpen && activeInstructionMappingId && currentInstruction?.exists && (
+        <div className="app-modal-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) {
+            setInstructionOpen(false);
+            focusBarcodeInput(120);
+          }
+        }}>
+          <section className="app-modal instruction-modal" role="dialog" aria-modal="true" aria-label="Instrukcja programu">
+            <header className="modal-header">
+              <div>
+                <span className="eyebrow">Instrukcja PDF</span>
+                <h2>Instrukcja programu {currentProgram}</h2>
+                <p>{currentInstruction.originalName ?? 'instruction.pdf'}</p>
+              </div>
+              <button type="button" className="modal-close" onClick={() => {
+                setInstructionOpen(false);
+                focusBarcodeInput(120);
+              }}>×</button>
+            </header>
+            <div className="pdf-viewer-body">
+              <iframe className="pdf-viewer-frame" src={`/api/programs/${encodeURIComponent(activeInstructionMappingId)}/instruction/file`} title={`Instrukcja programu ${currentProgram}`} />
+            </div>
+            <a className="instruction-fallback-link" href={`/api/programs/${encodeURIComponent(activeInstructionMappingId)}/instruction/file`} target="_blank" rel="noreferrer">Otwórz PDF</a>
           </section>
         </div>
       )}

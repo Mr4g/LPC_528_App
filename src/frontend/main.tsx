@@ -164,7 +164,10 @@ interface TestSessionState {
   operatorUserId: string | null;
   operatorLogin: string | null;
   startedAt: string | null;
+  firstLpcDataAt?: string | null;
+  lastLpcDataAt?: string | null;
   lastStreamAt: string | null;
+  finalResultAt?: string | null;
   completedAt: string | null;
   timeoutAt: string | null;
   message: string | null;

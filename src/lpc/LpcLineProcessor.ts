@@ -119,7 +119,7 @@ export class LpcLineProcessor {
       if (streamPoint) {
         const curvePoint = this.options.curveBuffer.addStreamPoint(streamPoint);
         this.lastStreamAt = receivedAt;
-        this.options.testSessionManager?.markStream();
+        this.options.testSessionManager?.markLpcData(receivedAt);
         this.streamCount += 1;
         diagnostic.parsedAs = 'stream';
         this.storeRawLine(diagnostic);
@@ -143,11 +143,10 @@ export class LpcLineProcessor {
         const enrichedResult = this.attachCurrentTest(result);
         const activeSessionBeforeComplete = this.options.testSessionManager?.getStatus() ?? null;
         const completedCurve = this.options.curveBuffer.completeAndClear();
-        console.log(`[ACTIVE_TEST] final_result_received status=${enrichedResult.result}`);
         this.options.database?.insertTestResult(enrichedResult, this.options.testSessionManager?.getActiveTestId() ?? null);
         this.options.lastResultStore?.set(enrichedResult);
         this.options.resultHistoryStore?.add(enrichedResult);
-        this.options.testSessionManager?.complete();
+        this.options.testSessionManager?.complete(enrichedResult.result);
         this.options.authService?.markTestActivity(activeSessionBeforeComplete?.operatorUserId);
         void this.autoPrint(enrichedResult);
         this.sendSplunkResult(enrichedResult, activeSessionBeforeComplete, completedCurve.points);

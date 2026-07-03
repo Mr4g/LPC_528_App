@@ -70,6 +70,7 @@ const lpcCurveBuffer = new LpcTestCurveBuffer({
 const testSessionManager = new TestSessionManager(database, io, {
   activeTestTimeoutMs: config.ACTIVE_TEST_TIMEOUT_MS,
   noDataWarningMs: config.ACTIVE_TEST_NO_DATA_WARNING_MS,
+  noDataTimeoutMs: config.ACTIVE_TEST_NO_DATA_TIMEOUT_MS,
   onEnded: (session, reason) => {
     authService.markTestActivity(session.operatorUserId);
     const envelope = buildSplunkErrorEnvelope(splunkConfig, {

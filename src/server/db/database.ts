@@ -28,7 +28,10 @@ export interface StoredTestSession {
   operatorLogin: string | null;
   startedAt: string | null;
   completedAt: string | null;
+  firstLpcDataAt: string | null;
+  lastLpcDataAt: string | null;
   lastStreamAt: string | null;
+  finalResultAt: string | null;
   timeoutAt: string | null;
   message: string | null;
 }
@@ -97,7 +100,10 @@ function rowToSession(row: Record<string, unknown>): StoredTestSession {
     operatorLogin: row.operatorLogin === null ? null : String(row.operatorLogin),
     startedAt: row.startedAt === null ? null : String(row.startedAt),
     completedAt: row.completedAt === null ? null : String(row.completedAt),
+    firstLpcDataAt: row.firstLpcDataAt === null || row.firstLpcDataAt === undefined ? null : String(row.firstLpcDataAt),
+    lastLpcDataAt: row.lastLpcDataAt === null || row.lastLpcDataAt === undefined ? null : String(row.lastLpcDataAt),
     lastStreamAt: row.lastStreamAt === null ? null : String(row.lastStreamAt),
+    finalResultAt: row.finalResultAt === null || row.finalResultAt === undefined ? null : String(row.finalResultAt),
     timeoutAt: row.timeoutAt === null ? null : String(row.timeoutAt),
     message: row.message === null ? null : String(row.message),
   };
@@ -297,12 +303,12 @@ export class AppDatabase {
   }
 
   upsertTestSession(session: StoredTestSession): void {
-    this.db.prepare(`INSERT INTO test_sessions (id, status, barcode, programNumber, programText, operatorUserId, operatorLogin, startedAt, completedAt, lastStreamAt, timeoutAt, message)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    this.db.prepare(`INSERT INTO test_sessions (id, status, barcode, programNumber, programText, operatorUserId, operatorLogin, startedAt, completedAt, firstLpcDataAt, lastLpcDataAt, lastStreamAt, finalResultAt, timeoutAt, message)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET status = excluded.status, barcode = excluded.barcode, programNumber = excluded.programNumber, programText = excluded.programText, operatorUserId = excluded.operatorUserId,
-      operatorLogin = excluded.operatorLogin, startedAt = excluded.startedAt, completedAt = excluded.completedAt, lastStreamAt = excluded.lastStreamAt,
-      timeoutAt = excluded.timeoutAt, message = excluded.message`)
-      .run(session.id, session.status, session.barcode, session.programNumber, session.programText, session.operatorUserId, session.operatorLogin, session.startedAt, session.completedAt, session.lastStreamAt, session.timeoutAt, session.message);
+      operatorLogin = excluded.operatorLogin, startedAt = excluded.startedAt, completedAt = excluded.completedAt, firstLpcDataAt = excluded.firstLpcDataAt, lastLpcDataAt = excluded.lastLpcDataAt, lastStreamAt = excluded.lastStreamAt,
+      finalResultAt = excluded.finalResultAt, timeoutAt = excluded.timeoutAt, message = excluded.message`)
+      .run(session.id, session.status, session.barcode, session.programNumber, session.programText, session.operatorUserId, session.operatorLogin, session.startedAt, session.completedAt, session.firstLpcDataAt, session.lastLpcDataAt, session.lastStreamAt, session.finalResultAt, session.timeoutAt, session.message);
   }
 
   getLatestTestSession(): StoredTestSession | null {
@@ -367,7 +373,7 @@ export class AppDatabase {
       CREATE INDEX IF NOT EXISTS idx_test_results_operatorLogin ON test_results(operatorLogin);
       CREATE INDEX IF NOT EXISTS idx_test_results_result ON test_results(result);
       CREATE INDEX IF NOT EXISTS idx_test_results_programText ON test_results(programText);
-      CREATE TABLE IF NOT EXISTS test_sessions (id TEXT PRIMARY KEY, status TEXT NOT NULL, barcode TEXT, programNumber INTEGER, programText TEXT, operatorUserId TEXT, operatorLogin TEXT, startedAt TEXT, completedAt TEXT, lastStreamAt TEXT, timeoutAt TEXT, message TEXT);
+      CREATE TABLE IF NOT EXISTS test_sessions (id TEXT PRIMARY KEY, status TEXT NOT NULL, barcode TEXT, programNumber INTEGER, programText TEXT, operatorUserId TEXT, operatorLogin TEXT, startedAt TEXT, completedAt TEXT, firstLpcDataAt TEXT, lastLpcDataAt TEXT, lastStreamAt TEXT, finalResultAt TEXT, timeoutAt TEXT, message TEXT);
       CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT NULL);
       CREATE TABLE IF NOT EXISTS splunk_event_buffer (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, next_attempt_at TEXT, sent_at TEXT, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, status TEXT NOT NULL DEFAULT 'pending', event_type TEXT NOT NULL, test_id TEXT, payload_json TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS idx_splunk_event_buffer_status_next ON splunk_event_buffer(status, next_attempt_at);
@@ -381,6 +387,10 @@ export class AppDatabase {
     addUserColumn('last_test_at', 'ALTER TABLE users ADD COLUMN last_test_at TEXT');
     const sessionColumns = this.db.prepare('PRAGMA table_info(test_sessions)').all() as Array<{ name: string }>;
     if (!sessionColumns.some((column) => column.name === 'operatorUserId')) this.db.prepare('ALTER TABLE test_sessions ADD COLUMN operatorUserId TEXT').run();
+    const addSessionColumn = (name: string, sql: string) => { if (!sessionColumns.some((column) => column.name === name)) this.db.prepare(sql).run(); };
+    addSessionColumn('firstLpcDataAt', 'ALTER TABLE test_sessions ADD COLUMN firstLpcDataAt TEXT');
+    addSessionColumn('lastLpcDataAt', 'ALTER TABLE test_sessions ADD COLUMN lastLpcDataAt TEXT');
+    addSessionColumn('finalResultAt', 'ALTER TABLE test_sessions ADD COLUMN finalResultAt TEXT');
     this.db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_card_uid_hash ON users(card_uid_hash) WHERE card_uid_hash IS NOT NULL').run();
     const programColumns = this.db.prepare('PRAGMA table_info(program_mappings)').all() as Array<{ name: string }>;
     const addProgramColumn = (name: string, sql: string) => { if (!programColumns.some((column) => column.name === name)) this.db.prepare(sql).run(); };

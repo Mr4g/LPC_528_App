@@ -157,7 +157,7 @@ type ClassifiedScan = { type: 'card'; value: string } | { type: 'barcode'; value
 type UserRole = 'operator' | 'line_leader' | 'admin';
 type ChartStatus = 'waiting' | 'live' | 'completed';
 type TestSessionStatus = 'idle' | 'program_selected' | 'starting' | 'running' | 'waiting_for_result' | 'completed' | 'timeout' | 'error';
-const CHART_UPDATE_THROTTLE_MS = 120;
+const CHART_RENDER_INTERVAL_MS = 250;
 
 interface TestSessionState {
   ok: true;
@@ -243,6 +243,7 @@ const statusLabels: Record<OperatorStatus, string> = {
 const frontendEnv = (import.meta as unknown as { env?: Record<string, string> }).env ?? {};
 const showDiagnostics = (frontendEnv.VITE_SHOW_DIAGNOSTICS ?? 'false') === 'true';
 const estimatedLeakRateEnabled = (frontendEnv.LPC_ENABLE_ESTIMATED_LEAK_RATE ?? 'false') === 'true';
+const debugChartPerf = (frontendEnv.VITE_DEBUG_CHART_PERF ?? 'false') === 'true';
 const estimatedLeakWindowPoints = normalizeEstimatedLeakWindowPoints(frontendEnv.LPC_ESTIMATED_LEAK_WINDOW_POINTS, 10);
 const LOGIN_REGEX = /^[A-Za-z]{3,5}$/;
 const CARD_UID_REGEX = /^\d{8}$/;
@@ -373,9 +374,13 @@ function isMeasurementSegment(segment: string | null | undefined): boolean {
 }
 
 function buildCurveSignature(points: LpcCurvePoint[]): string {
+  const firstPoint = points[0];
   const lastPoint = points.at(-1);
-  if (!lastPoint) return 'empty';
-  return `${points.length}:${lastPoint.elapsedTimeSec}:${lastPoint.pressureMbar ?? 'null'}:${lastPoint.segment}`;
+  if (!firstPoint || !lastPoint) return 'empty';
+  const firstPressure = firstPoint.pressureBar ?? firstPoint.pressureMbar ?? '';
+  const lastPressure = lastPoint.pressureBar ?? lastPoint.pressureMbar ?? '';
+  const lastLeak = lastPoint.liveLeakValue ?? lastPoint.RL ?? '';
+  return `${points.length}|${firstPoint.elapsedTimeSec}|${firstPressure}|${lastPoint.elapsedTimeSec}|${lastPressure}|${lastLeak}|${lastPoint.segment}`;
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -1019,6 +1024,7 @@ function App() {
   const pendingChartPointsRef = useRef<LpcCurvePoint[] | null>(null);
   const chartUpdateTimerRef = useRef<number | null>(null);
   const lastChartUpdateAtRef = useRef(0);
+  const lastChartPerfLogAtRef = useRef(0);
   const idleTimerRef = useRef<number | null>(null);
   const lastActivitySyncRef = useRef(0);
 
@@ -1105,6 +1111,7 @@ function App() {
       chartUpdateTimerRef.current = null;
     }
     lastChartUpdateAtRef.current = 0;
+    lastChartPerfLogAtRef.current = 0;
     setCurvePoints([]);
     setCompletedCurvePoints([]);
     setChartFinalResult(null);
@@ -1116,10 +1123,17 @@ function App() {
     setIgnoreCompletedCurveUntilNewStream(true);
   }
 
-  function applyChartPoints(nextPoints: LpcCurvePoint[], force = false) {
+  function applyChartPoints(nextPoints: LpcCurvePoint[], force = false, rawPointCount = nextPoints.length) {
     const commit = (points: LpcCurvePoint[]) => {
-      liveCurveSignatureRef.current = buildCurveSignature(points);
-      lastChartUpdateAtRef.current = Date.now();
+      const signature = buildCurveSignature(points);
+      if (!force && signature === liveCurveSignatureRef.current) return;
+      liveCurveSignatureRef.current = signature;
+      const now = Date.now();
+      lastChartUpdateAtRef.current = now;
+      if (debugChartPerf && now - lastChartPerfLogAtRef.current > 3_000) {
+        lastChartPerfLogAtRef.current = now;
+        console.debug(`[CHART_PERF] raw=${rawPointCount} window=${points.length} rendered=${points.length} intervalMs=${CHART_RENDER_INTERVAL_MS}`);
+      }
       setCurvePoints(points);
     };
 
@@ -1135,7 +1149,7 @@ function App() {
 
     pendingChartPointsRef.current = nextPoints;
     const elapsed = Date.now() - lastChartUpdateAtRef.current;
-    if (elapsed >= CHART_UPDATE_THROTTLE_MS && chartUpdateTimerRef.current === null) {
+    if (elapsed >= CHART_RENDER_INTERVAL_MS && chartUpdateTimerRef.current === null) {
       const points = pendingChartPointsRef.current;
       pendingChartPointsRef.current = null;
       if (points) commit(points);
@@ -1148,7 +1162,7 @@ function App() {
         const points = pendingChartPointsRef.current;
         pendingChartPointsRef.current = null;
         if (points) commit(points);
-      }, Math.max(0, CHART_UPDATE_THROTTLE_MS - elapsed));
+      }, Math.max(0, CHART_RENDER_INTERVAL_MS - elapsed));
     }
   }
 
@@ -1283,7 +1297,7 @@ function App() {
         if (payload.results.length > 0) setResultHistory(replaceHistoryFromResultsUpdated(payload.results, 50));
         if (payload.points.length > 0) {
           if (chartStatusRef.current === 'completed') return;
-          const nextPoints = toChartCurvePoints(payload.points).slice(-150);
+          const nextPoints = toChartCurvePoints(payload.points);
           const nextSignature = buildCurveSignature(nextPoints);
           const shouldIgnoreOldCompletedCurve = ignoreCompletedCurveUntilNewStreamRef.current && nextSignature === ignoredCurveSignatureRef.current;
           if (!shouldIgnoreOldCompletedCurve && nextSignature !== liveCurveSignatureRef.current) {
@@ -1292,7 +1306,7 @@ function App() {
             ignoreCompletedCurveUntilNewStreamRef.current = false;
             setIgnoreCompletedCurveUntilNewStream(false);
             setChartStatus('live');
-            applyChartPoints(nextPoints);
+            applyChartPoints(nextPoints, false, payload.points.length);
           }
         }
       });
@@ -1362,7 +1376,7 @@ function App() {
           ignoreCompletedCurveUntilNewStreamRef.current = false;
           setIgnoreCompletedCurveUntilNewStream(false);
           setCompletedCurvePoints([]);
-          applyChartPoints(nextPoints);
+          applyChartPoints(nextPoints, false, payload.points.length);
         }
       });
 
@@ -1385,7 +1399,7 @@ function App() {
       });
 
       socket.on('lpc:curve-completed', (payload) => {
-        const completedPoints = toChartCurvePoints(payload.points).slice(-150);
+        const completedPoints = toChartCurvePoints(payload.points);
         setEventCounters((counters) => ({ ...counters, curveCompletedEvents: counters.curveCompletedEvents + 1 }));
         hasLiveCurveRef.current = completedPoints.length > 0;
         liveCurveSignatureRef.current = buildCurveSignature(completedPoints);
@@ -1394,7 +1408,7 @@ function App() {
         setChartStatus('completed');
         if (completedPoints.length > 0) {
           setCompletedCurvePoints(completedPoints);
-          applyChartPoints(completedPoints, true);
+          applyChartPoints(completedPoints, true, payload.points.length);
         }
         setFinalMarkerResult((marker) => marker ? { ...marker, point: completedPoints.at(-1) ?? marker.point } : marker);
         ignoreCompletedCurveUntilNewStreamRef.current = false;

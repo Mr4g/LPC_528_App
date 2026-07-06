@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { buildChartRenderPoints, CHART_MAX_RENDER_POINTS, CHART_VISIBLE_WINDOW_SEC, downsampleChartPoints, getVisibleChartPoints, isValidRlPoint, PressureChart } from './PressureChart';
+import { buildChartRenderPoints, CHART_MAX_RENDER_POINTS, CHART_VISIBLE_WINDOW_SEC, getVisibleChartPoints, isValidRlPoint, PressureChart } from './PressureChart';
 
 describe('PressureChart', () => {
   it('renders separate pressure/RL series until the last DPT and hides EXH from chart data', () => {
@@ -56,6 +56,23 @@ describe('PressureChart', () => {
     expect(visible.at(-1)?.elapsedTimeSec).toBe(60);
   });
 
+  it('limits 1000 live points in the 20 second window to the render budget', () => {
+    const points = Array.from({ length: 1000 }, (_, index) => ({
+      elapsedTimeSec: 40 + (index * 20) / 999,
+      pressureMbar: 5000 + index / 10,
+      pressureBar: 5 + index / 10_000,
+      segment: index < 450 ? 'STG' : 'DPT',
+      liveLeakValue: index >= 450 && index % 12 === 0 ? 3 + index / 1000 : null,
+      liveLeakUnit: index >= 450 && index % 12 === 0 ? 'Pa/s' : null,
+    }));
+
+    const chartPoints = buildChartRenderPoints(points);
+
+    expect(chartPoints.length).toBeLessThanOrEqual(CHART_MAX_RENDER_POINTS);
+    expect(chartPoints[0].elapsedTimeSec).toBe(40);
+    expect(chartPoints.at(-1)?.elapsedTimeSec).toBe(60);
+  });
+
   it('keeps the full short curve when it fits in the visible window', () => {
     const points = Array.from({ length: 11 }, (_, elapsedTimeSec) => ({ elapsedTimeSec, pressureMbar: 5000, pressureBar: 5, segment: 'STG' }));
 
@@ -68,15 +85,19 @@ describe('PressureChart', () => {
       pressureMbar: 5000 + index,
       pressureBar: 5 + index / 10000,
       segment: index < 250 ? 'PRF' : 'DPT',
-      liveLeakValue: index >= 250 && index % 20 === 0 ? 3.5 : null,
+      liveLeakValue: index >= 250 && index % 20 === 0 ? 3.5 + index / 1000 : null,
       liveLeakUnit: index >= 250 && index % 20 === 0 ? 'Pa/s' : null,
     }));
 
     const chartPoints = buildChartRenderPoints(points);
+    const firstDptPoint = chartPoints.find((point, index) => index > 0 && chartPoints[index - 1].segment !== 'DPT' && point.segment === 'DPT');
+    const lastRenderedRlPoint = [...chartPoints].reverse().find((point) => point.segment === 'DPT' && Number.isFinite(point.liveLeakValue));
 
     expect(chartPoints.length).toBeLessThanOrEqual(CHART_MAX_RENDER_POINTS);
     expect(chartPoints[0].elapsedTimeSec).toBeGreaterThanOrEqual(9.95);
     expect(chartPoints.at(-1)?.elapsedTimeSec).toBe(599 / 20);
+    expect(firstDptPoint).toBeDefined();
     expect(chartPoints.some((point) => point.segment === 'DPT' && point.liveLeakValue !== null)).toBe(true);
+    expect(lastRenderedRlPoint?.elapsedTimeSec).toBe(29);
   });
 });

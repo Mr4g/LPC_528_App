@@ -20,7 +20,8 @@ export type PressureChartPressurePoint = PressureChartPoint & {
 };
 
 export const CHART_VISIBLE_WINDOW_SEC = 20;
-export const CHART_MAX_RENDER_POINTS = 400;
+// 120 points over a 20-second live window gives ~6 points/s, enough for the operator view while keeping SVG rendering light.
+export const CHART_MAX_RENDER_POINTS = 120;
 
 interface PressureChartProps {
   points: PressureChartPoint[];
@@ -101,30 +102,51 @@ function hasLiveRl(point: PressureChartPoint): boolean {
   return Number.isFinite(point.liveLeakValue ?? point.RL ?? null);
 }
 
+function getLiveRlIndexes(points: PressureChartPressurePoint[]): number[] {
+  const indexes: number[] = [];
+  for (let index = 0; index < points.length; index += 1) {
+    if (points[index].segment?.trim().toUpperCase() === 'DPT' && hasLiveRl(points[index])) indexes.push(index);
+  }
+  return indexes;
+}
+
 export function downsampleChartPoints(points: PressureChartPressurePoint[], maxPoints = CHART_MAX_RENDER_POINTS): PressureChartPressurePoint[] {
   if (points.length <= maxPoints) return points;
   const keep = new Set<number>([0, points.length - 1]);
+  const rlIndexes = getLiveRlIndexes(points);
+  const rlBudget = Math.max(1, Math.floor(maxPoints / 4));
+  const leakStride = Math.max(1, Math.ceil(rlIndexes.length / rlBudget));
+  const lastRlIndex = rlIndexes.at(-1);
+
   for (let index = 1; index < points.length; index += 1) {
     if (points[index].segment !== points[index - 1].segment) {
       keep.add(index - 1);
       keep.add(index);
     }
-    if (points[index].segment?.trim().toUpperCase() === 'DPT' && hasLiveRl(points[index])) keep.add(index);
   }
+
+  rlIndexes.forEach((index, rlIndex) => {
+    if (rlIndex % leakStride === 0) keep.add(index);
+  });
+  if (lastRlIndex !== undefined) keep.add(lastRlIndex);
 
   if (keep.size < maxPoints) {
     const remainingSlots = maxPoints - keep.size;
-    const step = Math.max(1, Math.floor(points.length / remainingSlots));
-    for (let index = 0; index < points.length && keep.size < maxPoints; index += step) keep.add(index);
+    const step = Math.max(1, points.length / remainingSlots);
+    for (let slot = 0; slot < remainingSlots && keep.size < maxPoints; slot += 1) {
+      keep.add(Math.min(points.length - 1, Math.floor(slot * step)));
+    }
   }
 
   if (keep.size > maxPoints) {
     const kept = [...keep].sort((a, b) => a - b);
-    const sampled = new Set<number>([kept[0], kept.at(-1) ?? kept[0]]);
-    const rlIndex = kept.find((index) => points[index].segment?.trim().toUpperCase() === 'DPT' && hasLiveRl(points[index]));
-    if (rlIndex !== undefined) sampled.add(rlIndex);
-    const step = Math.max(1, Math.ceil(kept.length / maxPoints));
-    for (let index = 0; index < kept.length && sampled.size < maxPoints; index += step) sampled.add(kept[index]);
+    const sampled = new Set<number>([0, points.length - 1]);
+    if (lastRlIndex !== undefined) sampled.add(lastRlIndex);
+    const remainingSlots = Math.max(0, maxPoints - sampled.size);
+    const step = remainingSlots > 0 ? kept.length / remainingSlots : kept.length;
+    for (let slot = 0; slot < remainingSlots && sampled.size < maxPoints; slot += 1) {
+      sampled.add(kept[Math.min(kept.length - 1, Math.floor(slot * step))]);
+    }
     return [...sampled].sort((a, b) => a - b).map((index) => points[index]);
   }
 

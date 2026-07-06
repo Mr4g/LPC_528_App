@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import type { LpcResult } from '../../shared/types';
 import { formatMeasurement, formatNumber, getResultBadgeClass, getResultDisplayLabel } from '../formatters';
 
@@ -13,10 +14,13 @@ export interface PressureChartPoint {
   RL_unit?: string | null;
 }
 
-type PressureChartPressurePoint = PressureChartPoint & {
+export type PressureChartPressurePoint = PressureChartPoint & {
   pressureBar: number;
   phaseLabel: string;
 };
+
+export const CHART_VISIBLE_WINDOW_SEC = 20;
+export const CHART_MAX_RENDER_POINTS = 400;
 
 interface PressureChartProps {
   points: PressureChartPoint[];
@@ -71,7 +75,7 @@ export function isValidRlPoint(point: PressureChartPoint | null | undefined): po
   );
 }
 
-export function PressureChart({ points, lastResult }: PressureChartProps) {
+export function buildChartPressurePoints(points: PressureChartPoint[]): PressureChartPressurePoint[] {
   const allPressurePoints: PressureChartPressurePoint[] = points
     .filter(isValidPressurePoint)
     .map((point) => ({
@@ -81,9 +85,58 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
       phaseLabel: getSegmentDisplay(point.segment),
     }));
   const lastDptElapsedSec = allPressurePoints.filter((point) => point.segment?.trim().toUpperCase() === 'DPT').at(-1)?.elapsedTimeSec ?? null;
-  const pressureSeries = lastDptElapsedSec === null
+  return lastDptElapsedSec === null
     ? allPressurePoints
     : allPressurePoints.filter((point) => point.elapsedTimeSec <= lastDptElapsedSec);
+}
+
+export function getVisibleChartPoints(points: PressureChartPressurePoint[], windowSec = CHART_VISIBLE_WINDOW_SEC): PressureChartPressurePoint[] {
+  const latestElapsedTimeSec = points.at(-1)?.elapsedTimeSec ?? null;
+  if (latestElapsedTimeSec === null) return [];
+  const minElapsedTimeSec = Math.max(0, latestElapsedTimeSec - windowSec);
+  return points.filter((point) => point.elapsedTimeSec >= minElapsedTimeSec && point.elapsedTimeSec <= latestElapsedTimeSec);
+}
+
+function hasLiveRl(point: PressureChartPoint): boolean {
+  return Number.isFinite(point.liveLeakValue ?? point.RL ?? null);
+}
+
+export function downsampleChartPoints(points: PressureChartPressurePoint[], maxPoints = CHART_MAX_RENDER_POINTS): PressureChartPressurePoint[] {
+  if (points.length <= maxPoints) return points;
+  const keep = new Set<number>([0, points.length - 1]);
+  for (let index = 1; index < points.length; index += 1) {
+    if (points[index].segment !== points[index - 1].segment) {
+      keep.add(index - 1);
+      keep.add(index);
+    }
+    if (points[index].segment?.trim().toUpperCase() === 'DPT' && hasLiveRl(points[index])) keep.add(index);
+  }
+
+  if (keep.size < maxPoints) {
+    const remainingSlots = maxPoints - keep.size;
+    const step = Math.max(1, Math.floor(points.length / remainingSlots));
+    for (let index = 0; index < points.length && keep.size < maxPoints; index += step) keep.add(index);
+  }
+
+  if (keep.size > maxPoints) {
+    const kept = [...keep].sort((a, b) => a - b);
+    const sampled = new Set<number>([kept[0], kept.at(-1) ?? kept[0]]);
+    const rlIndex = kept.find((index) => points[index].segment?.trim().toUpperCase() === 'DPT' && hasLiveRl(points[index]));
+    if (rlIndex !== undefined) sampled.add(rlIndex);
+    const step = Math.max(1, Math.ceil(kept.length / maxPoints));
+    for (let index = 0; index < kept.length && sampled.size < maxPoints; index += step) sampled.add(kept[index]);
+    return [...sampled].sort((a, b) => a - b).map((index) => points[index]);
+  }
+
+  return [...keep].sort((a, b) => a - b).map((index) => points[index]);
+}
+
+export function buildChartRenderPoints(points: PressureChartPoint[]): PressureChartPressurePoint[] {
+  return downsampleChartPoints(getVisibleChartPoints(buildChartPressurePoints(points)));
+}
+
+export function PressureChart({ points, lastResult }: PressureChartProps) {
+  const pressureSeries = useMemo(() => buildChartRenderPoints(points), [points]);
   const hasLine = pressureSeries.length >= 2;
   const width = 930;
   const height = 420;

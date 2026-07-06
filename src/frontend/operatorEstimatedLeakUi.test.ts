@@ -28,8 +28,8 @@ describe('operator estimated leak UI wiring', () => {
     expect(mainSource).toContain("if (normalized === 'EXH') return 'Spuszczanie / wydech'");
     expect(mainSource).toContain("return normalized === 'DPT'");
     expect(mainSource).toContain('function toChartCurvePoints');
-    expect(mainSource).toContain("point.segment.trim().toUpperCase() !== 'EXH'");
-    expect(mainSource).toContain('setCurvePoints(nextPoints)');
+    expect(mainSource).toContain('buildChartRenderPoints(points)');
+    expect(mainSource).toContain('applyChartPoints(nextPoints)');
     expect(mainSource).toContain('liveCurveSignatureRef');
     expect(mainSource).toContain('Pomiar właściwy');
     expect(mainSource).toContain('Czas do końca fazy');

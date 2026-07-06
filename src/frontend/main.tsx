@@ -1,11 +1,11 @@
-import React, { FormEvent, useEffect, useRef, useState } from 'react';
+import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { getLatestEstimatedLeakTrend, normalizeEstimatedLeakWindowPoints } from '../shared/estimatedLeakTrend';
 import type { BarcodeScan, CurrentTest, LpcResult, LpcStreamPoint, ProgramStartRequest, ProgramStartResult } from '../shared/types';
 import { formatDateTime, formatMeasurement, formatNumber, formatResultLabel, getConnectionLabel, getResultClass } from './formatters';
 import { LastResultPanel } from './components/LastResultPanel';
 import carrierLogo from './assets/carrier-logo.svg';
-import { PressureChart } from './components/PressureChart';
+import { buildChartRenderPoints, PressureChart } from './components/PressureChart';
 import { UserMenu } from './components/UserMenu';
 import { getProgramStartOperatorMessage } from './programStartMessages';
 import { mergeResultIntoHistory, replaceHistoryFromResultsUpdated } from './resultHistoryState';
@@ -157,6 +157,7 @@ type ClassifiedScan = { type: 'card'; value: string } | { type: 'barcode'; value
 type UserRole = 'operator' | 'line_leader' | 'admin';
 type ChartStatus = 'waiting' | 'live' | 'completed';
 type TestSessionStatus = 'idle' | 'program_selected' | 'starting' | 'running' | 'waiting_for_result' | 'completed' | 'timeout' | 'error';
+const CHART_UPDATE_THROTTLE_MS = 120;
 
 interface TestSessionState {
   ok: true;
@@ -392,9 +393,17 @@ function isValidCurvePoint(point: LpcCurvePoint | null | undefined): point is Lp
 }
 
 function toChartCurvePoints(points: LpcCurvePoint[]): LpcCurvePoint[] {
-  const validPoints = points.filter((point) => isValidCurvePoint(point) && point.segment.trim().toUpperCase() !== 'EXH');
-  const lastDptElapsedSec = validPoints.filter((point) => point.segment.trim().toUpperCase() === 'DPT').at(-1)?.elapsedTimeSec ?? null;
-  return lastDptElapsedSec === null ? validPoints : validPoints.filter((point) => point.elapsedTimeSec <= lastDptElapsedSec);
+  return buildChartRenderPoints(points).map((point) => ({
+    elapsedTimeSec: point.elapsedTimeSec,
+    remainingTimeSec: point.remainingTimeSec ?? null,
+    pressureBar: point.pressureBar,
+    pressureMbar: point.pressureMbar,
+    segment: point.segment ?? '',
+    liveLeakValue: point.liveLeakValue ?? null,
+    liveLeakUnit: point.liveLeakUnit ?? null,
+    RL: point.RL ?? null,
+    RL_unit: point.RL_unit ?? null,
+  }));
 }
 
 function LoginPage(props: { onLoggedIn: (user: AuthUser) => void; idleMessage?: string | null }) {
@@ -1007,6 +1016,9 @@ function App() {
   const completedCurvePointsRef = useRef<LpcCurvePoint[]>([]);
   const activeTestIdRef = useRef<string | null>(null);
   const liveCurveSignatureRef = useRef<string>('empty');
+  const pendingChartPointsRef = useRef<LpcCurvePoint[] | null>(null);
+  const chartUpdateTimerRef = useRef<number | null>(null);
+  const lastChartUpdateAtRef = useRef(0);
   const idleTimerRef = useRef<number | null>(null);
   const lastActivitySyncRef = useRef(0);
 
@@ -1087,6 +1099,12 @@ function App() {
     ignoredCurveSignatureRef.current = buildCurveSignature(displayedBeforeReset);
     hasLiveCurveRef.current = false;
     liveCurveSignatureRef.current = 'empty';
+    pendingChartPointsRef.current = null;
+    if (chartUpdateTimerRef.current !== null) {
+      window.clearTimeout(chartUpdateTimerRef.current);
+      chartUpdateTimerRef.current = null;
+    }
+    lastChartUpdateAtRef.current = 0;
     setCurvePoints([]);
     setCompletedCurvePoints([]);
     setChartFinalResult(null);
@@ -1096,6 +1114,42 @@ function App() {
     setChartStatus('waiting');
     ignoreCompletedCurveUntilNewStreamRef.current = true;
     setIgnoreCompletedCurveUntilNewStream(true);
+  }
+
+  function applyChartPoints(nextPoints: LpcCurvePoint[], force = false) {
+    const commit = (points: LpcCurvePoint[]) => {
+      liveCurveSignatureRef.current = buildCurveSignature(points);
+      lastChartUpdateAtRef.current = Date.now();
+      setCurvePoints(points);
+    };
+
+    if (force) {
+      pendingChartPointsRef.current = null;
+      if (chartUpdateTimerRef.current !== null) {
+        window.clearTimeout(chartUpdateTimerRef.current);
+        chartUpdateTimerRef.current = null;
+      }
+      commit(nextPoints);
+      return;
+    }
+
+    pendingChartPointsRef.current = nextPoints;
+    const elapsed = Date.now() - lastChartUpdateAtRef.current;
+    if (elapsed >= CHART_UPDATE_THROTTLE_MS && chartUpdateTimerRef.current === null) {
+      const points = pendingChartPointsRef.current;
+      pendingChartPointsRef.current = null;
+      if (points) commit(points);
+      return;
+    }
+
+    if (chartUpdateTimerRef.current === null) {
+      chartUpdateTimerRef.current = window.setTimeout(() => {
+        chartUpdateTimerRef.current = null;
+        const points = pendingChartPointsRef.current;
+        pendingChartPointsRef.current = null;
+        if (points) commit(points);
+      }, Math.max(0, CHART_UPDATE_THROTTLE_MS - elapsed));
+    }
   }
 
   async function refreshMe() {
@@ -1234,12 +1288,11 @@ function App() {
           const shouldIgnoreOldCompletedCurve = ignoreCompletedCurveUntilNewStreamRef.current && nextSignature === ignoredCurveSignatureRef.current;
           if (!shouldIgnoreOldCompletedCurve && nextSignature !== liveCurveSignatureRef.current) {
             hasLiveCurveRef.current = true;
-            liveCurveSignatureRef.current = nextSignature;
             chartStatusRef.current = 'live';
             ignoreCompletedCurveUntilNewStreamRef.current = false;
             setIgnoreCompletedCurveUntilNewStream(false);
             setChartStatus('live');
-            setCurvePoints(nextPoints);
+            applyChartPoints(nextPoints);
           }
         }
       });
@@ -1303,14 +1356,13 @@ function App() {
           const nextSignature = buildCurveSignature(nextPoints);
           if (nextSignature === liveCurveSignatureRef.current) return;
           hasLiveCurveRef.current = true;
-          liveCurveSignatureRef.current = nextSignature;
           ignoredCurveSignatureRef.current = null;
           chartStatusRef.current = 'live';
           setChartStatus('live');
           ignoreCompletedCurveUntilNewStreamRef.current = false;
           setIgnoreCompletedCurveUntilNewStream(false);
           setCompletedCurvePoints([]);
-          setCurvePoints(nextPoints);
+          applyChartPoints(nextPoints);
         }
       });
 
@@ -1342,7 +1394,7 @@ function App() {
         setChartStatus('completed');
         if (completedPoints.length > 0) {
           setCompletedCurvePoints(completedPoints);
-          setCurvePoints(completedPoints);
+          applyChartPoints(completedPoints, true);
         }
         setFinalMarkerResult((marker) => marker ? { ...marker, point: completedPoints.at(-1) ?? marker.point } : marker);
         ignoreCompletedCurveUntilNewStreamRef.current = false;
@@ -1384,6 +1436,9 @@ function App() {
       activeSocket?.off('lpc:curve-completed');
       activeSocket?.off('test:completed');
       activeSocket?.off('test-session:updated');
+      if (chartUpdateTimerRef.current !== null) window.clearTimeout(chartUpdateTimerRef.current);
+      chartUpdateTimerRef.current = null;
+      pendingChartPointsRef.current = null;
       activeSocket?.disconnect();
     };
   }, []);
@@ -1575,7 +1630,7 @@ function App() {
   const connectionClass = `connection-${compactLpcStatus.state}`;
   const activeInstructionMappingId = lastAccepted?.currentTest.mappingId ?? null;
   const instructionAvailable = Boolean(currentInstruction?.exists && activeInstructionMappingId);
-  const displayedCurvePoints = toChartCurvePoints(curvePoints.length > 0 ? curvePoints : completedCurvePoints);
+  const displayedCurvePoints = useMemo(() => toChartCurvePoints(curvePoints.length > 0 ? curvePoints : completedCurvePoints), [curvePoints, completedCurvePoints]);
   const estimatedLeakTrendPaPerSec = estimatedLeakRateEnabled
     ? getLatestEstimatedLeakTrend(displayedCurvePoints, estimatedLeakWindowPoints)
     : null;

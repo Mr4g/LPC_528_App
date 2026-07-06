@@ -1,28 +1,29 @@
 import { describe, expect, it } from 'vitest';
+import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { isValidRlPoint, PressureChart } from './PressureChart';
+import { buildChartRenderPoints, CHART_MAX_RENDER_POINTS, CHART_VISIBLE_WINDOW_SEC, downsampleChartPoints, getVisibleChartPoints, isValidRlPoint, PressureChart } from './PressureChart';
 
 describe('PressureChart', () => {
   it('renders separate pressure/RL series until the last DPT and hides EXH from chart data', () => {
     const html = renderToStaticMarkup(
-      <PressureChart
-        lastResult={{ result: 'REJECT', leakValue: 11.686662, leakUnit: 'Pa/s', leakType: 'RL' } as never}
-        points={[
+      React.createElement(PressureChart, {
+        lastResult: { result: 'REJECT', leakValue: 11.686662, leakUnit: 'Pa/s', leakType: 'RL' } as never,
+        points: [
           { elapsedTimeSec: 1, pressureMbar: 1000, pressureBar: 1, segment: 'FILL' },
           { elapsedTimeSec: 1.5, pressureMbar: 5996.863, pressureBar: 5.996863, segment: 'STG', liveLeakValue: null, RL: null },
           { elapsedTimeSec: Number.NaN, pressureMbar: Number.NaN, pressureBar: null, segment: 'BROKEN' },
           { elapsedTimeSec: 2, pressureMbar: 5990.978, pressureBar: 5.990978, segment: 'DPT', liveLeakValue: 3.788533, liveLeakUnit: 'Pa/s' },
           { elapsedTimeSec: 2.5, pressureMbar: 5990.5, pressureBar: 5.9905, segment: 'DPT', RL: 3.8, RL_unit: 'Pa/s' },
           { elapsedTimeSec: 3, pressureMbar: 200, pressureBar: 0.2, segment: 'EXH' },
-        ]}
-      />,
+        ],
+      }),
     );
 
     expect(html).toContain('Napełnianie');
     expect(html).toContain('Stabilizacja');
     expect(html).toContain('Pomiar właściwy');
     expect(html).toContain('Ciśnienie [bar]');
-    expect(html).toContain('7,00');
+    expect(html).toContain('7.00');
     expect(html).not.toContain('Spuszczanie / wydech');
     expect(html).toContain('segment-dpt');
     expect(html).not.toContain('segment-exh');
@@ -39,5 +40,43 @@ describe('PressureChart', () => {
     expect(isValidRlPoint({ elapsedTimeSec: 2, pressureMbar: 5990, segment: 'EXH', RL: 3.1, RL_unit: 'Pa/s' })).toBe(false);
     expect(isValidRlPoint({ elapsedTimeSec: 3, pressureMbar: 5990, segment: 'DPT', liveLeakValue: 0, liveLeakUnit: 'Pa/s' })).toBe(true);
     expect(isValidRlPoint({ elapsedTimeSec: 4, pressureMbar: 5990, segment: 'DPT', liveLeakValue: Number.NaN, liveLeakUnit: 'Pa/s' })).toBe(false);
+  });
+
+  it('renders only the latest visible time window', () => {
+    const points = Array.from({ length: 61 }, (_, elapsedTimeSec) => ({
+      elapsedTimeSec,
+      pressureMbar: 5000,
+      pressureBar: 5,
+      segment: elapsedTimeSec < 30 ? 'PRF' : 'DPT',
+    }));
+
+    const visible = getVisibleChartPoints(buildChartRenderPoints(points), CHART_VISIBLE_WINDOW_SEC);
+
+    expect(visible[0].elapsedTimeSec).toBe(40);
+    expect(visible.at(-1)?.elapsedTimeSec).toBe(60);
+  });
+
+  it('keeps the full short curve when it fits in the visible window', () => {
+    const points = Array.from({ length: 11 }, (_, elapsedTimeSec) => ({ elapsedTimeSec, pressureMbar: 5000, pressureBar: 5, segment: 'STG' }));
+
+    expect(buildChartRenderPoints(points)).toHaveLength(11);
+  });
+
+  it('downsamples render points while preserving edges, segment changes and RL samples', () => {
+    const points = Array.from({ length: 600 }, (_, index) => ({
+      elapsedTimeSec: index / 20,
+      pressureMbar: 5000 + index,
+      pressureBar: 5 + index / 10000,
+      segment: index < 250 ? 'PRF' : 'DPT',
+      liveLeakValue: index >= 250 && index % 20 === 0 ? 3.5 : null,
+      liveLeakUnit: index >= 250 && index % 20 === 0 ? 'Pa/s' : null,
+    }));
+
+    const chartPoints = buildChartRenderPoints(points);
+
+    expect(chartPoints.length).toBeLessThanOrEqual(CHART_MAX_RENDER_POINTS);
+    expect(chartPoints[0].elapsedTimeSec).toBeGreaterThanOrEqual(9.95);
+    expect(chartPoints.at(-1)?.elapsedTimeSec).toBe(599 / 20);
+    expect(chartPoints.some((point) => point.segment === 'DPT' && point.liveLeakValue !== null)).toBe(true);
   });
 });

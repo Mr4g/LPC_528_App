@@ -57,6 +57,10 @@ export interface SplunkRuntimeConfig {
   bufferEnabled: boolean;
   bufferRetryIntervalMs: number;
   bufferMaxAttempts: number;
+  streamPointsMode: 'full' | 'sampled' | 'none';
+  streamPointsMax: number;
+  includeRawStream: boolean;
+  rawStreamMax: number;
 }
 
 export interface SplunkResultContext {

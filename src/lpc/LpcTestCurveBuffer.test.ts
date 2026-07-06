@@ -29,7 +29,7 @@ describe('LpcTestCurveBuffer', () => {
     buffer.addStreamPoint(streamPoint(0.1, -0.00011));
 
     expect(buffer.getPoints()).toEqual([
-      { elapsedTimeSec: 0.1, remainingTimeSec: 10, pressureBar: -0.00011, pressureMbar: -0.11, segment: 'PRF' },
+      { elapsedTimeSec: 0.1, remainingTimeSec: 10, pressureBar: -0.00011, pressureMbar: -0.11, segment: 'PRF', messageId: '0.1' },
     ]);
   });
 
@@ -41,6 +41,7 @@ describe('LpcTestCurveBuffer', () => {
     buffer.addStreamPoint(streamPoint(1.1));
 
     expect(buffer.getPoints()).toHaveLength(2);
+    expect(buffer.getFullStreamPoints()).toHaveLength(3);
   });
 
   it('limits points to maxPoints', () => {

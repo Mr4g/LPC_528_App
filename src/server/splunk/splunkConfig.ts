@@ -20,6 +20,10 @@ export function getSplunkConfig(config: AppConfig): SplunkRuntimeConfig {
     bufferEnabled: config.SPLUNK_BUFFER_ENABLED,
     bufferRetryIntervalMs: config.SPLUNK_BUFFER_RETRY_INTERVAL_MS,
     bufferMaxAttempts: config.SPLUNK_BUFFER_MAX_ATTEMPTS,
+    streamPointsMode: config.SPLUNK_STREAM_POINTS_MODE,
+    streamPointsMax: config.SPLUNK_STREAM_POINTS_MAX,
+    includeRawStream: config.SPLUNK_INCLUDE_RAW_STREAM,
+    rawStreamMax: config.SPLUNK_RAW_STREAM_MAX,
   };
 }
 

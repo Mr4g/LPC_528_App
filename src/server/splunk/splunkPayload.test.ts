@@ -21,6 +21,10 @@ const config: SplunkRuntimeConfig = {
   bufferEnabled: true,
   bufferRetryIntervalMs: 30000,
   bufferMaxAttempts: 0,
+  streamPointsMode: 'full',
+  streamPointsMax: 5000,
+  includeRawStream: false,
+  rawStreamMax: 1000,
 };
 
 const result: EnrichedLpcResult = {
@@ -48,6 +52,20 @@ describe('buildSplunkResultEnvelope', () => {
     expect(envelope).toMatchObject({ index: 'machinedata_w16', source: 'LPC-528-01', sourcetype: '_json' });
     expect(envelope.event).toMatchObject({ name: 'LPC.TestFinished', site: 'W16', line: 'PWT', workplace: 'LPC-528-01', device: 'LPC-528-01', barcode: '5901234123457', programNumber: 1, programText: 'P01', resultStatus: 'OK', resultRawStatus: 'ACCEPT', leakValue: 7.253, leakUnit: 'Pa/s', operatorLogin: 'ADM', operatorId: 'ADM', curvePointCount: 1, curveUnit: 'Pa/s', curvePoints: [{ t: 0, elapsedSec: 54.65, remainingTimeSec: 1.35, value: 5990.978, pressureBar: 5.990978, pressureMbar: 5990.978, raw: 'DPT', segment: 'DPT', liveLeakValue: 3.788533, liveLeakUnit: 'Pa/s', RL: 3.788533, RL_unit: 'Pa/s' }] });
     expect(envelope.fields).toMatchObject({ site: 'W16', line: 'PWT', workplace: 'LPC-528-01', device: 'LPC-528-01' });
+    expect(envelope.event).toMatchObject({
+      schemaVersion: 2,
+      station: { site: 'W16', line: 'PWT', workplace: 'LPC-528-01', device: 'LPC-528-01', source: 'LPC-528-01' },
+      test: { id: 'test-1', status: 'completed', activeTestEndReason: 'final_result' },
+      operator: { login: 'ADM' },
+      product: { barcode: '5901234123457' },
+      program: { number: 1, text: 'P01' },
+      result: { status: 'OK', isOk: true },
+      curves: { pointCount: 1, liveLeak: [{ value: 3.788533 }] },
+      process: { segments: { DPT: { liveLeakMin: 3.788533, liveLeakMax: 3.788533, liveLeakAvg: 3.788533 } } },
+      summary: { streamPointCount: 1, curvePointCount: 1, dptPointCount: 1 },
+      raw: { streamLineCount: 0 },
+      diagnostics: { splunkPayloadSchemaVersion: 2, bufferedStreamPoints: 1, sentStreamPoints: 1, truncated: false },
+    });
   });
 
   it('sends empty curve as pointCount 0 and points []', () => {
@@ -98,5 +116,65 @@ describe('buildSplunkResultEnvelope', () => {
       errorCode: null,
     });
     expect(envelope.event).not.toMatchObject({ resultRawStatus: 'TIMEOUT' });
+  });
+
+  it('builds final measurements from R frame values and keeps legacy measurement fields', () => {
+    const richResult = {
+      ...result,
+      resultFrameFormat: 2 as const,
+      resultRawStatus: 'SB',
+      result: 'REJECT' as const,
+      value: 'REJECT' as const,
+      testType: 'DPT',
+      testEvaluation: 'F',
+      leakValue: 11.815086,
+      leakUnit: 'Pa/s',
+      measurements: {
+        RL: { value: 11.815086, unit: 'Pa/s' },
+        Pt: { value: 5.997561, unit: 'bar' },
+        EDC: { value: 0, unit: 'Pa/s' },
+        PL: { value: 141.973679, unit: 'dPa' },
+        LLR: { value: -7.191792, unit: 'Pa/s' },
+        HLR: { value: 10.787688, unit: 'Pa/s' },
+        FPR: { value: 6.002622, unit: 'bar' },
+      },
+      RL: 11.815086,
+      Pt: 5.997561,
+      EDC: 0,
+      PL: 141.973679,
+      LLR: -7.191792,
+      HLR: 10.787688,
+      FPR: 6.002622,
+    };
+    const envelope = buildSplunkResultEnvelope(config, { result: richResult, session: null, curvePoints: [], config: { ...appConfig, LPC_RESULT_FRAME_FORMAT: 2 } });
+    expect(envelope.event).toMatchObject({
+      resultStatus: 'NOK',
+      measurements: {
+        main: { name: 'RL', value: 11.815086, unit: 'Pa/s' },
+        items: { RL: { value: 11.815086, unit: 'Pa/s' }, Pt: { value: 5.997561, unit: 'bar' }, EDC: { value: 0, unit: 'Pa/s' }, PL: { value: 141.973679, unit: 'dPa' }, LLR: { value: -7.191792, unit: 'Pa/s' }, HLR: { value: 10.787688, unit: 'Pa/s' }, FPR: { value: 6.002622, unit: 'bar' } },
+      },
+      RL: 11.815086,
+      Pt: 5.997561,
+      EDC: 0,
+      PL: 141.973679,
+      LLR: -7.191792,
+      HLR: 10.787688,
+      FPR: 6.002622,
+    });
+  });
+
+  it('keeps EXH pressure points without RL and truncates sent curves without losing full-buffer summary', () => {
+    const points = [
+      { elapsedTimeSec: 1, remainingTimeSec: 3, pressureBar: 1, pressureMbar: 1000, segment: 'STB', raw: 's1' },
+      { elapsedTimeSec: 2, remainingTimeSec: 2, pressureBar: 2, pressureMbar: 2000, segment: 'DPT', liveLeakValue: 4, liveLeakUnit: 'Pa/s', raw: 's2' },
+      { elapsedTimeSec: 3, remainingTimeSec: 1, pressureBar: 0.2, pressureMbar: 200, segment: 'EXH', raw: 's3' },
+    ];
+    const envelope = buildSplunkResultEnvelope({ ...config, streamPointsMax: 2 }, { result, session: null, curvePoints: points, config: appConfig });
+    expect(envelope.event).toMatchObject({
+      curves: { pointCount: 2, pressure: [{ bar: 1 }, { bar: 2 }], points: [{ liveLeakValue: null }, { liveLeakValue: 4 }] },
+      summary: { streamPointCount: 3, dptPointCount: 1, liveLeak: { min: 4, max: 4, avg: 4, last: 4 } },
+      raw: { streamFirstLine: 's1', streamLastLine: 's3', streamLineCount: 3 },
+      diagnostics: { truncated: true, sentStreamPoints: 2 },
+    });
   });
 });

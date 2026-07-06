@@ -85,8 +85,10 @@ export function createUsersRouter(authService: AuthService): Router {
       activeAdminCount: authService.countActiveAdmins(),
     });
     if (!permission.ok) return res.status(403).json({ ok: false, code: permission.code, error: permission.code, message: permission.message });
-    const user = authService.setActive(target.id, false);
-    return user ? res.json({ ok: true, user }) : res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
+    const user = authService.softDeleteUser(target.id);
+    if (!user) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
+    console.info(`[USERS] soft deleted userId=${target.id} by=${req.user?.login ?? 'unknown'}`);
+    return res.json({ ok: true, deletedUserId: target.id });
   });
 
   router.patch('/:id', (req: AuthenticatedRequest, res) => {

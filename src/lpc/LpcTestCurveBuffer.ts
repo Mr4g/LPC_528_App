@@ -10,6 +10,9 @@ export interface LpcCurvePoint {
   liveLeakUnit?: string | null;
   RL?: number | null;
   RL_unit?: string | null;
+  messageId?: string | null;
+  raw?: string | null;
+  normalized?: string | null;
 }
 
 export interface LpcCurveSummary {
@@ -31,12 +34,30 @@ export interface LpcTestCurveBufferOptions {
   minElapsedStepSec?: number;
 }
 
+export function isValidCurvePoint(point: LpcCurvePoint | null | undefined): point is LpcCurvePoint {
+  return Boolean(
+    point
+    && Number.isFinite(point.elapsedTimeSec)
+    && typeof point.segment === 'string'
+    && point.segment.trim() !== ''
+    && (Number.isFinite(point.pressureMbar) || Number.isFinite(point.pressureBar)),
+  );
+}
+
+function pressureMbar(point: LpcCurvePoint): number | null {
+  if (Number.isFinite(point.pressureMbar)) return point.pressureMbar;
+  if (Number.isFinite(point.pressureBar)) return (point.pressureBar ?? 0) * 1000;
+  return null;
+}
+
 export class LpcTestCurveBuffer {
   private readonly maxPoints: number;
   private readonly minElapsedStepSec: number;
   private points: LpcCurvePoint[] = [];
+  private fullStreamPoints: LpcCurvePoint[] = [];
   private lastStoredElapsedTimeSec: number | null = null;
   private lastCompletedPoints: LpcCurvePoint[] = [];
+  private lastCompletedFullStreamPoints: LpcCurvePoint[] = [];
   private lastCompletedSummary: LpcCurveSummary = this.buildSummary([]);
 
   constructor(options: LpcTestCurveBufferOptions = {}) {
@@ -46,13 +67,35 @@ export class LpcTestCurveBuffer {
 
   addStreamPoint(point: LpcStreamPoint): LpcCurvePoint | null {
     if (point.elapsedTimeSec === null) return null;
-    if (
-      this.lastStoredElapsedTimeSec !== null
-      && point.elapsedTimeSec - this.lastStoredElapsedTimeSec < this.minElapsedStepSec
-    ) {
-      return null;
+    const curvePoint = this.toCurvePoint({ ...point, elapsedTimeSec: point.elapsedTimeSec });
+    if (!isValidCurvePoint(curvePoint)) return null;
+    if (this.isSingleZeroPressureArtifact(curvePoint)) return null;
+    this.fullStreamPoints.push(curvePoint);
+
+    this.points.push(curvePoint);
+    this.lastStoredElapsedTimeSec = point.elapsedTimeSec;
+
+    if (this.points.length > this.maxPoints) {
+      this.points = this.points.slice(-this.maxPoints);
     }
 
+    return curvePoint;
+  }
+
+  private isSingleZeroPressureArtifact(point: LpcCurvePoint): boolean {
+    const currentPressureMbar = pressureMbar(point);
+    const previousPressureMbar = this.points.length > 0 ? pressureMbar(this.points[this.points.length - 1]) : null;
+    const elapsedDelta = this.lastStoredElapsedTimeSec === null ? null : point.elapsedTimeSec - this.lastStoredElapsedTimeSec;
+    return currentPressureMbar === 0
+      && previousPressureMbar !== null
+      && previousPressureMbar > 1000
+      && elapsedDelta !== null
+      && elapsedDelta >= 0
+      && elapsedDelta <= 0.25
+      && point.segment !== 'EXH';
+  }
+
+  private toCurvePoint(point: LpcStreamPoint & { elapsedTimeSec: number }): LpcCurvePoint {
     const pressureBar = point.pressureValue;
     const curvePoint: LpcCurvePoint = {
       elapsedTimeSec: point.elapsedTimeSec,
@@ -61,6 +104,9 @@ export class LpcTestCurveBuffer {
       pressureMbar: pressureBar === null ? null : pressureBar * 1000,
       segment: point.segment,
     };
+    if (point.messageId) curvePoint.messageId = point.messageId;
+    if (point.raw) curvePoint.raw = point.raw;
+    if (point.normalized) curvePoint.normalized = point.normalized;
 
     const liveLeakValue = point.liveLeakValue ?? point.RL ?? null;
     const liveLeakUnit = point.liveLeakUnit ?? point.RL_unit ?? null;
@@ -73,18 +119,15 @@ export class LpcTestCurveBuffer {
       curvePoint.RL_unit = liveLeakUnit;
     }
 
-    this.points.push(curvePoint);
-    this.lastStoredElapsedTimeSec = point.elapsedTimeSec;
-
-    if (this.points.length > this.maxPoints) {
-      this.points = this.points.slice(-this.maxPoints);
-    }
-
     return curvePoint;
   }
 
   getPoints(): LpcCurvePoint[] {
     return [...this.points];
+  }
+
+  getFullStreamPoints(): LpcCurvePoint[] {
+    return [...this.fullStreamPoints];
   }
 
   getSnapshot(): LpcCurveSnapshot {
@@ -101,8 +144,9 @@ export class LpcTestCurveBuffer {
 
   completeAndClear(): LpcCurveSnapshot {
     this.lastCompletedPoints = this.getPoints();
+    this.lastCompletedFullStreamPoints = this.getFullStreamPoints();
     this.lastCompletedSummary = this.getSummary();
-    const snapshot = { points: [...this.lastCompletedPoints], summary: { ...this.lastCompletedSummary }, completed: true };
+    const snapshot = { points: [...this.lastCompletedFullStreamPoints], summary: this.buildSummary(this.lastCompletedFullStreamPoints), completed: true };
     this.clearCurrent();
     return snapshot;
   }
@@ -110,6 +154,7 @@ export class LpcTestCurveBuffer {
   clear(): void {
     this.clearCurrent();
     this.lastCompletedPoints = [];
+    this.lastCompletedFullStreamPoints = [];
     this.lastCompletedSummary = this.buildSummary([]);
   }
 
@@ -119,6 +164,7 @@ export class LpcTestCurveBuffer {
 
   private clearCurrent(): void {
     this.points = [];
+    this.fullStreamPoints = [];
     this.lastStoredElapsedTimeSec = null;
   }
 

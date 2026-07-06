@@ -54,9 +54,16 @@ export interface SplunkRuntimeConfig {
   verifyTls: boolean;
   sendResult: boolean;
   sendCurve: boolean;
+  sendCurveSummary: boolean;
+  curveSampleIntervalSec: number;
+  curveSampleMaxPoints: number;
   bufferEnabled: boolean;
   bufferRetryIntervalMs: number;
   bufferMaxAttempts: number;
+  streamPointsMode: 'full' | 'sampled' | 'none';
+  streamPointsMax: number;
+  includeRawStream: boolean;
+  rawStreamMax: number;
 }
 
 export interface SplunkResultContext {

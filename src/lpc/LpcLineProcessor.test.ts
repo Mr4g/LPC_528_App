@@ -72,6 +72,34 @@ describe('LpcLineProcessor', () => {
     expect(emitted.find((item) => item.event === 'lpc:stream')?.payload).toMatchObject({ segment: 'DPT', pressureMbar: 5990.978, liveLeakValue: 3.788533, liveLeakUnit: 'Pa/s' });
   });
 
+  it('emits curve-updated for every valid pressure point even when elapsed steps are close', () => {
+    const sampledCurveBuffer = new LpcTestCurveBuffer({ minElapsedStepSec: 1 });
+    const { processor, emitted } = createProcessor({ curveBuffer: sampledCurveBuffer });
+
+    processor.processLine('9369034 S C01,P01,PRF,ET 5.20 sec,T 19.80 sec,P 1.00000 bar');
+    processor.processLine('9369035 S C01,P01,PRF,ET 5.25 sec,T 19.75 sec,P 1.10000 bar');
+
+    expect(sampledCurveBuffer.getPoints()).toHaveLength(2);
+    expect(emitted.filter((item) => item.event === 'lpc:stream')).toHaveLength(2);
+    expect(emitted.filter((item) => item.event === 'lpc:curve-updated')).toHaveLength(2);
+  });
+
+  it('does not update the curve for streams after a final result completed the test', () => {
+    const testSessionManager = {
+      getStatus: vi.fn(() => ({ status: 'completed', activeTestId: 'test-1' })),
+      markLpcData: vi.fn(),
+    };
+    const { processor, emitted, curveBuffer } = createProcessor({ testSessionManager: testSessionManager as never });
+
+    const diagnostic = processor.processLine('508E035 S C01,P11,STG,ET 27.10 sec,T 12.90 sec,P 5.996863 bar');
+
+    expect(diagnostic).toMatchObject({ parsedAs: 'stream', reason: 'stream-after-final-result' });
+    expect(curveBuffer.getPoints()).toHaveLength(0);
+    expect(testSessionManager.markLpcData).not.toHaveBeenCalled();
+    expect(emitted.some((item) => item.event === 'lpc:stream')).toBe(false);
+    expect(emitted.some((item) => item.event === 'lpc:curve-updated')).toBe(false);
+  });
+
   it('recognizes result, stores it and emits completion events', () => {
     const { processor, emitted, lastResultStore, resultHistoryStore } = createProcessor();
 

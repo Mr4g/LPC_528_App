@@ -1,11 +1,11 @@
-import React, { FormEvent, useEffect, useRef, useState } from 'react';
+import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { getLatestEstimatedLeakTrend, normalizeEstimatedLeakWindowPoints } from '../shared/estimatedLeakTrend';
 import type { BarcodeScan, CurrentTest, LpcResult, LpcStreamPoint, ProgramStartRequest, ProgramStartResult } from '../shared/types';
 import { formatDateTime, formatMeasurement, formatNumber, formatResultLabel, getConnectionLabel, getResultClass } from './formatters';
 import { LastResultPanel } from './components/LastResultPanel';
 import carrierLogo from './assets/carrier-logo.svg';
-import { PressureChart } from './components/PressureChart';
+import { buildChartRenderPoints, PressureChart } from './components/PressureChart';
 import { UserMenu } from './components/UserMenu';
 import { getProgramStartOperatorMessage } from './programStartMessages';
 import { mergeResultIntoHistory, replaceHistoryFromResultsUpdated } from './resultHistoryState';
@@ -157,6 +157,7 @@ type ClassifiedScan = { type: 'card'; value: string } | { type: 'barcode'; value
 type UserRole = 'operator' | 'line_leader' | 'admin';
 type ChartStatus = 'waiting' | 'live' | 'completed';
 type TestSessionStatus = 'idle' | 'program_selected' | 'starting' | 'running' | 'waiting_for_result' | 'completed' | 'timeout' | 'error';
+const CHART_RENDER_INTERVAL_MS = 250;
 
 interface TestSessionState {
   ok: true;
@@ -228,6 +229,7 @@ interface PublicUser extends AuthUser {
   cardUidLast4: string | null;
   cardMask: string | null;
   lastTestAt: string | null;
+  deletedAt?: string | null;
 }
 
 const statusLabels: Record<OperatorStatus, string> = {
@@ -241,6 +243,7 @@ const statusLabels: Record<OperatorStatus, string> = {
 const frontendEnv = (import.meta as unknown as { env?: Record<string, string> }).env ?? {};
 const showDiagnostics = (frontendEnv.VITE_SHOW_DIAGNOSTICS ?? 'false') === 'true';
 const estimatedLeakRateEnabled = (frontendEnv.LPC_ENABLE_ESTIMATED_LEAK_RATE ?? 'false') === 'true';
+const debugChartPerf = (frontendEnv.VITE_DEBUG_CHART_PERF ?? 'false') === 'true';
 const estimatedLeakWindowPoints = normalizeEstimatedLeakWindowPoints(frontendEnv.LPC_ESTIMATED_LEAK_WINDOW_POINTS, 10);
 const LOGIN_REGEX = /^[A-Za-z]{3,5}$/;
 const CARD_UID_REGEX = /^\d{8}$/;
@@ -358,18 +361,54 @@ function getCompactSplunkLabel(status: SplunkStatusPayload | null): string {
 
 
 function getSegmentDisplay(segment: string | null | undefined): string {
+  const normalized = segment?.trim().toUpperCase();
+  if (normalized === 'STG') return 'Stabilizacja';
+  if (normalized === 'DPT') return 'Pomiar właściwy';
+  if (normalized === 'EXH') return 'Spuszczanie / wydech';
   return segment?.trim() || '-';
 }
 
 function isMeasurementSegment(segment: string | null | undefined): boolean {
   const normalized = segment?.trim().toUpperCase();
-  return normalized === 'EXH' || normalized === 'DPT';
+  return normalized === 'DPT';
 }
 
 function buildCurveSignature(points: LpcCurvePoint[]): string {
+  const firstPoint = points[0];
   const lastPoint = points.at(-1);
-  if (!lastPoint) return 'empty';
-  return `${points.length}:${lastPoint.elapsedTimeSec}:${lastPoint.pressureMbar ?? 'null'}:${lastPoint.segment}`;
+  if (!firstPoint || !lastPoint) return 'empty';
+  const firstPressure = firstPoint.pressureBar ?? firstPoint.pressureMbar ?? '';
+  const lastPressure = lastPoint.pressureBar ?? lastPoint.pressureMbar ?? '';
+  const lastLeak = lastPoint.liveLeakValue ?? lastPoint.RL ?? '';
+  return `${points.length}|${firstPoint.elapsedTimeSec}|${firstPressure}|${lastPoint.elapsedTimeSec}|${lastPressure}|${lastLeak}|${lastPoint.segment}`;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isValidCurvePoint(point: LpcCurvePoint | null | undefined): point is LpcCurvePoint {
+  return Boolean(
+    point
+    && isFiniteNumber(point.elapsedTimeSec)
+    && typeof point.segment === 'string'
+    && point.segment.trim() !== ''
+    && (isFiniteNumber(point.pressureMbar) || isFiniteNumber(point.pressureBar)),
+  );
+}
+
+function toChartCurvePoints(points: LpcCurvePoint[]): LpcCurvePoint[] {
+  return buildChartRenderPoints(points).map((point) => ({
+    elapsedTimeSec: point.elapsedTimeSec,
+    remainingTimeSec: point.remainingTimeSec ?? null,
+    pressureBar: point.pressureBar,
+    pressureMbar: point.pressureMbar,
+    segment: point.segment ?? '',
+    liveLeakValue: point.liveLeakValue ?? null,
+    liveLeakUnit: point.liveLeakUnit ?? null,
+    RL: point.RL ?? null,
+    RL_unit: point.RL_unit ?? null,
+  }));
 }
 
 function LoginPage(props: { onLoggedIn: (user: AuthUser) => void; idleMessage?: string | null }) {
@@ -581,9 +620,10 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
   async function deleteUser(id: string) {
     if (!window.confirm('Usunąć użytkownika?')) return;
     const response = await fetch(`/api/users/${id}`, { method: 'DELETE', credentials: 'include' });
-    const payload = (await response.json()) as { ok: boolean; message?: string };
+    const payload = (await response.json()) as { ok: boolean; deletedUserId?: string; message?: string };
     setMessage(response.ok ? 'Użytkownik został usunięty.' : payload.message ?? 'Brak uprawnień do tej operacji.');
-    await loadUsers();
+    if (response.ok) setUsers((current) => current.filter((user) => user.id !== (payload.deletedUserId ?? id)));
+    else await loadUsers();
   }
 
   async function userAction(id: string, action: 'enable' | 'disable') {
@@ -979,6 +1019,12 @@ function App() {
   const chartStatusRef = useRef<ChartStatus>(chartStatus);
   const curvePointsRef = useRef<LpcCurvePoint[]>([]);
   const completedCurvePointsRef = useRef<LpcCurvePoint[]>([]);
+  const activeTestIdRef = useRef<string | null>(null);
+  const liveCurveSignatureRef = useRef<string>('empty');
+  const pendingChartPointsRef = useRef<LpcCurvePoint[] | null>(null);
+  const chartUpdateTimerRef = useRef<number | null>(null);
+  const lastChartUpdateAtRef = useRef(0);
+  const lastChartPerfLogAtRef = useRef(0);
   const idleTimerRef = useRef<number | null>(null);
   const lastActivitySyncRef = useRef(0);
 
@@ -1058,6 +1104,14 @@ function App() {
     const displayedBeforeReset = curvePoints.length > 0 ? curvePoints : completedCurvePoints;
     ignoredCurveSignatureRef.current = buildCurveSignature(displayedBeforeReset);
     hasLiveCurveRef.current = false;
+    liveCurveSignatureRef.current = 'empty';
+    pendingChartPointsRef.current = null;
+    if (chartUpdateTimerRef.current !== null) {
+      window.clearTimeout(chartUpdateTimerRef.current);
+      chartUpdateTimerRef.current = null;
+    }
+    lastChartUpdateAtRef.current = 0;
+    lastChartPerfLogAtRef.current = 0;
     setCurvePoints([]);
     setCompletedCurvePoints([]);
     setChartFinalResult(null);
@@ -1067,6 +1121,49 @@ function App() {
     setChartStatus('waiting');
     ignoreCompletedCurveUntilNewStreamRef.current = true;
     setIgnoreCompletedCurveUntilNewStream(true);
+  }
+
+  function applyChartPoints(nextPoints: LpcCurvePoint[], force = false, rawPointCount = nextPoints.length) {
+    const commit = (points: LpcCurvePoint[]) => {
+      const signature = buildCurveSignature(points);
+      if (!force && signature === liveCurveSignatureRef.current) return;
+      liveCurveSignatureRef.current = signature;
+      const now = Date.now();
+      lastChartUpdateAtRef.current = now;
+      if (debugChartPerf && now - lastChartPerfLogAtRef.current > 3_000) {
+        lastChartPerfLogAtRef.current = now;
+        console.debug(`[CHART_PERF] raw=${rawPointCount} window=${points.length} rendered=${points.length} intervalMs=${CHART_RENDER_INTERVAL_MS}`);
+      }
+      setCurvePoints(points);
+    };
+
+    if (force) {
+      pendingChartPointsRef.current = null;
+      if (chartUpdateTimerRef.current !== null) {
+        window.clearTimeout(chartUpdateTimerRef.current);
+        chartUpdateTimerRef.current = null;
+      }
+      commit(nextPoints);
+      return;
+    }
+
+    pendingChartPointsRef.current = nextPoints;
+    const elapsed = Date.now() - lastChartUpdateAtRef.current;
+    if (elapsed >= CHART_RENDER_INTERVAL_MS && chartUpdateTimerRef.current === null) {
+      const points = pendingChartPointsRef.current;
+      pendingChartPointsRef.current = null;
+      if (points) commit(points);
+      return;
+    }
+
+    if (chartUpdateTimerRef.current === null) {
+      chartUpdateTimerRef.current = window.setTimeout(() => {
+        chartUpdateTimerRef.current = null;
+        const points = pendingChartPointsRef.current;
+        pendingChartPointsRef.current = null;
+        if (points) commit(points);
+      }, Math.max(0, CHART_RENDER_INTERVAL_MS - elapsed));
+    }
   }
 
   async function refreshMe() {
@@ -1189,23 +1286,27 @@ function App() {
     void refreshLpcStatus();
     void refreshSplunkStatus();
     void fetchTestSessionStatus().then((payload) => {
-      if (payload) setTestSession(payload);
+      if (payload) {
+        setTestSession(payload);
+        activeTestIdRef.current = payload.activeTestId;
+      }
     });
     const refreshRuntimeState = () => {
       void fetchLpcRuntimeState().then((payload) => {
         if (payload.lastResult) setLastResult(payload.lastResult);
         if (payload.results.length > 0) setResultHistory(replaceHistoryFromResultsUpdated(payload.results, 50));
         if (payload.points.length > 0) {
-          const nextPoints = payload.points.slice(-150);
+          if (chartStatusRef.current === 'completed') return;
+          const nextPoints = toChartCurvePoints(payload.points);
           const nextSignature = buildCurveSignature(nextPoints);
           const shouldIgnoreOldCompletedCurve = ignoreCompletedCurveUntilNewStreamRef.current && nextSignature === ignoredCurveSignatureRef.current;
-          if (!shouldIgnoreOldCompletedCurve) {
+          if (!shouldIgnoreOldCompletedCurve && nextSignature !== liveCurveSignatureRef.current) {
             hasLiveCurveRef.current = true;
             chartStatusRef.current = 'live';
             ignoreCompletedCurveUntilNewStreamRef.current = false;
             setIgnoreCompletedCurveUntilNewStream(false);
             setChartStatus('live');
-            setCurvePoints(nextPoints);
+            applyChartPoints(nextPoints, false, payload.points.length);
           }
         }
       });
@@ -1228,12 +1329,15 @@ function App() {
       activeSocket = socket;
 
       socket.on('scan:accepted', (payload: ScanAcceptedPayload) => {
+        const nextTestId = payload.activeTest?.activeTestId ?? null;
+        const isNewTest = nextTestId !== null && nextTestId !== activeTestIdRef.current;
+        activeTestIdRef.current = nextTestId;
         setLastAccepted(payload);
         setLastRejected(null);
         setStatus(payload.programStart.success ? 'program-selected' : 'start-error');
         if (payload.activeTest) setTestSession(payload.activeTest);
         void loadInstructionForMapping(payload.currentTest.mappingId);
-        if (payload.programStart.success && !hasLiveCurveRef.current) resetChartForNewTest();
+        if (payload.programStart.success && (isNewTest || !hasLiveCurveRef.current)) resetChartForNewTest();
       });
 
       socket.on('scan:rejected', (payload: ScanRejectedPayload) => {
@@ -1254,30 +1358,17 @@ function App() {
 
       socket.on('lpc:stream', (payload) => {
         setEventCounters((counters) => ({ ...counters, streamEvents: counters.streamEvents + 1 }));
+        if (chartStatusRef.current === 'completed') return;
         setLastStream(payload);
-        chartStatusRef.current = 'live';
-        setChartStatus('live');
-        hasLiveCurveRef.current = true;
-        ignoredCurveSignatureRef.current = null;
-        ignoreCompletedCurveUntilNewStreamRef.current = false;
-        setIgnoreCompletedCurveUntilNewStream(false);
-        setCompletedCurvePoints([]);
-        setCurvePoints((points) => [...points.slice(-149), {
-          elapsedTimeSec: payload.elapsedTimeSec ?? 0,
-          remainingTimeSec: payload.remainingTimeSec,
-          pressureBar: payload.pressureValue,
-          pressureMbar: payload.pressureMbar,
-          segment: payload.segment,
-          liveLeakValue: payload.liveLeakValue ?? null,
-          liveLeakUnit: payload.liveLeakUnit ?? null,
-          RL: payload.RL ?? payload.liveLeakValue ?? null,
-          RL_unit: payload.RL_unit ?? payload.liveLeakUnit ?? null,
-        }]);
       });
 
       socket.on('lpc:curve-updated', (payload) => {
         setEventCounters((counters) => ({ ...counters, curveUpdatedEvents: counters.curveUpdatedEvents + 1 }));
+        if (chartStatusRef.current === 'completed') return;
         if (payload.points.length > 0) {
+          const nextPoints = toChartCurvePoints(payload.points);
+          const nextSignature = buildCurveSignature(nextPoints);
+          if (nextSignature === liveCurveSignatureRef.current) return;
           hasLiveCurveRef.current = true;
           ignoredCurveSignatureRef.current = null;
           chartStatusRef.current = 'live';
@@ -1285,13 +1376,15 @@ function App() {
           ignoreCompletedCurveUntilNewStreamRef.current = false;
           setIgnoreCompletedCurveUntilNewStream(false);
           setCompletedCurvePoints([]);
-          setCurvePoints(payload.points.slice(-150));
+          applyChartPoints(nextPoints, false, payload.points.length);
         }
       });
 
       socket.on('lpc:result', (payload) => {
         setEventCounters((counters) => ({ ...counters, resultEvents: counters.resultEvents + 1 }));
         setLastResult(payload);
+        chartStatusRef.current = 'completed';
+        setChartStatus('completed');
         // Final result marker is intentionally kept until the next accepted scan.
         setChartFinalResult(payload);
         setFinalMarkerResult(buildFinalMarker(payload, getLastKnownCurvePoint()));
@@ -1306,14 +1399,17 @@ function App() {
       });
 
       socket.on('lpc:curve-completed', (payload) => {
-        const completedPoints = payload.points.slice(-150);
+        const completedPoints = toChartCurvePoints(payload.points);
         setEventCounters((counters) => ({ ...counters, curveCompletedEvents: counters.curveCompletedEvents + 1 }));
         hasLiveCurveRef.current = completedPoints.length > 0;
+        liveCurveSignatureRef.current = buildCurveSignature(completedPoints);
         ignoredCurveSignatureRef.current = null;
         chartStatusRef.current = 'completed';
         setChartStatus('completed');
-        setCompletedCurvePoints(completedPoints);
-        setCurvePoints(completedPoints);
+        if (completedPoints.length > 0) {
+          setCompletedCurvePoints(completedPoints);
+          applyChartPoints(completedPoints, true, payload.points.length);
+        }
         setFinalMarkerResult((marker) => marker ? { ...marker, point: completedPoints.at(-1) ?? marker.point } : marker);
         ignoreCompletedCurveUntilNewStreamRef.current = false;
         setIgnoreCompletedCurveUntilNewStream(false);
@@ -1321,6 +1417,8 @@ function App() {
 
       socket.on('test:completed', (payload) => {
         setLastResult(payload);
+        chartStatusRef.current = 'completed';
+        setChartStatus('completed');
         // Final result marker is intentionally kept until the next accepted scan.
         setChartFinalResult(payload);
         setFinalMarkerResult(buildFinalMarker(payload, getLastKnownCurvePoint()));
@@ -1331,6 +1429,7 @@ function App() {
 
       socket.on('test-session:updated', (payload) => {
         setTestSession(payload);
+        activeTestIdRef.current = payload.activeTestId;
         if (!payload.locked) focusBarcodeInput(180);
       });
     });
@@ -1351,6 +1450,9 @@ function App() {
       activeSocket?.off('lpc:curve-completed');
       activeSocket?.off('test:completed');
       activeSocket?.off('test-session:updated');
+      if (chartUpdateTimerRef.current !== null) window.clearTimeout(chartUpdateTimerRef.current);
+      chartUpdateTimerRef.current = null;
+      pendingChartPointsRef.current = null;
       activeSocket?.disconnect();
     };
   }, []);
@@ -1542,12 +1644,20 @@ function App() {
   const connectionClass = `connection-${compactLpcStatus.state}`;
   const activeInstructionMappingId = lastAccepted?.currentTest.mappingId ?? null;
   const instructionAvailable = Boolean(currentInstruction?.exists && activeInstructionMappingId);
-  const displayedCurvePoints = curvePoints.length > 0 ? curvePoints : completedCurvePoints;
+  const displayedCurvePoints = useMemo(() => toChartCurvePoints(curvePoints.length > 0 ? curvePoints : completedCurvePoints), [curvePoints, completedCurvePoints]);
   const estimatedLeakTrendPaPerSec = estimatedLeakRateEnabled
     ? getLatestEstimatedLeakTrend(displayedCurvePoints, estimatedLeakWindowPoints)
     : null;
   const liveSegment = getSegmentDisplay(lastStream?.segment);
   const isProperMeasurement = isMeasurementSegment(lastStream?.segment);
+  const finalRlValue = finalMarkerResult?.leakValue ?? chartFinalResult?.leakValue ?? null;
+  const finalRlUnit = finalMarkerResult?.leakUnit ?? chartFinalResult?.leakUnit ?? null;
+  const liveRlValue = isProperMeasurement ? lastStream?.liveLeakValue ?? null : null;
+  const liveRlUnit = isProperMeasurement ? lastStream?.liveLeakUnit ?? null : null;
+  const rlMetricLabel = finalRlValue !== null ? 'Finalny RL' : liveRlValue !== null ? 'RL live' : 'Pomiar RL';
+  const rlMetricValue = finalRlValue !== null ? finalRlValue : liveRlValue;
+  const rlMetricUnit = finalRlValue !== null ? finalRlUnit : liveRlUnit;
+  const rlMetricHint = finalRlValue !== null ? 'Finalny wynik z ramki R' : liveRlValue !== null ? 'Live z ramki S / DPT' : 'Oczekiwanie na DPT';
   const scanLocked = Boolean(testSession?.locked);
   const scanStatusText = scanLocked ? 'Trwa test — poczekaj na wynik' : (status === 'program-selected' && lastAccepted ? `${lastAccepted.currentTest.programText} wybrany` : statusLabels[status]);
   const activeTestHelper = scanLocked ? [testSession?.programText, testSession?.barcode].filter(Boolean).join(' / ') : '';
@@ -1790,13 +1900,10 @@ function App() {
             <div className="metric-card"><span>Elapsed</span><strong>{formatNumber(lastStream?.elapsedTimeSec, 2)} s</strong></div>
             <div className="metric-card"><span>Czas do końca fazy</span><strong>{formatNumber(lastStream?.remainingTimeSec, 2)} s</strong></div>
             <div className="metric-card emphasis"><span>Ciśnienie [mbar]</span><strong>{formatNumber(lastStream?.pressureMbar, 2)}</strong></div>
-            {(lastStream?.liveLeakValue ?? null) !== null && (
-              <div className="metric-card leak-live"><span>RL [Pa/s]</span><strong>{formatMeasurement(lastStream?.liveLeakValue, lastStream?.liveLeakUnit, 3)}</strong><small className="metric-hint">Live z ramki S / DPT</small></div>
-            )}
+            <div className="metric-card leak-live"><span>{rlMetricLabel}</span><strong>{formatMeasurement(rlMetricValue, rlMetricUnit, 3)}</strong><small className="metric-hint">{rlMetricHint}</small></div>
             {estimatedLeakRateEnabled && (
               <div className="metric-card estimated"><span>Szacowany trend [Pa/s]</span><strong>{formatNumber(estimatedLeakTrendPaPerSec, 3)}</strong><small className="metric-hint">Trend ciśnienia, nie wynik RL</small></div>
             )}
-            <div className="metric-card"><span>Finalny RL</span><strong>{formatMeasurement((finalMarkerResult?.leakValue ?? chartFinalResult?.leakValue), (finalMarkerResult?.leakUnit ?? chartFinalResult?.leakUnit))}</strong></div>
           </div>
 
           <PressureChart points={displayedCurvePoints} lastResult={finalMarkerResult?.result ?? chartFinalResult} />

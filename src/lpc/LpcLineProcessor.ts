@@ -11,7 +11,7 @@ import { normalizeLpcLine } from './normalizeLpcLine';
 import { parseLpcResult } from './parseLpcResult';
 import { parseLpcStream } from './parseLpcStream';
 import type { LpcTcpClient } from './LpcTcpClient';
-import { LpcTestCurveBuffer } from './LpcTestCurveBuffer';
+import { isValidCurvePoint, LpcTestCurveBuffer } from './LpcTestCurveBuffer';
 import { shouldPrintForResult, type ZebraPrinter } from '../zebra/ZebraPrinter';
 import type { SplunkBuffer } from '../server/splunk/splunkBuffer';
 import { buildSplunkResultEnvelope } from '../server/splunk/splunkPayload';
@@ -125,6 +125,16 @@ export class LpcLineProcessor {
 
       const streamPoint = parseLpcStream(rawLine);
       if (streamPoint) {
+        const activeSession = this.options.testSessionManager?.getStatus() ?? null;
+        if (this.isTerminalSession(activeSession?.status)) {
+          diagnostic.parsedAs = 'stream';
+          diagnostic.reason = 'stream-after-final-result';
+          this.storeRawLine(diagnostic);
+          if (this.options.debugPipeline) {
+            console.debug(`[LPC_CURVE] ignored stream after final_result testId=${activeSession?.activeTestId ?? 'unknown'} messageId=${streamPoint.messageId}`);
+          }
+          return diagnostic;
+        }
         const curvePoint = this.options.curveBuffer.addStreamPoint(streamPoint);
         this.lastStreamAt = receivedAt;
         this.options.testSessionManager?.markLpcData(receivedAt);
@@ -138,10 +148,14 @@ export class LpcLineProcessor {
           curvePoint,
         };
         this.emit('lpc:stream', streamPayload);
-        this.emit('lpc:curve-updated', {
-          points: this.options.curveBuffer.getPoints(),
-          summary: this.options.curveBuffer.getSummary(),
-        });
+        if (isValidCurvePoint(curvePoint)) {
+          this.emit('lpc:curve-updated', {
+            points: this.options.curveBuffer.getPoints(),
+            summary: this.options.curveBuffer.getSummary(),
+          });
+        } else if (this.options.debugPipeline) {
+          console.debug(`[LPC_CURVE] skipped invalid curvePoint messageId=${streamPoint.messageId}`);
+        }
         this.debugLog('PARSED STREAM', streamPayload);
         return diagnostic;
       }
@@ -215,6 +229,10 @@ export class LpcLineProcessor {
     if (!this.options.autoSelectInterface || this.interfaceSelectionSent) return false;
 
     return rawLine.includes('TCP/IP INTERFACE SELECTION') || isInterfaceSelectionPrompt(rawLine);
+  }
+
+  private isTerminalSession(status: string | null | undefined): boolean {
+    return status === 'completed' || status === 'timeout' || status === 'error';
   }
 
   private attachCurrentTest(result: LpcResult): EnrichedLpcResult {

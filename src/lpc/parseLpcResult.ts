@@ -14,7 +14,7 @@ const RESULT_REGEX = /^(?:(\S+)\s+([A-Z])\s+)?(C\d{2})\s+(N\d+)\s+(P\d{2})\s+(\S
 const SHORT_RESULT_REGEX = /^([A-Fa-f0-9]+)\s+R\s+(C\d+)\s+(P\d+)\s+(\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)\s+(\d{2}\/\d{2}\/\d{2})\s+(\d+)\s+(\S+)\s+(\S+)(?:\s+(.*))?$/;
 
 const DEFAULT_OK_EVALUATIONS = ['A', 'OK', 'PASS', 'ACCEPT', 'GOOD', 'GUT'];
-const DEFAULT_NOK_EVALUATIONS = ['SB', 'NOK', 'FAIL', 'REJECT', 'BAD', 'FEHLER'];
+const DEFAULT_NOK_EVALUATIONS = ['R', 'F', 'SB', 'NOK', 'FAIL', 'REJECT', 'BAD', 'FEHLER'];
 
 function deriveResult(messageType: string | null, linkInfo: string | null): LpcResultValue {
   const indicator = messageType ?? linkInfo?.charAt(0) ?? '';
@@ -34,10 +34,17 @@ function normalizeCodeSet(values: string[] | undefined, defaults: string[]): Set
   return new Set((values && values.length > 0 ? values : defaults).map((value) => value.trim().toUpperCase()).filter(Boolean));
 }
 
-function deriveShortResult(programEvaluation: string, options: LpcResultParserOptions): LpcResultValue {
-  const normalized = programEvaluation.toUpperCase();
-  if (normalizeCodeSet(options.okCodes, DEFAULT_OK_EVALUATIONS).has(normalized)) return 'ACCEPT';
-  if (normalizeCodeSet(options.nokCodes, DEFAULT_NOK_EVALUATIONS).has(normalized)) return 'REJECT';
+function deriveShortResult(programEvaluation: string, options: LpcResultParserOptions, testEvaluation?: string | null): LpcResultValue {
+  const testNormalized = testEvaluation?.trim().toUpperCase();
+  const okCodes = normalizeCodeSet(options.okCodes, DEFAULT_OK_EVALUATIONS);
+  const nokCodes = normalizeCodeSet(options.nokCodes, DEFAULT_NOK_EVALUATIONS);
+  if (testNormalized) {
+    if (okCodes.has(testNormalized)) return 'ACCEPT';
+    if (nokCodes.has(testNormalized)) return 'REJECT';
+  }
+  const normalized = programEvaluation.trim().toUpperCase();
+  if (okCodes.has(normalized)) return 'ACCEPT';
+  if (nokCodes.has(normalized)) return 'REJECT';
   return 'UNKNOWN';
 }
 
@@ -135,8 +142,8 @@ function parseLpcResultFormat2(raw: string, options: LpcResultParserOptions): Lp
   const [, messageId, channel, programText, testerTime, testerDate, uniqueId, programEvaluation, spcFlag, allResultInformation = null] = match;
   const programNumber = parseProgramNumber(programText);
   const channelNumber = parseChannelNumber(channel);
-  const result = deriveShortResult(programEvaluation, options);
   const details = parseResultDetails(allResultInformation ? `- ${allResultInformation}` : null);
+  const result = deriveShortResult(programEvaluation, options, details.testEvaluation);
 
   console.log(`[LPC_RESULT] format=2 short_result_frame parsed messageId=${messageId} channel=${channel} program=${programText} evaluation=${programEvaluation} uniqueId=${uniqueId}`);
 

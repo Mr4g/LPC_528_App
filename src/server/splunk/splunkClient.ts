@@ -30,6 +30,15 @@ export function createSplunkRequestOptions(config: SplunkRuntimeConfig, body: st
   };
 }
 
+export function cleanSplunkJsonPayload(json: string): string {
+  return json
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[łŁ]/g, (char) => (char === 'Ł' ? 'L' : 'l'))
+    .replace(/\\[trn]/g, ' ')
+    .replace(/[\t\r\n\f\v\u00A0\u1680\u180E\u2000-\u200B\u2028\u2029\u202F\u205F\u3000\uFEFF]+/g, ' ');
+}
+
 function parseSplunkResponse(body: string): { code?: number; text?: string } | null {
   if (!body.trim()) return null;
   try {
@@ -91,7 +100,7 @@ export class SplunkClient {
 
     const started = Date.now();
     console.log(`[SPLUNK] tls verify=${this.config.verifyTls}`);
-    const body = JSON.stringify(envelope);
+    const body = cleanSplunkJsonPayload(JSON.stringify(envelope));
     return new Promise<SplunkSendResult>((resolve) => {
       const url = new URL(this.normalizedUrl);
       const transport = url.protocol === 'http:' ? http : https;

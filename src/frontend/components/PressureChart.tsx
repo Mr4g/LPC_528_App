@@ -24,6 +24,13 @@ function buildTicks(min: number, max: number, count: number): number[] {
   return Array.from({ length: count }, (_, index) => min + step * index);
 }
 
+function getSegmentDisplay(segment: string | null | undefined): string {
+  const normalized = segment?.trim().toUpperCase();
+  if (normalized === 'DPT') return 'Pomiar właściwy';
+  if (normalized === 'EXH') return 'Spuszczanie / wydech';
+  return segment?.trim() || '-';
+}
+
 export function PressureChart({ points, lastResult }: PressureChartProps) {
   const validPoints = points.filter((point) => point.pressureMbar !== null) as Array<PressureChartPoint & { pressureMbar: number }>;
   const hasLine = validPoints.length >= 2;
@@ -68,9 +75,19 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
     : 0;
   const xTicks = buildTicks(minX, maxX, 5);
   const yTicks = buildTicks(minY, maxY, 5);
+  const phaseBadges = validPoints.reduce<Array<{ segment: string; label: string }>>((badges, point) => {
+    if (!point.segment || badges.some((badge) => badge.segment === point.segment)) return badges;
+    badges.push({ segment: point.segment, label: getSegmentDisplay(point.segment) });
+    return badges;
+  }, []);
 
   return (
     <div className="chart-wrap">
+      {phaseBadges.length > 0 && (
+        <div className="chart-phase-badges" aria-label="Fazy testu">
+          {phaseBadges.map((badge) => <span key={badge.segment}>{badge.label}</span>)}
+        </div>
+      )}
       <svg className="pressure-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Ciśnienie w czasie">
         <line className="chart-axis" x1={plot.left} y1={plot.bottom} x2={plot.right} y2={plot.bottom} />
         <line className="chart-axis" x1={plot.left} y1={plot.top} x2={plot.left} y2={plot.bottom} />
@@ -88,6 +105,15 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
           </g>
         ))}
         {hasLine && <polyline className="chart-pressure-line" points={polyline} />}
+        {validPoints.map((point) => {
+          const leakValue = point.liveLeakValue ?? point.RL ?? null;
+          const leakUnit = point.liveLeakUnit ?? point.RL_unit ?? null;
+          return (
+            <circle key={`${point.elapsedTimeSec}-${point.segment}-${point.pressureMbar}`} className={`chart-point segment-${point.segment?.toLowerCase() ?? 'unknown'}`} cx={xScale(point.elapsedTimeSec)} cy={yScale(point.pressureMbar)} r={point.segment === 'DPT' ? 4 : 3}>
+              <title>{`Ciśnienie: ${formatMeasurement(point.pressureBar ?? point.pressureMbar / 1000, 'bar', 6)}\nRL: ${formatMeasurement(leakValue, leakUnit, 3)}\nSegment: ${getSegmentDisplay(point.segment)}`}</title>
+            </circle>
+          );
+        })}
         {lastResult && finalPoint && (
           <g className={`chart-final-marker ${finalClass}`}>
             <line x1={finalMarkerX} y1={plot.top} x2={finalMarkerX} y2={plot.bottom} />

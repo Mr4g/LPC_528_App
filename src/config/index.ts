@@ -62,7 +62,7 @@ const envSchema = z.object({
   LPC_DEBUG_PIPELINE: z.coerce.boolean().default(false),
   LPC_RESULT_FRAME_FORMAT: z.coerce.number().int().refine((value) => value === 1 || value === 2, 'LPC_RESULT_FRAME_FORMAT must be 1 or 2').default(1),
   LPC_RESULT_OK_CODES: z.string().default('A,OK,PASS,ACCEPT,GOOD,GUT'),
-  LPC_RESULT_NOK_CODES: z.string().default('SB,NOK,FAIL,REJECT,BAD,FEHLER'),
+  LPC_RESULT_NOK_CODES: z.string().default('R,F,SB,NOK,FAIL,REJECT,BAD,FEHLER'),
   CURRENT_TEST_MAX_AGE_MS: z.coerce.number().int().positive().default(600000),
   ACTIVE_TEST_TIMEOUT_MS: z.coerce.number().int().positive().default(180000),
   ACTIVE_TEST_NO_DATA_WARNING_MS: z.coerce.number().int().positive().default(15000),

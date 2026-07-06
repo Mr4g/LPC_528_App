@@ -141,6 +141,28 @@ describe('parseLpcResult format 2', () => {
     });
   });
 
+  it('maps R program evaluation and F test evaluation to REJECT for full format 2 result details', () => {
+    const result = parseLpcResult('2FDA0D2 R C01 P11 09:30:42.730 07/06/26 0000294220 R - DPT F RL 11.815086 pa/s Pt 5.997561 bar EDC 0.000000 pa/s PL 141.973679 dPa LLR -7.191792 pa/s HLR 10.787688 pa/s FPR 6.002622 bar', 2);
+
+    expect(result).toMatchObject({
+      programEvaluation: 'R',
+      testEvaluation: 'F',
+      result: 'REJECT',
+      value: 'REJECT',
+      resultRawStatus: 'R',
+      leakValue: 11.815086,
+      leakUnit: 'Pa/s',
+      RL: 11.815086,
+      RL_unit: 'Pa/s',
+      Pt: 5.997561,
+      measurements: {
+        RL: { value: 11.815086, unit: 'Pa/s' },
+        Pt: { value: 5.997561, unit: 'bar' },
+      },
+    });
+    expect(result?.result).not.toBe('UNKNOWN');
+  });
+
   it('maps configured SB to REJECT and keeps unknown evaluations as UNKNOWN without timeout', () => {
     expect(parseLpcResult('2BFC030 R C01 P17 15:34:00.830 07/03/26 0000293998 SB -', 2)).toMatchObject({ result: 'REJECT', resultRawStatus: 'SB' });
     expect(parseLpcResult('2BFC030 R C01 P17 15:34:00.830 07/03/26 0000293998 X -', 2)).toMatchObject({ result: 'UNKNOWN', resultRawStatus: 'X' });

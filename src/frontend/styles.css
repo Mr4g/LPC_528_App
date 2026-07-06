@@ -747,6 +747,42 @@ input:disabled {
   filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.32));
 }
 
+.pressure-chart .chart-point {
+  fill: #dbeafe;
+  stroke: rgba(15, 23, 42, 0.72);
+  stroke-width: 1.5;
+}
+
+.pressure-chart .chart-point.segment-dpt {
+  fill: #bbf7d0;
+}
+
+.pressure-chart .chart-point.segment-exh {
+  fill: #fde68a;
+}
+
+.chart-phase-badges {
+  position: absolute;
+  top: 14px;
+  left: 22px;
+  right: 22px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.chart-phase-badges span {
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.72);
+  color: #e2e8f0;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
 .chart-final-marker line {
   stroke-dasharray: 8 8;
   stroke-width: 2;

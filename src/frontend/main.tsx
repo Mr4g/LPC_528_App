@@ -358,12 +358,15 @@ function getCompactSplunkLabel(status: SplunkStatusPayload | null): string {
 
 
 function getSegmentDisplay(segment: string | null | undefined): string {
+  const normalized = segment?.trim().toUpperCase();
+  if (normalized === 'DPT') return 'Pomiar właściwy';
+  if (normalized === 'EXH') return 'Spuszczanie / wydech';
   return segment?.trim() || '-';
 }
 
 function isMeasurementSegment(segment: string | null | undefined): boolean {
   const normalized = segment?.trim().toUpperCase();
-  return normalized === 'EXH' || normalized === 'DPT';
+  return normalized === 'DPT';
 }
 
 function buildCurveSignature(points: LpcCurvePoint[]): string {
@@ -1262,7 +1265,7 @@ function App() {
         ignoreCompletedCurveUntilNewStreamRef.current = false;
         setIgnoreCompletedCurveUntilNewStream(false);
         setCompletedCurvePoints([]);
-        setCurvePoints((points) => [...points.slice(-149), {
+        setCurvePoints((points) => [...points, {
           elapsedTimeSec: payload.elapsedTimeSec ?? 0,
           remainingTimeSec: payload.remainingTimeSec,
           pressureBar: payload.pressureValue,
@@ -1285,7 +1288,7 @@ function App() {
           ignoreCompletedCurveUntilNewStreamRef.current = false;
           setIgnoreCompletedCurveUntilNewStream(false);
           setCompletedCurvePoints([]);
-          setCurvePoints(payload.points.slice(-150));
+          setCurvePoints(payload.points);
         }
       });
 
@@ -1548,6 +1551,14 @@ function App() {
     : null;
   const liveSegment = getSegmentDisplay(lastStream?.segment);
   const isProperMeasurement = isMeasurementSegment(lastStream?.segment);
+  const finalRlValue = finalMarkerResult?.leakValue ?? chartFinalResult?.leakValue ?? null;
+  const finalRlUnit = finalMarkerResult?.leakUnit ?? chartFinalResult?.leakUnit ?? null;
+  const liveRlValue = lastStream?.liveLeakValue ?? null;
+  const liveRlUnit = lastStream?.liveLeakUnit ?? null;
+  const rlMetricLabel = finalRlValue !== null ? 'Finalny RL' : liveRlValue !== null ? 'RL live' : 'Pomiar RL';
+  const rlMetricValue = finalRlValue !== null ? finalRlValue : liveRlValue;
+  const rlMetricUnit = finalRlValue !== null ? finalRlUnit : liveRlUnit;
+  const rlMetricHint = finalRlValue !== null ? 'Finalny wynik z ramki R' : liveRlValue !== null ? 'Live z ramki S / DPT' : 'Oczekiwanie na DPT';
   const scanLocked = Boolean(testSession?.locked);
   const scanStatusText = scanLocked ? 'Trwa test — poczekaj na wynik' : (status === 'program-selected' && lastAccepted ? `${lastAccepted.currentTest.programText} wybrany` : statusLabels[status]);
   const activeTestHelper = scanLocked ? [testSession?.programText, testSession?.barcode].filter(Boolean).join(' / ') : '';
@@ -1790,13 +1801,10 @@ function App() {
             <div className="metric-card"><span>Elapsed</span><strong>{formatNumber(lastStream?.elapsedTimeSec, 2)} s</strong></div>
             <div className="metric-card"><span>Czas do końca fazy</span><strong>{formatNumber(lastStream?.remainingTimeSec, 2)} s</strong></div>
             <div className="metric-card emphasis"><span>Ciśnienie [mbar]</span><strong>{formatNumber(lastStream?.pressureMbar, 2)}</strong></div>
-            {(lastStream?.liveLeakValue ?? null) !== null && (
-              <div className="metric-card leak-live"><span>RL [Pa/s]</span><strong>{formatMeasurement(lastStream?.liveLeakValue, lastStream?.liveLeakUnit, 3)}</strong><small className="metric-hint">Live z ramki S / DPT</small></div>
-            )}
+            <div className="metric-card leak-live"><span>{rlMetricLabel}</span><strong>{formatMeasurement(rlMetricValue, rlMetricUnit, 3)}</strong><small className="metric-hint">{rlMetricHint}</small></div>
             {estimatedLeakRateEnabled && (
               <div className="metric-card estimated"><span>Szacowany trend [Pa/s]</span><strong>{formatNumber(estimatedLeakTrendPaPerSec, 3)}</strong><small className="metric-hint">Trend ciśnienia, nie wynik RL</small></div>
             )}
-            <div className="metric-card"><span>Finalny RL</span><strong>{formatMeasurement((finalMarkerResult?.leakValue ?? chartFinalResult?.leakValue), (finalMarkerResult?.leakUnit ?? chartFinalResult?.leakUnit))}</strong></div>
           </div>
 
           <PressureChart points={displayedCurvePoints} lastResult={finalMarkerResult?.result ?? chartFinalResult} />

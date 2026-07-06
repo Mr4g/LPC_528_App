@@ -10,16 +10,22 @@ describe('operator estimated leak UI wiring', () => {
     expect(mainSource).toContain('Szacowany trend [Pa/s]');
   });
 
-  it('labels live pressure and final RL separately', () => {
+  it('keeps one stable RL metric card that switches live/final labels', () => {
     expect(mainSource).toContain('Ciśnienie [mbar]');
+    expect(mainSource).toContain('Pomiar RL');
+    expect(mainSource).toContain('RL live');
     expect(mainSource).toContain('Finalny RL');
-    expect(mainSource).toContain('RL [Pa/s]');
     expect(mainSource).toContain('Live z ramki S / DPT');
+    expect(mainSource).toContain('Finalny wynik z ramki R');
     expect(mainSource).toContain('Trend ciśnienia, nie wynik RL');
+    expect((mainSource.match(/metric-card leak-live/g) ?? [])).toHaveLength(1);
   });
 
-  it('shows the EXH phase as proper measurement and remaining phase time', () => {
-    expect(mainSource).toContain("normalized === 'EXH' || normalized === 'DPT'");
+  it('labels DPT as proper measurement and EXH as exhaust without resetting the chart', () => {
+    expect(mainSource).toContain("if (normalized === 'DPT') return 'Pomiar właściwy'");
+    expect(mainSource).toContain("if (normalized === 'EXH') return 'Spuszczanie / wydech'");
+    expect(mainSource).toContain("return normalized === 'DPT'");
+    expect(mainSource).toContain('setCurvePoints(payload.points)');
     expect(mainSource).toContain('Pomiar właściwy');
     expect(mainSource).toContain('Czas do końca fazy');
   });

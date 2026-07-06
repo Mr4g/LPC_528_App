@@ -34,6 +34,16 @@ export interface LpcTestCurveBufferOptions {
   minElapsedStepSec?: number;
 }
 
+export function isValidCurvePoint(point: LpcCurvePoint | null | undefined): point is LpcCurvePoint {
+  return Boolean(
+    point
+    && Number.isFinite(point.elapsedTimeSec)
+    && typeof point.segment === 'string'
+    && point.segment.trim() !== ''
+    && (Number.isFinite(point.pressureMbar) || Number.isFinite(point.pressureBar)),
+  );
+}
+
 export class LpcTestCurveBuffer {
   private readonly maxPoints: number;
   private readonly minElapsedStepSec: number;
@@ -52,6 +62,7 @@ export class LpcTestCurveBuffer {
   addStreamPoint(point: LpcStreamPoint): LpcCurvePoint | null {
     if (point.elapsedTimeSec === null) return null;
     const curvePoint = this.toCurvePoint({ ...point, elapsedTimeSec: point.elapsedTimeSec });
+    if (!isValidCurvePoint(curvePoint)) return null;
     this.fullStreamPoints.push(curvePoint);
 
     if (this.lastStoredElapsedTimeSec !== null && point.elapsedTimeSec - this.lastStoredElapsedTimeSec < this.minElapsedStepSec) return null;

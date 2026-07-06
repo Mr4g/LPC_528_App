@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSplunkResultEnvelope } from './splunkPayload';
+import { buildSplunkErrorEnvelope, buildSplunkResultEnvelope } from './splunkPayload';
 import type { SplunkRuntimeConfig } from './splunkTypes';
 import type { EnrichedLpcResult } from '../../lpc/LpcLineProcessor';
 
@@ -54,12 +54,15 @@ describe('buildSplunkResultEnvelope', () => {
     expect(envelope.fields).toMatchObject({ site: 'W16', line: 'PWT', workplace: 'LPC-528-01', device: 'LPC-528-01' });
     expect(envelope.event).toMatchObject({
       schemaVersion: 2,
+      context: { site: 'W16', line: 'PWT', workplace: 'LPC-528-01', device: 'LPC-528-01' },
       station: { site: 'W16', line: 'PWT', workplace: 'LPC-528-01', device: 'LPC-528-01', source: 'LPC-528-01' },
-      test: { id: 'test-1', status: 'completed', activeTestEndReason: 'final_result' },
+      test: { id: 'test-1', barcode: '5901234123457', matchedKey: '5901234123457', programNumber: 1, programText: 'P01', status: 'completed', activeTestEndReason: 'final_result' },
       operator: { login: 'ADM' },
       product: { barcode: '5901234123457' },
       program: { number: 1, text: 'P01' },
-      result: { status: 'OK', isOk: true },
+      result: { status: 'OK', value: 'ACCEPT', isOk: true, leak: { type: 'RL', value: 7.253, unit: 'Pa/s' }, measurements: {} },
+      lpc: { messageId: '1', messageType: 'R', channel: 'C01' },
+      curve: { pointCount: 1, dptPointCount: 1, unit: 'mbar', points: [{ elapsedTimeSec: 54.65, pressureMbar: 5990.978, segment: 'DPT', liveLeakValue: 3.788533 }] },
       curves: { pointCount: 1, liveLeak: [{ value: 3.788533 }] },
       process: { segments: { DPT: { liveLeakMin: 3.788533, liveLeakMax: 3.788533, liveLeakAvg: 3.788533 } } },
       summary: { streamPointCount: 1, curvePointCount: 1, dptPointCount: 1 },
@@ -70,7 +73,7 @@ describe('buildSplunkResultEnvelope', () => {
 
   it('sends empty curve as pointCount 0 and points []', () => {
     const envelope = buildSplunkResultEnvelope(config, { result, session: null, curvePoints: [], config: appConfig });
-    expect(envelope.event).toMatchObject({ curvePointCount: 0, curvePoints: [] });
+    expect(envelope.event).toMatchObject({ curvePointCount: 0, curvePoints: [], curve: { pointCount: 0, points: [] } });
   });
 
   it('includes format 2 LPC fields and does not report timeout for short R frame', () => {
@@ -153,6 +156,12 @@ describe('buildSplunkResultEnvelope', () => {
         main: { name: 'RL', value: 11.815086, unit: 'Pa/s' },
         items: { RL: { value: 11.815086, unit: 'Pa/s' }, Pt: { value: 5.997561, unit: 'bar' }, EDC: { value: 0, unit: 'Pa/s' }, PL: { value: 141.973679, unit: 'dPa' }, LLR: { value: -7.191792, unit: 'Pa/s' }, HLR: { value: 10.787688, unit: 'Pa/s' }, FPR: { value: 6.002622, unit: 'bar' } },
       },
+      result: {
+        status: 'NOK',
+        value: 'REJECT',
+        leak: { type: 'RL', value: 11.815086, unit: 'Pa/s' },
+        measurements: { RL: { value: 11.815086, unit: 'Pa/s' }, Pt: { value: 5.997561, unit: 'bar' } },
+      },
       RL: 11.815086,
       Pt: 5.997561,
       EDC: 0,
@@ -166,15 +175,38 @@ describe('buildSplunkResultEnvelope', () => {
   it('keeps EXH pressure points without RL and truncates sent curves without losing full-buffer summary', () => {
     const points = [
       { elapsedTimeSec: 1, remainingTimeSec: 3, pressureBar: 1, pressureMbar: 1000, segment: 'STB', raw: 's1' },
+      { elapsedTimeSec: Number.NaN, remainingTimeSec: 0, pressureBar: null, pressureMbar: Number.NaN, segment: 'BROKEN', raw: 'bad' },
       { elapsedTimeSec: 2, remainingTimeSec: 2, pressureBar: 2, pressureMbar: 2000, segment: 'DPT', liveLeakValue: 4, liveLeakUnit: 'Pa/s', raw: 's2' },
       { elapsedTimeSec: 3, remainingTimeSec: 1, pressureBar: 0.2, pressureMbar: 200, segment: 'EXH', raw: 's3' },
     ];
     const envelope = buildSplunkResultEnvelope({ ...config, streamPointsMax: 2 }, { result, session: null, curvePoints: points, config: appConfig });
     expect(envelope.event).toMatchObject({
+      curve: { pointCount: 2, points: [{ segment: 'STB' }, { segment: 'DPT' }] },
       curves: { pointCount: 2, pressure: [{ bar: 1 }, { bar: 2 }], points: [{ liveLeakValue: null }, { liveLeakValue: 4 }] },
       summary: { streamPointCount: 3, dptPointCount: 1, liveLeak: { min: 4, max: 4, avg: 4, last: 4 } },
       raw: { streamFirstLine: 's1', streamLastLine: 's3', streamLineCount: 3 },
       diagnostics: { truncated: true, sentStreamPoints: 2 },
+    });
+    expect(JSON.stringify(envelope.event)).not.toContain('BROKEN');
+  });
+
+  it('builds nested timeout/error payloads with collected valid curve points', () => {
+    const envelope = buildSplunkErrorEnvelope(config, {
+      session: { ok: true, status: 'timeout', locked: false, activeTestId: 'test-timeout', barcode: '7096', programNumber: 11, programText: 'P11', operatorUserId: 'adm-1', operatorLogin: 'ADM', startedAt: '2026-06-30T10:00:00.000Z', firstLpcDataAt: null, lastLpcDataAt: null, lastStreamAt: null, finalResultAt: null, completedAt: null, timeoutAt: '2026-06-30T10:01:00.000Z', message: 'Timeout' },
+      reason: 'TIMEOUT',
+      message: 'No final result',
+      curvePoints: [{ elapsedTimeSec: 1, remainingTimeSec: 2, pressureBar: 1, pressureMbar: 1000, segment: 'FILL' }],
+      config: appConfig,
+    });
+
+    expect(envelope).toMatchObject({ index: 'machinedata_w16', source: 'LPC-528-01', sourcetype: '_json' });
+    expect(envelope.event).toMatchObject({
+      context: { site: 'W16', line: 'PWT', workplace: 'LPC-528-01', device: 'LPC-528-01' },
+      test: { id: 'test-timeout', barcode: '7096', programText: 'P11', status: 'error' },
+      operator: { login: 'ADM' },
+      result: { status: 'ERROR', rawStatus: 'TIMEOUT', value: 'ERROR', errorCode: 'TIMEOUT', errorMessage: 'No final result', leak: null, measurements: {} },
+      lpc: { resultFrameFormat: 1, program: 11, programText: 'P11' },
+      curve: { pointCount: 1, points: [{ elapsedTimeSec: 1, pressureMbar: 1000, segment: 'FILL' }] },
     });
   });
 });

@@ -228,6 +228,7 @@ interface PublicUser extends AuthUser {
   cardUidLast4: string | null;
   cardMask: string | null;
   lastTestAt: string | null;
+  deletedAt?: string | null;
 }
 
 const statusLabels: Record<OperatorStatus, string> = {
@@ -373,6 +374,20 @@ function buildCurveSignature(points: LpcCurvePoint[]): string {
   const lastPoint = points.at(-1);
   if (!lastPoint) return 'empty';
   return `${points.length}:${lastPoint.elapsedTimeSec}:${lastPoint.pressureMbar ?? 'null'}:${lastPoint.segment}`;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isValidCurvePoint(point: LpcCurvePoint | null | undefined): point is LpcCurvePoint {
+  return Boolean(
+    point
+    && isFiniteNumber(point.elapsedTimeSec)
+    && typeof point.segment === 'string'
+    && point.segment.trim() !== ''
+    && (isFiniteNumber(point.pressureMbar) || isFiniteNumber(point.pressureBar)),
+  );
 }
 
 function LoginPage(props: { onLoggedIn: (user: AuthUser) => void; idleMessage?: string | null }) {
@@ -584,9 +599,10 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
   async function deleteUser(id: string) {
     if (!window.confirm('Usunąć użytkownika?')) return;
     const response = await fetch(`/api/users/${id}`, { method: 'DELETE', credentials: 'include' });
-    const payload = (await response.json()) as { ok: boolean; message?: string };
+    const payload = (await response.json()) as { ok: boolean; deletedUserId?: string; message?: string };
     setMessage(response.ok ? 'Użytkownik został usunięty.' : payload.message ?? 'Brak uprawnień do tej operacji.');
-    await loadUsers();
+    if (response.ok) setUsers((current) => current.filter((user) => user.id !== (payload.deletedUserId ?? id)));
+    else await loadUsers();
   }
 
   async function userAction(id: string, action: 'enable' | 'disable') {
@@ -1265,7 +1281,7 @@ function App() {
         ignoreCompletedCurveUntilNewStreamRef.current = false;
         setIgnoreCompletedCurveUntilNewStream(false);
         setCompletedCurvePoints([]);
-        setCurvePoints((points) => [...points, {
+        const nextPoint: LpcCurvePoint = {
           elapsedTimeSec: payload.elapsedTimeSec ?? 0,
           remainingTimeSec: payload.remainingTimeSec,
           pressureBar: payload.pressureValue,
@@ -1275,7 +1291,8 @@ function App() {
           liveLeakUnit: payload.liveLeakUnit ?? null,
           RL: payload.RL ?? payload.liveLeakValue ?? null,
           RL_unit: payload.RL_unit ?? payload.liveLeakUnit ?? null,
-        }]);
+        };
+        if (isValidCurvePoint(nextPoint)) setCurvePoints((points) => [...points, nextPoint]);
       });
 
       socket.on('lpc:curve-updated', (payload) => {
@@ -1288,7 +1305,7 @@ function App() {
           ignoreCompletedCurveUntilNewStreamRef.current = false;
           setIgnoreCompletedCurveUntilNewStream(false);
           setCompletedCurvePoints([]);
-          setCurvePoints(payload.points);
+          setCurvePoints(payload.points.filter(isValidCurvePoint));
         }
       });
 
@@ -1545,7 +1562,7 @@ function App() {
   const connectionClass = `connection-${compactLpcStatus.state}`;
   const activeInstructionMappingId = lastAccepted?.currentTest.mappingId ?? null;
   const instructionAvailable = Boolean(currentInstruction?.exists && activeInstructionMappingId);
-  const displayedCurvePoints = curvePoints.length > 0 ? curvePoints : completedCurvePoints;
+  const displayedCurvePoints = (curvePoints.length > 0 ? curvePoints : completedCurvePoints).filter(isValidCurvePoint);
   const estimatedLeakTrendPaPerSec = estimatedLeakRateEnabled
     ? getLatestEstimatedLeakTrend(displayedCurvePoints, estimatedLeakWindowPoints)
     : null;

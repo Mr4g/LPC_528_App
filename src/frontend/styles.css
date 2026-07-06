@@ -302,7 +302,8 @@ input:disabled {
   border-radius: 24px;
   background: rgba(2, 6, 23, 0.62);
   border: 1px solid rgba(148, 163, 184, 0.18);
-  overflow: hidden;
+  overflow: visible;
+  padding-left: 8px;
 }
 .pressure-chart {
   width: 100%;

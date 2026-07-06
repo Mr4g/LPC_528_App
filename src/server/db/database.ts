@@ -63,6 +63,7 @@ function rowToUser(row: Record<string, unknown>): UserRecord {
     cardUidLast4: row.card_uid_last4 === null || row.card_uid_last4 === undefined ? null : String(row.card_uid_last4),
     cardAssignedAt: row.card_assigned_at === null || row.card_assigned_at === undefined ? null : String(row.card_assigned_at),
     lastTestAt: row.last_test_at === null || row.last_test_at === undefined ? null : String(row.last_test_at),
+    deletedAt: row.deleted_at === null || row.deleted_at === undefined ? null : String(row.deleted_at),
   };
 }
 
@@ -217,28 +218,28 @@ export class AppDatabase {
     const row = this.db.prepare(sql).get() as { count?: number } | undefined;
     return Number(row?.count ?? 0);
   }
-  countUsers(): number { return this.count('SELECT COUNT(*) AS count FROM users'); }
-  countActiveUsers(): number { return this.count('SELECT COUNT(*) AS count FROM users WHERE isActive = 1'); }
+  countUsers(): number { return this.count('SELECT COUNT(*) AS count FROM users WHERE deleted_at IS NULL'); }
+  countActiveUsers(): number { return this.count('SELECT COUNT(*) AS count FROM users WHERE isActive = 1 AND deleted_at IS NULL'); }
   countAdmins(): number { return this.countAdminUsers(); }
-  countAdminUsers(): number { return this.count("SELECT COUNT(*) AS count FROM users WHERE role = 'admin'"); }
-  countActiveAdminUsers(): number { return this.count("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND isActive = 1"); }
-  listUsers(): UserRecord[] { return (this.db.prepare('SELECT * FROM users ORDER BY login ASC').all() as Record<string, unknown>[]).map(rowToUser); }
-  findByLogin(login: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE login = ?').get(login) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
-  findById(id: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
-  findByCardUidHash(hash: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE card_uid_hash = ? AND isActive = 1').get(hash) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
+  countAdminUsers(): number { return this.count("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND deleted_at IS NULL"); }
+  countActiveAdminUsers(): number { return this.count("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND isActive = 1 AND deleted_at IS NULL"); }
+  listUsers(): UserRecord[] { return (this.db.prepare('SELECT * FROM users WHERE deleted_at IS NULL AND isActive != 0 ORDER BY login ASC').all() as Record<string, unknown>[]).map(rowToUser); }
+  findByLogin(login: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE login = ? AND deleted_at IS NULL').get(login) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
+  findById(id: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').get(id) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
+  findByCardUidHash(hash: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE card_uid_hash = ? AND isActive = 1 AND deleted_at IS NULL').get(hash) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
 
   insertUser(user: UserRecord): void {
-    this.db.prepare(`INSERT INTO users (id, login, passwordHash, role, isActive, createdAt, updatedAt, lastLoginAt, createdBy, card_uid_hash, card_uid_last4, card_assigned_at, last_test_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(user.id, user.login, user.passwordHash, user.role, user.isActive, user.createdAt, user.updatedAt, user.lastLoginAt, user.createdBy, user.cardUidHash, user.cardUidLast4, user.cardAssignedAt, user.lastTestAt);
+    this.db.prepare(`INSERT INTO users (id, login, passwordHash, role, isActive, createdAt, updatedAt, lastLoginAt, createdBy, card_uid_hash, card_uid_last4, card_assigned_at, last_test_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(user.id, user.login, user.passwordHash, user.role, user.isActive, user.createdAt, user.updatedAt, user.lastLoginAt, user.createdBy, user.cardUidHash, user.cardUidLast4, user.cardAssignedAt, user.lastTestAt, user.deletedAt);
   }
 
   updateUser(id: string, patch: Partial<UserRecord>): UserRecord | null {
     const existing = this.findById(id);
     if (!existing) return null;
     const next = { ...existing, ...patch };
-    this.db.prepare(`UPDATE users SET login = ?, passwordHash = ?, role = ?, isActive = ?, createdAt = ?, updatedAt = ?, lastLoginAt = ?, createdBy = ?, card_uid_hash = ?, card_uid_last4 = ?, card_assigned_at = ?, last_test_at = ? WHERE id = ?`)
-      .run(next.login, next.passwordHash, next.role, next.isActive, next.createdAt, next.updatedAt, next.lastLoginAt, next.createdBy, next.cardUidHash, next.cardUidLast4, next.cardAssignedAt, next.lastTestAt, id);
-    return this.findById(id);
+    this.db.prepare(`UPDATE users SET login = ?, passwordHash = ?, role = ?, isActive = ?, createdAt = ?, updatedAt = ?, lastLoginAt = ?, createdBy = ?, card_uid_hash = ?, card_uid_last4 = ?, card_assigned_at = ?, last_test_at = ?, deleted_at = ? WHERE id = ?`)
+      .run(next.login, next.passwordHash, next.role, next.isActive, next.createdAt, next.updatedAt, next.lastLoginAt, next.createdBy, next.cardUidHash, next.cardUidLast4, next.cardAssignedAt, next.lastTestAt, next.deletedAt, id);
+    return next;
   }
 
   countProgramMappings(): number { return this.count('SELECT COUNT(*) AS count FROM program_mappings'); }
@@ -385,6 +386,7 @@ export class AppDatabase {
     addUserColumn('card_uid_last4', 'ALTER TABLE users ADD COLUMN card_uid_last4 TEXT');
     addUserColumn('card_assigned_at', 'ALTER TABLE users ADD COLUMN card_assigned_at TEXT');
     addUserColumn('last_test_at', 'ALTER TABLE users ADD COLUMN last_test_at TEXT');
+    addUserColumn('deleted_at', 'ALTER TABLE users ADD COLUMN deleted_at TEXT');
     const sessionColumns = this.db.prepare('PRAGMA table_info(test_sessions)').all() as Array<{ name: string }>;
     if (!sessionColumns.some((column) => column.name === 'operatorUserId')) this.db.prepare('ALTER TABLE test_sessions ADD COLUMN operatorUserId TEXT').run();
     const addSessionColumn = (name: string, sql: string) => { if (!sessionColumns.some((column) => column.name === name)) this.db.prepare(sql).run(); };

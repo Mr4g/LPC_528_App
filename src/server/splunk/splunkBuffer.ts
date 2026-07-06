@@ -20,9 +20,9 @@ export class SplunkBuffer {
     if (!this.config.enabled) return;
     const event = envelope.event;
     const testId = typeof event.testId === 'string' ? event.testId : null;
-    const pointCount = typeof event.curves === 'object' && event.curves !== null && 'pointCount' in event.curves ? String((event.curves as { pointCount?: unknown }).pointCount) : String(event.curvePointCount ?? 0);
-    const dptPointCount = typeof event.summary === 'object' && event.summary !== null && 'dptPointCount' in event.summary ? String((event.summary as { dptPointCount?: unknown }).dptPointCount) : '0';
-    console.log(`[SPLUNK] sending testId=${testId ?? ''} pointCount=${pointCount} dptPointCount=${dptPointCount}`);
+    const pointCount = typeof event.curve === 'object' && event.curve !== null && 'pointCount' in event.curve ? String((event.curve as { pointCount?: unknown }).pointCount) : String(event.curvePointCount ?? 0);
+    const dptPointCount = typeof event.curve === 'object' && event.curve !== null && 'dptPointCount' in event.curve ? String((event.curve as { dptPointCount?: unknown }).dptPointCount) : '0';
+    console.log(`[SPLUNK] sending nested payload testId=${testId ?? ''} pointCount=${pointCount} dptPointCount=${dptPointCount}`);
 
     const result = await this.client.send(envelope);
     if (result.ok) return;

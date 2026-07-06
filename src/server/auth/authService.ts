@@ -149,6 +149,7 @@ export class AuthService {
       cardUidLast4: null,
       cardAssignedAt: null,
       lastTestAt: new Date().toISOString(),
+      deletedAt: null,
     };
 
     this.db.insertUser(user);
@@ -276,6 +277,12 @@ export class AuthService {
     return user ? this.toPublicUser(user) : null;
   }
 
+  softDeleteUser(id: string): PublicUser | null {
+    const deletedAt = new Date().toISOString();
+    const user = this.db.updateUser(id, { isActive: 0, deletedAt, updatedAt: deletedAt, cardUidHash: null, cardUidLast4: null, cardAssignedAt: null });
+    return user ? this.toPublicUser(user) : null;
+  }
+
   resetPassword(id: string, password: string): PublicUser | null {
     this.assertValidPassword(password);
     const passwordHash = hashPassword(password);
@@ -321,6 +328,7 @@ export class AuthService {
       cardUidLast4: user.cardUidLast4,
       cardMask: maskCardLast4(user.cardUidLast4),
       lastTestAt: user.lastTestAt,
+      deletedAt: user.deletedAt,
     };
   }
 

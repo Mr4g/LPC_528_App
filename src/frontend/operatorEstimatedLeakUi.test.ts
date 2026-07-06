@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 
 describe('operator estimated leak UI wiring', () => {
   const mainSource = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8');
+  const chartSource = readFileSync(new URL('./components/PressureChart.tsx', import.meta.url), 'utf8');
+  const stylesSource = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
 
   it('keeps estimated leak hidden behind LPC_ENABLE_ESTIMATED_LEAK_RATE', () => {
     expect(mainSource).toContain("frontendEnv.LPC_ENABLE_ESTIMATED_LEAK_RATE ?? 'false'");
@@ -25,8 +27,15 @@ describe('operator estimated leak UI wiring', () => {
     expect(mainSource).toContain("if (normalized === 'DPT') return 'Pomiar właściwy'");
     expect(mainSource).toContain("if (normalized === 'EXH') return 'Spuszczanie / wydech'");
     expect(mainSource).toContain("return normalized === 'DPT'");
-    expect(mainSource).toContain('setCurvePoints(payload.points)');
+    expect(mainSource).toContain('setCurvePoints(payload.points.filter(isValidCurvePoint))');
+    expect(mainSource).toContain('.filter(isValidCurvePoint)');
     expect(mainSource).toContain('Pomiar właściwy');
     expect(mainSource).toContain('Czas do końca fazy');
+  });
+
+  it('keeps the Y axis labels visible with a wider left plot margin', () => {
+    expect(chartSource).toContain('left: 96');
+    expect(stylesSource).toContain('overflow: visible');
+    expect(stylesSource).toContain('padding-left: 8px');
   });
 });

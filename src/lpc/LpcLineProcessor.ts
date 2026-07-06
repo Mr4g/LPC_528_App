@@ -11,7 +11,7 @@ import { normalizeLpcLine } from './normalizeLpcLine';
 import { parseLpcResult } from './parseLpcResult';
 import { parseLpcStream } from './parseLpcStream';
 import type { LpcTcpClient } from './LpcTcpClient';
-import { LpcTestCurveBuffer } from './LpcTestCurveBuffer';
+import { isValidCurvePoint, LpcTestCurveBuffer } from './LpcTestCurveBuffer';
 import { shouldPrintForResult, type ZebraPrinter } from '../zebra/ZebraPrinter';
 import type { SplunkBuffer } from '../server/splunk/splunkBuffer';
 import { buildSplunkResultEnvelope } from '../server/splunk/splunkPayload';
@@ -138,10 +138,14 @@ export class LpcLineProcessor {
           curvePoint,
         };
         this.emit('lpc:stream', streamPayload);
-        this.emit('lpc:curve-updated', {
-          points: this.options.curveBuffer.getPoints(),
-          summary: this.options.curveBuffer.getSummary(),
-        });
+        if (isValidCurvePoint(curvePoint)) {
+          this.emit('lpc:curve-updated', {
+            points: this.options.curveBuffer.getPoints(),
+            summary: this.options.curveBuffer.getSummary(),
+          });
+        } else if (this.options.debugPipeline) {
+          console.debug(`[LPC_CURVE] skipped invalid curvePoint messageId=${streamPoint.messageId}`);
+        }
         this.debugLog('PARSED STREAM', streamPayload);
         return diagnostic;
       }

@@ -50,4 +50,17 @@ describe('AuthService', () => {
     auth.setActive(user.id, false);
     expect(auth.login('ABC', 'test123')).toBeNull();
   });
+
+  it('soft deletes users and hides them from user lists and login/card lookup', () => {
+    const auth = service();
+    const user = auth.createUser({ login: 'OPR', password: 'test123', role: 'operator', createdBy: null });
+
+    const deleted = auth.softDeleteUser(user.id);
+
+    expect(deleted).toMatchObject({ id: user.id, isActive: false });
+    expect(deleted?.deletedAt).toEqual(expect.any(String));
+    expect(auth.listUsers().some((item) => item.id === user.id)).toBe(false);
+    expect(auth.getUserById(user.id)).toBeNull();
+    expect(auth.login('OPR', 'test123')).toBeNull();
+  });
 });

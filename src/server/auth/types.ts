@@ -14,6 +14,7 @@ export interface UserRecord {
   cardUidLast4: string | null;
   cardAssignedAt: string | null;
   lastTestAt: string | null;
+  deletedAt: string | null;
 }
 
 export interface PublicUser {
@@ -28,6 +29,7 @@ export interface PublicUser {
   cardUidLast4: string | null;
   cardMask: string | null;
   lastTestAt: string | null;
+  deletedAt: string | null;
 }
 
 export interface AuthUser {

@@ -32,11 +32,17 @@ function getSegmentDisplay(segment: string | null | undefined): string {
 }
 
 export function PressureChart({ points, lastResult }: PressureChartProps) {
-  const validPoints = points.filter((point) => point.pressureMbar !== null) as Array<PressureChartPoint & { pressureMbar: number }>;
+  const validPoints = points.filter((point): point is PressureChartPoint & { pressureMbar: number } => (
+    point !== null
+    && Number.isFinite(point.elapsedTimeSec)
+    && typeof point.segment === 'string'
+    && point.segment.trim() !== ''
+    && (Number.isFinite(point.pressureMbar) || Number.isFinite(point.pressureBar))
+  )).map((point) => ({ ...point, pressureMbar: Number.isFinite(point.pressureMbar) ? point.pressureMbar : (point.pressureBar ?? 0) * 1000 }));
   const hasLine = validPoints.length >= 2;
   const width = 930;
   const height = 420;
-  const plot = { left: 62, top: 36, right: 900, bottom: 326 };
+  const plot = { left: 96, top: 36, right: 900, bottom: 326 };
   const minX = validPoints.length ? Math.min(...validPoints.map((point) => point.elapsedTimeSec)) : 0;
   const maxX = validPoints.length ? Math.max(...validPoints.map((point) => point.elapsedTimeSec)) : 1;
   const rawMinY = validPoints.length ? Math.min(...validPoints.map((point) => point.pressureMbar)) : -1;

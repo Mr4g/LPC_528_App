@@ -99,11 +99,9 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
   const rlSeries = finalRlPoint ? [...liveRlSeries, finalRlPoint] : liveRlSeries;
   const minX = pressureSeries.length ? Math.min(...pressureSeries.map((point) => point.elapsedTimeSec)) : 0;
   const maxX = pressureSeries.length ? Math.max(...pressureSeries.map((point) => point.elapsedTimeSec)) : 1;
-  const rawMinY = pressureSeries.length ? Math.min(...pressureSeries.map((point) => point.pressureBar)) : -1;
-  const rawMaxY = pressureSeries.length ? Math.max(...pressureSeries.map((point) => point.pressureBar)) : 1;
-  const yPadding = Math.max((rawMaxY - rawMinY) * 0.18, 0.05);
-  const minY = rawMinY - yPadding;
-  const maxY = rawMaxY + yPadding;
+  const maxPressure = pressureSeries.length ? Math.max(...pressureSeries.map((point) => point.pressureBar)) : 0;
+  const minY = 0;
+  const maxY = Math.max(7, Math.ceil((maxPressure + 0.2) * 2) / 2);
   const xRange = maxX - minX || 1;
   const yRange = maxY - minY || 1;
   const xScale = (x: number) => plot.left + ((x - minX) / xRange) * (plot.right - plot.left);
@@ -117,7 +115,7 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
   const rlScale = (value: number) => plot.bottom - ((value - minRl) / rlRange) * (plot.bottom - plot.top);
   const polyline = pressureSeries.map((point) => `${xScale(point.elapsedTimeSec)},${yScale(point.pressureBar)}`).join(' ');
   const rlPolyline = rlSeries.map((point) => `${xScale(point.elapsedTimeSec)},${rlScale(point.leakValue)}`).join(' ');
-  const latestLiveLeakPoint = [...points].reverse().find((point) => point.liveLeakValue !== null && point.liveLeakValue !== undefined) ?? null;
+  const latestLiveLeakPoint = [...liveRlSeries].reverse().find((point) => point.liveLeakValue !== null && point.liveLeakValue !== undefined) ?? null;
   const latestLiveLeakLabel = latestLiveLeakPoint
     ? `RL ${formatMeasurement(latestLiveLeakPoint.liveLeakValue, latestLiveLeakPoint.liveLeakUnit, 3)}`
     : null;
@@ -144,8 +142,9 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
   const yTicks = buildTicks(minY, maxY, 5);
   const rlTicks = buildTicks(minRl, maxRl, 5);
   const phaseBadges = pressureSeries.reduce<Array<{ segment: string; label: string }>>((badges, point) => {
-    if (!point.segment || badges.some((badge) => badge.segment === point.segment)) return badges;
-    badges.push({ segment: point.segment, label: getSegmentDisplay(point.segment) });
+    const label = point.phaseLabel;
+    if (!point.segment || badges.some((badge) => badge.label === label)) return badges;
+    badges.push({ segment: point.segment, label });
     return badges;
   }, []);
 

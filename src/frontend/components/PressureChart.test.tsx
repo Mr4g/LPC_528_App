@@ -22,6 +22,7 @@ describe('PressureChart', () => {
     expect(html).toContain('Stabilizacja');
     expect(html).toContain('Pomiar właściwy');
     expect(html).toContain('Ciśnienie [bar]');
+    expect(html).toContain('7,00');
     expect(html).not.toContain('Spuszczanie / wydech');
     expect(html).toContain('segment-dpt');
     expect(html).not.toContain('segment-exh');

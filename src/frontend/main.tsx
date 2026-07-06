@@ -391,6 +391,12 @@ function isValidCurvePoint(point: LpcCurvePoint | null | undefined): point is Lp
   );
 }
 
+function toChartCurvePoints(points: LpcCurvePoint[]): LpcCurvePoint[] {
+  const validPoints = points.filter((point) => isValidCurvePoint(point) && point.segment.trim().toUpperCase() !== 'EXH');
+  const lastDptElapsedSec = validPoints.filter((point) => point.segment.trim().toUpperCase() === 'DPT').at(-1)?.elapsedTimeSec ?? null;
+  return lastDptElapsedSec === null ? validPoints : validPoints.filter((point) => point.elapsedTimeSec <= lastDptElapsedSec);
+}
+
 function LoginPage(props: { onLoggedIn: (user: AuthUser) => void; idleMessage?: string | null }) {
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
@@ -1223,7 +1229,7 @@ function App() {
         if (payload.results.length > 0) setResultHistory(replaceHistoryFromResultsUpdated(payload.results, 50));
         if (payload.points.length > 0) {
           if (chartStatusRef.current === 'completed') return;
-          const nextPoints = payload.points.slice(-150).filter(isValidCurvePoint);
+          const nextPoints = toChartCurvePoints(payload.points).slice(-150);
           const nextSignature = buildCurveSignature(nextPoints);
           const shouldIgnoreOldCompletedCurve = ignoreCompletedCurveUntilNewStreamRef.current && nextSignature === ignoredCurveSignatureRef.current;
           if (!shouldIgnoreOldCompletedCurve && nextSignature !== liveCurveSignatureRef.current) {
@@ -1293,7 +1299,7 @@ function App() {
         setEventCounters((counters) => ({ ...counters, curveUpdatedEvents: counters.curveUpdatedEvents + 1 }));
         if (chartStatusRef.current === 'completed') return;
         if (payload.points.length > 0) {
-          const nextPoints = payload.points.filter(isValidCurvePoint);
+          const nextPoints = toChartCurvePoints(payload.points);
           const nextSignature = buildCurveSignature(nextPoints);
           if (nextSignature === liveCurveSignatureRef.current) return;
           hasLiveCurveRef.current = true;
@@ -1327,15 +1333,17 @@ function App() {
       });
 
       socket.on('lpc:curve-completed', (payload) => {
-        const completedPoints = payload.points.slice(-150).filter(isValidCurvePoint);
+        const completedPoints = toChartCurvePoints(payload.points).slice(-150);
         setEventCounters((counters) => ({ ...counters, curveCompletedEvents: counters.curveCompletedEvents + 1 }));
         hasLiveCurveRef.current = completedPoints.length > 0;
         liveCurveSignatureRef.current = buildCurveSignature(completedPoints);
         ignoredCurveSignatureRef.current = null;
         chartStatusRef.current = 'completed';
         setChartStatus('completed');
-        setCompletedCurvePoints(completedPoints);
-        setCurvePoints(completedPoints);
+        if (completedPoints.length > 0) {
+          setCompletedCurvePoints(completedPoints);
+          setCurvePoints(completedPoints);
+        }
         setFinalMarkerResult((marker) => marker ? { ...marker, point: completedPoints.at(-1) ?? marker.point } : marker);
         ignoreCompletedCurveUntilNewStreamRef.current = false;
         setIgnoreCompletedCurveUntilNewStream(false);
@@ -1567,7 +1575,7 @@ function App() {
   const connectionClass = `connection-${compactLpcStatus.state}`;
   const activeInstructionMappingId = lastAccepted?.currentTest.mappingId ?? null;
   const instructionAvailable = Boolean(currentInstruction?.exists && activeInstructionMappingId);
-  const displayedCurvePoints = (curvePoints.length > 0 ? curvePoints : completedCurvePoints).filter(isValidCurvePoint);
+  const displayedCurvePoints = toChartCurvePoints(curvePoints.length > 0 ? curvePoints : completedCurvePoints);
   const estimatedLeakTrendPaPerSec = estimatedLeakRateEnabled
     ? getLatestEstimatedLeakTrend(displayedCurvePoints, estimatedLeakWindowPoints)
     : null;

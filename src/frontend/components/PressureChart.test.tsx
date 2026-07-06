@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { isValidRlPoint, PressureChart } from './PressureChart';
 
 describe('PressureChart', () => {
-  it('renders one continuous chart with fill, DPT and EXH phases plus RL tooltip data', () => {
+  it('renders separate pressure/RL series until the last DPT and hides EXH from chart data', () => {
     const html = renderToStaticMarkup(
       <PressureChart
         lastResult={{ result: 'REJECT', leakValue: 11.686662, leakUnit: 'Pa/s', leakType: 'RL' } as never}
@@ -18,12 +18,13 @@ describe('PressureChart', () => {
       />,
     );
 
-    expect(html).toContain('FILL');
+    expect(html).toContain('Napełnianie');
     expect(html).toContain('Stabilizacja');
     expect(html).toContain('Pomiar właściwy');
-    expect(html).toContain('Spuszczanie / wydech');
+    expect(html).toContain('Ciśnienie [bar]');
+    expect(html).not.toContain('Spuszczanie / wydech');
     expect(html).toContain('segment-dpt');
-    expect(html).toContain('segment-exh');
+    expect(html).not.toContain('segment-exh');
     expect(html).toContain('RL: 3,789 Pa/s');
     expect(html).toContain('RL [Pa/s]');
     expect(html).toContain('chart-axis-rl');

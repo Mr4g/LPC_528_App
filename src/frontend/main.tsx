@@ -1000,6 +1000,7 @@ function App() {
   const curvePointsRef = useRef<LpcCurvePoint[]>([]);
   const completedCurvePointsRef = useRef<LpcCurvePoint[]>([]);
   const activeTestIdRef = useRef<string | null>(null);
+  const liveCurveSignatureRef = useRef<string>('empty');
   const idleTimerRef = useRef<number | null>(null);
   const lastActivitySyncRef = useRef(0);
 
@@ -1079,6 +1080,7 @@ function App() {
     const displayedBeforeReset = curvePoints.length > 0 ? curvePoints : completedCurvePoints;
     ignoredCurveSignatureRef.current = buildCurveSignature(displayedBeforeReset);
     hasLiveCurveRef.current = false;
+    liveCurveSignatureRef.current = 'empty';
     setCurvePoints([]);
     setCompletedCurvePoints([]);
     setChartFinalResult(null);
@@ -1224,8 +1226,9 @@ function App() {
           const nextPoints = payload.points.slice(-150).filter(isValidCurvePoint);
           const nextSignature = buildCurveSignature(nextPoints);
           const shouldIgnoreOldCompletedCurve = ignoreCompletedCurveUntilNewStreamRef.current && nextSignature === ignoredCurveSignatureRef.current;
-          if (!shouldIgnoreOldCompletedCurve) {
+          if (!shouldIgnoreOldCompletedCurve && nextSignature !== liveCurveSignatureRef.current) {
             hasLiveCurveRef.current = true;
+            liveCurveSignatureRef.current = nextSignature;
             chartStatusRef.current = 'live';
             ignoreCompletedCurveUntilNewStreamRef.current = false;
             setIgnoreCompletedCurveUntilNewStream(false);
@@ -1284,39 +1287,24 @@ function App() {
         setEventCounters((counters) => ({ ...counters, streamEvents: counters.streamEvents + 1 }));
         if (chartStatusRef.current === 'completed') return;
         setLastStream(payload);
-        chartStatusRef.current = 'live';
-        setChartStatus('live');
-        hasLiveCurveRef.current = true;
-        ignoredCurveSignatureRef.current = null;
-        ignoreCompletedCurveUntilNewStreamRef.current = false;
-        setIgnoreCompletedCurveUntilNewStream(false);
-        setCompletedCurvePoints([]);
-        const nextPoint: LpcCurvePoint = {
-          elapsedTimeSec: payload.elapsedTimeSec ?? 0,
-          remainingTimeSec: payload.remainingTimeSec,
-          pressureBar: payload.pressureValue,
-          pressureMbar: payload.pressureMbar,
-          segment: payload.segment,
-          liveLeakValue: payload.liveLeakValue ?? null,
-          liveLeakUnit: payload.liveLeakUnit ?? null,
-          RL: payload.RL ?? payload.liveLeakValue ?? null,
-          RL_unit: payload.RL_unit ?? payload.liveLeakUnit ?? null,
-        };
-        if (isValidCurvePoint(nextPoint)) setCurvePoints((points) => [...points, nextPoint]);
       });
 
       socket.on('lpc:curve-updated', (payload) => {
         setEventCounters((counters) => ({ ...counters, curveUpdatedEvents: counters.curveUpdatedEvents + 1 }));
         if (chartStatusRef.current === 'completed') return;
         if (payload.points.length > 0) {
+          const nextPoints = payload.points.filter(isValidCurvePoint);
+          const nextSignature = buildCurveSignature(nextPoints);
+          if (nextSignature === liveCurveSignatureRef.current) return;
           hasLiveCurveRef.current = true;
+          liveCurveSignatureRef.current = nextSignature;
           ignoredCurveSignatureRef.current = null;
           chartStatusRef.current = 'live';
           setChartStatus('live');
           ignoreCompletedCurveUntilNewStreamRef.current = false;
           setIgnoreCompletedCurveUntilNewStream(false);
           setCompletedCurvePoints([]);
-          setCurvePoints(payload.points.filter(isValidCurvePoint));
+          setCurvePoints(nextPoints);
         }
       });
 
@@ -1342,6 +1330,7 @@ function App() {
         const completedPoints = payload.points.slice(-150).filter(isValidCurvePoint);
         setEventCounters((counters) => ({ ...counters, curveCompletedEvents: counters.curveCompletedEvents + 1 }));
         hasLiveCurveRef.current = completedPoints.length > 0;
+        liveCurveSignatureRef.current = buildCurveSignature(completedPoints);
         ignoredCurveSignatureRef.current = null;
         chartStatusRef.current = 'completed';
         setChartStatus('completed');
@@ -1586,8 +1575,8 @@ function App() {
   const isProperMeasurement = isMeasurementSegment(lastStream?.segment);
   const finalRlValue = finalMarkerResult?.leakValue ?? chartFinalResult?.leakValue ?? null;
   const finalRlUnit = finalMarkerResult?.leakUnit ?? chartFinalResult?.leakUnit ?? null;
-  const liveRlValue = lastStream?.liveLeakValue ?? null;
-  const liveRlUnit = lastStream?.liveLeakUnit ?? null;
+  const liveRlValue = isProperMeasurement ? lastStream?.liveLeakValue ?? null : null;
+  const liveRlUnit = isProperMeasurement ? lastStream?.liveLeakUnit ?? null : null;
   const rlMetricLabel = finalRlValue !== null ? 'Finalny RL' : liveRlValue !== null ? 'RL live' : 'Pomiar RL';
   const rlMetricValue = finalRlValue !== null ? finalRlValue : liveRlValue;
   const rlMetricUnit = finalRlValue !== null ? finalRlUnit : liveRlUnit;

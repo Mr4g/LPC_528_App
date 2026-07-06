@@ -34,6 +34,19 @@ function buildTicks(min: number, max: number, count: number): number[] {
   return Array.from({ length: count }, (_, index) => min + step * index);
 }
 
+export function buildTimeTicks(min: number, max: number, count: number): number[] {
+  const epsilon = 1e-9;
+  const labels = new Set<string>();
+  return buildTicks(min, max, count).filter((tick) => {
+    if (tick < min - epsilon || tick > max + epsilon) return false;
+    if (min > epsilon && Math.abs(tick) <= epsilon) return false;
+    const label = formatNumber(tick, 1);
+    if (labels.has(label)) return false;
+    labels.add(label);
+    return true;
+  });
+}
+
 function getSegmentDisplay(segment: string | null | undefined): string {
   const normalized = segment?.trim().toUpperCase();
   if (normalized === 'PRF' || normalized === 'FGN' || normalized === 'FILL' || normalized === 'FIL') return 'Napełnianie';
@@ -197,8 +210,9 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
   const finalClass = lastResult ? getResultBadgeClass(lastResult.result).replace('status-', 'chart-result-') : 'chart-result-unknown';
   const resultLabel = lastResult ? getResultDisplayLabel(lastResult.result) : null;
   const measurementLabel = lastResult ? `${lastResult.leakType ?? ''} ${formatMeasurement(lastResult.leakValue, lastResult.leakUnit)}`.trim() : null;
-  const finalMarkerX = finalPoint ? xScale(finalPoint.elapsedTimeSec) : 0;
-  const finalMarkerY = finalPoint ? yScale(finalPoint.pressureBar) : 0;
+  const finalResultAnchorPoint = finalRlPoint ?? liveRlSeries.at(-1) ?? null;
+  const finalMarkerX = finalResultAnchorPoint ? xScale(finalResultAnchorPoint.elapsedTimeSec) : finalPoint ? xScale(finalPoint.elapsedTimeSec) : 0;
+  const finalMarkerY = finalResultAnchorPoint ? rlScale(finalResultAnchorPoint.leakValue) : finalPoint ? yScale(finalPoint.pressureBar) : 0;
   const resultLabelWidth = 190;
   const resultLabelHeight = 76;
   const resultLabelX = finalPoint
@@ -213,7 +227,7 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
   const resultLabelY = finalPoint
     ? Math.min(Math.max(finalMarkerY - 58, plot.top + 4), plot.bottom - resultLabelHeight - 8)
     : 0;
-  const xTicks = buildTicks(minX, maxX, 5);
+  const xTicks = buildTimeTicks(minX, maxX, 5);
   const yTicks = buildTicks(minY, maxY, 5);
   const rlTicks = buildTicks(minRl, maxRl, 5);
   const phaseBadges = pressureSeries.reduce<Array<{ segment: string; label: string }>>((badges, point) => {

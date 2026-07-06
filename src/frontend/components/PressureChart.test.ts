@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { buildChartRenderPoints, CHART_MAX_RENDER_POINTS, CHART_VISIBLE_WINDOW_SEC, getVisibleChartPoints, isValidRlPoint, PressureChart } from './PressureChart';
+import { buildChartRenderPoints, buildTimeTicks, CHART_MAX_RENDER_POINTS, CHART_VISIBLE_WINDOW_SEC, getVisibleChartPoints, isValidRlPoint, PressureChart } from './PressureChart';
 
 describe('PressureChart', () => {
   it('renders separate pressure/RL series until the last DPT and hides EXH from chart data', () => {
@@ -54,6 +54,30 @@ describe('PressureChart', () => {
 
     expect(visible[0].elapsedTimeSec).toBe(40);
     expect(visible.at(-1)?.elapsedTimeSec).toBe(60);
+  });
+
+  it('does not render a sticky zero tick after the visible X window moves forward', () => {
+    expect(buildTimeTicks(0, 20, 5)).toContain(0);
+    expect(buildTimeTicks(40, 60, 5)).toEqual([40, 45, 50, 55, 60]);
+    expect(buildTimeTicks(40, 60, 5)).not.toContain(0);
+  });
+
+  it('anchors the final result label near the RL series instead of the pressure line', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(PressureChart, {
+        lastResult: { result: 'REJECT', leakValue: 3.8, leakUnit: 'Pa/s', leakType: 'RL' } as never,
+        points: [
+          { elapsedTimeSec: 40, pressureMbar: 5900, pressureBar: 5.9, segment: 'STG' },
+          { elapsedTimeSec: 50, pressureMbar: 5990, pressureBar: 5.99, segment: 'DPT', liveLeakValue: 3.7, liveLeakUnit: 'Pa/s' },
+          { elapsedTimeSec: 60, pressureMbar: 5991, pressureBar: 5.991, segment: 'DPT', liveLeakValue: 3.8, liveLeakUnit: 'Pa/s' },
+        ],
+      }),
+    );
+
+    const labelY = Number(html.match(/<foreignObject[^>]* y="([^"]+)"/)?.[1]);
+
+    expect(labelY).toBeGreaterThan(100);
+    expect(html).toContain('RL 3,8 Pa/s');
   });
 
   it('limits 1000 live points in the 20 second window to the render budget', () => {

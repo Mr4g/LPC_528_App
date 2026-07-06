@@ -17,7 +17,10 @@ const config: SplunkRuntimeConfig = {
   timeoutMs: 5000,
   verifyTls: true,
   sendResult: true,
-  sendCurve: true,
+  sendCurve: false,
+  sendCurveSummary: true,
+  curveSampleIntervalSec: 1,
+  curveSampleMaxPoints: 2,
   bufferEnabled: true,
   bufferRetryIntervalMs: 30000,
   bufferMaxAttempts: 0,
@@ -46,8 +49,10 @@ describe('buildSplunkResultEnvelope', () => {
       result,
       session: { ok: true, status: 'running', locked: true, activeTestId: 'test-1', barcode: '7096', programNumber: 11, programText: 'P11', operatorUserId: 'ADM', operatorLogin: 'ADM', startedAt: '2026-06-30T10:00:00.000Z', firstLpcDataAt: null, lastLpcDataAt: null, lastStreamAt: null, finalResultAt: null, completedAt: '2026-06-30T10:00:10.000Z', timeoutAt: null, message: null },
       curvePoints: [
-        { elapsedTimeSec: 20, remainingTimeSec: 1, pressureBar: 5.9, pressureMbar: 5900, segment: 'STG' },
+        { elapsedTimeSec: 20.1, remainingTimeSec: 2, pressureBar: 5.8, pressureMbar: 5800, segment: 'STG' },
+        { elapsedTimeSec: 20.6, remainingTimeSec: 1, pressureBar: 5.9, pressureMbar: 5900, segment: 'STG' },
         { elapsedTimeSec: 54.65, remainingTimeSec: 1.35, pressureBar: 5.990978, pressureMbar: 5990.978, segment: 'DPT', liveLeakValue: 3.788533, liveLeakUnit: 'Pa/s', RL: 3.788533, RL_unit: 'Pa/s' },
+        { elapsedTimeSec: Number.NaN, remainingTimeSec: null, pressureBar: null, pressureMbar: null, segment: 'BROKEN' },
       ],
       config: appConfig,
     });
@@ -58,8 +63,17 @@ describe('buildSplunkResultEnvelope', () => {
       name: 'LPC.TestFinished', eventType: 'lpc_test_result', resultStatus: 'NOK', result: 'REJECT', resultRawStatus: 'R', barcode: '7096', matchedKey: '7096', programNumber: 11, programText: 'P11', operatorLogin: 'ADM', operatorId: 'ADM', testId: 'test-1',
       leakType: 'RL', leakValue: 11.686662, leakUnit: 'Pa/s', leakText: '11,686662 Pa/s',
       lpcMessageId: '59DA0D2', lpcMessageType: 'R', lpcChannel: 'C01', lpcProgram: 11, lpcProgramText: 'P11', lpcTesterTime: '11:04:36.780', lpcTesterDate: '07/06/26', lpcUniqueId: '0000294244', lpcProgramEvaluation: 'R', lpcTestType: 'DPT', lpcTestEvaluation: 'F', lpcSpcFlag: '-',
-      RL: 11.686662, RL_unit: 'Pa/s', Pt: 5.995510, Pt_unit: 'bar', EDC: 0, EDC_unit: 'Pa/s', PL: 140.368362, PL_unit: 'dPa', LLR: -7.191792, LLR_unit: 'Pa/s', HLR: 10.787688, HLR_unit: 'Pa/s', FPR: 6.000356, FPR_unit: 'bar', curvePointCount: 2, dptPointCount: 1,
+      RL: 11.686662, RL_unit: 'Pa/s', Pt: 5.995510, Pt_unit: 'bar', EDC: 0, EDC_unit: 'Pa/s', PL: 140.368362, PL_unit: 'dPa', LLR: -7.191792, LLR_unit: 'Pa/s', HLR: 10.787688, HLR_unit: 'Pa/s', FPR: 6.000356, FPR_unit: 'bar', curvePointCount: 3, dptPointCount: 1,
     });
+    expect(envelope.event.curveSummary).toMatchObject({
+      pointCount: 3,
+      dptPointCount: 1,
+      pressureUnit: 'mbar',
+      rlUnit: 'Pa/s',
+      sampling: { enabled: true, intervalSec: 1, maxPoints: 2, method: 'bucket_avg' },
+    });
+    expect((envelope.event.curveSummary as { sampledPoints: unknown[] }).sampledPoints).toHaveLength(2);
+    expect((envelope.event.curveSummary as { sampledPoints: Array<Record<string, unknown>> }).sampledPoints[0]).toMatchObject({ t: 20.1, segment: 'STG', pressureMbarAvg: 5850, pressureMbarMin: 5800, pressureMbarMax: 5900, rlAvg: null });
     expect(envelope.event).not.toHaveProperty('curvePoints');
     expect(envelope.event).not.toHaveProperty('curve');
   });
@@ -71,6 +85,7 @@ describe('buildSplunkResultEnvelope', () => {
     });
 
     expect(envelope.event).toMatchObject({ resultStatus: 'ERROR', result: 'ERROR', resultRawStatus: 'TIMEOUT', errorCode: 'TIMEOUT', errorMessage: 'No final result', curvePointCount: 1, dptPointCount: 0 });
+    expect(envelope.event.curveSummary).toMatchObject({ pointCount: 1, sampledPoints: [{ t: 1, segment: 'STG', pressureMbarAvg: 1000, rlAvg: null }] });
     expect(envelope.event).not.toHaveProperty('curvePoints');
     expect(envelope.event).not.toHaveProperty('curve');
   });

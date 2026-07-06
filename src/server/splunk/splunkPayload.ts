@@ -152,6 +152,83 @@ function buildEventCounts(points: LpcCurvePoint[]) {
   return { curvePointCount: valid.length, dptPointCount: valid.filter((point) => point.segment === 'DPT' && Number.isFinite(point.liveLeakValue ?? point.RL)).length };
 }
 
+function min(values: number[]): number | null {
+  return values.length ? Math.min(...values) : null;
+}
+
+function max(values: number[]): number | null {
+  return values.length ? Math.max(...values) : null;
+}
+
+function dominantSegment(points: LpcCurvePoint[]): string | null {
+  const counts = new Map<string, number>();
+  for (const point of points) counts.set(point.segment, (counts.get(point.segment) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? points.at(-1)?.segment ?? null;
+}
+
+function buildSampledPoints(points: LpcCurvePoint[], config: SplunkRuntimeConfig) {
+  const valid = sanitizeCurvePoints(points);
+  const intervalSec = Math.max(config.curveSampleIntervalSec, 0.001);
+  const maxPoints = config.curveSampleMaxPoints;
+  if (!config.sendCurveSummary || maxPoints === 0 || valid.length === 0) return [];
+  const firstElapsed = valid[0].elapsedTimeSec;
+  const buckets = new Map<number, LpcCurvePoint[]>();
+  for (const point of valid) {
+    const bucket = Math.floor((point.elapsedTimeSec - firstElapsed) / intervalSec);
+    const existing = buckets.get(bucket) ?? [];
+    existing.push(point);
+    buckets.set(bucket, existing);
+  }
+
+  const orderedBuckets = [...buckets.entries()].sort(([a], [b]) => a - b);
+  const selectedBuckets = orderedBuckets.length <= maxPoints
+    ? orderedBuckets
+    : orderedBuckets.filter(([bucket, bucketPoints], index) => (
+        index === 0
+        || index === orderedBuckets.length - 1
+        || bucketPoints.some((point) => point.segment === 'DPT')
+        || bucket % Math.ceil(orderedBuckets.length / maxPoints) === 0
+      )).slice(0, maxPoints);
+
+  return selectedBuckets
+    .map(([bucket, bucketPoints]) => {
+      const pressureValues = bucketPoints
+        .map((point) => point.pressureMbar)
+        .filter((value): value is number => Number.isFinite(value));
+      const rlValues = bucketPoints
+        .filter((point) => point.segment === 'DPT')
+        .map((point) => point.liveLeakValue ?? point.RL ?? null)
+        .filter((value): value is number => Number.isFinite(value));
+      return {
+        t: Number((firstElapsed + bucket * intervalSec).toFixed(3)),
+        segment: dominantSegment(bucketPoints),
+        pressureMbarAvg: avg(pressureValues),
+        pressureMbarMin: min(pressureValues),
+        pressureMbarMax: max(pressureValues),
+        rlAvg: avg(rlValues),
+        rlMin: min(rlValues),
+        rlMax: max(rlValues),
+      };
+    });
+}
+
+function buildCurveSummary(points: LpcCurvePoint[], config: SplunkRuntimeConfig) {
+  const { curvePointCount, dptPointCount } = buildEventCounts(points);
+  return {
+    pointCount: curvePointCount,
+    dptPointCount,
+    pressureUnit: 'mbar',
+    rlUnit: 'Pa/s',
+    sampling: {
+      enabled: config.sendCurveSummary,
+      intervalSec: config.curveSampleIntervalSec,
+      maxPoints: config.curveSampleMaxPoints,
+      method: 'bucket_avg',
+    },
+    sampledPoints: buildSampledPoints(points, config),
+  };
+}
+
 export function buildSplunkResultEnvelope(config: SplunkRuntimeConfig, context: SplunkResultContext): SplunkHecEnvelope {
   const { result, session } = context;
   const endedAt = session?.completedAt ?? result.receivedAt;
@@ -163,6 +240,7 @@ export function buildSplunkResultEnvelope(config: SplunkRuntimeConfig, context: 
   const operatorLogin = result.operatorLogin ?? session?.operatorLogin ?? null;
   const status = resultStatus(result.result);
   const { curvePointCount, dptPointCount } = buildEventCounts(context.curvePoints);
+  const curveSummary = buildCurveSummary(context.curvePoints, config);
 
   return {
     time: unixTime(endedAt),
@@ -217,6 +295,7 @@ export function buildSplunkResultEnvelope(config: SplunkRuntimeConfig, context: 
       FPR_unit: result.FPR_unit,
       curvePointCount,
       dptPointCount,
+      curveSummary,
       errorCode: result.errorCode ?? null,
       errorMessage: result.errorMessage ?? null,
     },
@@ -228,6 +307,7 @@ export function buildSplunkErrorEnvelope(config: SplunkRuntimeConfig, context: S
   const endedAt = context.session.completedAt ?? context.session.timeoutAt ?? new Date().toISOString();
   const ms = durationMs(context.session.startedAt, endedAt);
   const { curvePointCount, dptPointCount } = buildEventCounts(context.curvePoints);
+  const curveSummary = buildCurveSummary(context.curvePoints, config);
   return {
     time: unixTime(endedAt),
     sourcetype: config.sourcetype,
@@ -281,6 +361,7 @@ export function buildSplunkErrorEnvelope(config: SplunkRuntimeConfig, context: S
       FPR_unit: null,
       curvePointCount,
       dptPointCount,
+      curveSummary,
       errorCode: context.reason,
       errorMessage: context.message,
     },

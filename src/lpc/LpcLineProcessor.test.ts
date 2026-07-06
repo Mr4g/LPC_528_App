@@ -84,6 +84,22 @@ describe('LpcLineProcessor', () => {
     expect(emitted.filter((item) => item.event === 'lpc:curve-updated')).toHaveLength(2);
   });
 
+  it('does not update the curve for streams after a final result completed the test', () => {
+    const testSessionManager = {
+      getStatus: vi.fn(() => ({ status: 'completed', activeTestId: 'test-1' })),
+      markLpcData: vi.fn(),
+    };
+    const { processor, emitted, curveBuffer } = createProcessor({ testSessionManager: testSessionManager as never });
+
+    const diagnostic = processor.processLine('508E035 S C01,P11,STG,ET 27.10 sec,T 12.90 sec,P 5.996863 bar');
+
+    expect(diagnostic).toMatchObject({ parsedAs: 'stream', reason: 'stream-after-final-result' });
+    expect(curveBuffer.getPoints()).toHaveLength(0);
+    expect(testSessionManager.markLpcData).not.toHaveBeenCalled();
+    expect(emitted.some((item) => item.event === 'lpc:stream')).toBe(false);
+    expect(emitted.some((item) => item.event === 'lpc:curve-updated')).toBe(false);
+  });
+
   it('recognizes result, stores it and emits completion events', () => {
     const { processor, emitted, lastResultStore, resultHistoryStore } = createProcessor();
 

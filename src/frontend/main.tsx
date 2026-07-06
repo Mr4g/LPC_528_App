@@ -360,6 +360,7 @@ function getCompactSplunkLabel(status: SplunkStatusPayload | null): string {
 
 function getSegmentDisplay(segment: string | null | undefined): string {
   const normalized = segment?.trim().toUpperCase();
+  if (normalized === 'STG') return 'Stabilizacja';
   if (normalized === 'DPT') return 'Pomiar właściwy';
   if (normalized === 'EXH') return 'Spuszczanie / wydech';
   return segment?.trim() || '-';
@@ -998,6 +999,7 @@ function App() {
   const chartStatusRef = useRef<ChartStatus>(chartStatus);
   const curvePointsRef = useRef<LpcCurvePoint[]>([]);
   const completedCurvePointsRef = useRef<LpcCurvePoint[]>([]);
+  const activeTestIdRef = useRef<string | null>(null);
   const idleTimerRef = useRef<number | null>(null);
   const lastActivitySyncRef = useRef(0);
 
@@ -1208,14 +1210,18 @@ function App() {
     void refreshLpcStatus();
     void refreshSplunkStatus();
     void fetchTestSessionStatus().then((payload) => {
-      if (payload) setTestSession(payload);
+      if (payload) {
+        setTestSession(payload);
+        activeTestIdRef.current = payload.activeTestId;
+      }
     });
     const refreshRuntimeState = () => {
       void fetchLpcRuntimeState().then((payload) => {
         if (payload.lastResult) setLastResult(payload.lastResult);
         if (payload.results.length > 0) setResultHistory(replaceHistoryFromResultsUpdated(payload.results, 50));
         if (payload.points.length > 0) {
-          const nextPoints = payload.points.slice(-150);
+          if (chartStatusRef.current === 'completed') return;
+          const nextPoints = payload.points.slice(-150).filter(isValidCurvePoint);
           const nextSignature = buildCurveSignature(nextPoints);
           const shouldIgnoreOldCompletedCurve = ignoreCompletedCurveUntilNewStreamRef.current && nextSignature === ignoredCurveSignatureRef.current;
           if (!shouldIgnoreOldCompletedCurve) {
@@ -1247,12 +1253,15 @@ function App() {
       activeSocket = socket;
 
       socket.on('scan:accepted', (payload: ScanAcceptedPayload) => {
+        const nextTestId = payload.activeTest?.activeTestId ?? null;
+        const isNewTest = nextTestId !== null && nextTestId !== activeTestIdRef.current;
+        activeTestIdRef.current = nextTestId;
         setLastAccepted(payload);
         setLastRejected(null);
         setStatus(payload.programStart.success ? 'program-selected' : 'start-error');
         if (payload.activeTest) setTestSession(payload.activeTest);
         void loadInstructionForMapping(payload.currentTest.mappingId);
-        if (payload.programStart.success && !hasLiveCurveRef.current) resetChartForNewTest();
+        if (payload.programStart.success && (isNewTest || !hasLiveCurveRef.current)) resetChartForNewTest();
       });
 
       socket.on('scan:rejected', (payload: ScanRejectedPayload) => {
@@ -1273,6 +1282,7 @@ function App() {
 
       socket.on('lpc:stream', (payload) => {
         setEventCounters((counters) => ({ ...counters, streamEvents: counters.streamEvents + 1 }));
+        if (chartStatusRef.current === 'completed') return;
         setLastStream(payload);
         chartStatusRef.current = 'live';
         setChartStatus('live');
@@ -1297,6 +1307,7 @@ function App() {
 
       socket.on('lpc:curve-updated', (payload) => {
         setEventCounters((counters) => ({ ...counters, curveUpdatedEvents: counters.curveUpdatedEvents + 1 }));
+        if (chartStatusRef.current === 'completed') return;
         if (payload.points.length > 0) {
           hasLiveCurveRef.current = true;
           ignoredCurveSignatureRef.current = null;
@@ -1312,6 +1323,8 @@ function App() {
       socket.on('lpc:result', (payload) => {
         setEventCounters((counters) => ({ ...counters, resultEvents: counters.resultEvents + 1 }));
         setLastResult(payload);
+        chartStatusRef.current = 'completed';
+        setChartStatus('completed');
         // Final result marker is intentionally kept until the next accepted scan.
         setChartFinalResult(payload);
         setFinalMarkerResult(buildFinalMarker(payload, getLastKnownCurvePoint()));
@@ -1326,7 +1339,7 @@ function App() {
       });
 
       socket.on('lpc:curve-completed', (payload) => {
-        const completedPoints = payload.points.slice(-150);
+        const completedPoints = payload.points.slice(-150).filter(isValidCurvePoint);
         setEventCounters((counters) => ({ ...counters, curveCompletedEvents: counters.curveCompletedEvents + 1 }));
         hasLiveCurveRef.current = completedPoints.length > 0;
         ignoredCurveSignatureRef.current = null;
@@ -1341,6 +1354,8 @@ function App() {
 
       socket.on('test:completed', (payload) => {
         setLastResult(payload);
+        chartStatusRef.current = 'completed';
+        setChartStatus('completed');
         // Final result marker is intentionally kept until the next accepted scan.
         setChartFinalResult(payload);
         setFinalMarkerResult(buildFinalMarker(payload, getLastKnownCurvePoint()));
@@ -1351,6 +1366,7 @@ function App() {
 
       socket.on('test-session:updated', (payload) => {
         setTestSession(payload);
+        activeTestIdRef.current = payload.activeTestId;
         if (!payload.locked) focusBarcodeInput(180);
       });
     });

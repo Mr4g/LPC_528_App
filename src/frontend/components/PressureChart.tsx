@@ -32,25 +32,49 @@ function getSegmentDisplay(segment: string | null | undefined): string {
   return segment?.trim() || '-';
 }
 
-export function PressureChart({ points, lastResult }: PressureChartProps) {
-  const validPoints = points.filter((point): point is PressureChartPoint & { pressureMbar: number } => (
-    point !== null
+function isValidPressurePoint(point: PressureChartPoint | null | undefined): point is PressureChartPoint & { pressureMbar: number } {
+  return Boolean(
+    point
     && Number.isFinite(point.elapsedTimeSec)
     && typeof point.segment === 'string'
     && point.segment.trim() !== ''
-    && (Number.isFinite(point.pressureMbar) || Number.isFinite(point.pressureBar))
-  )).map((point) => ({ ...point, pressureMbar: Number.isFinite(point.pressureMbar) ? point.pressureMbar : (point.pressureBar ?? 0) * 1000 }));
-  const hasLine = validPoints.length >= 2;
+    && (Number.isFinite(point.pressureMbar) || Number.isFinite(point.pressureBar)),
+  );
+}
+
+export function isValidRlPoint(point: PressureChartPoint | null | undefined): point is PressureChartPoint {
+  const leakValue = point?.liveLeakValue ?? point?.RL ?? null;
+  const leakUnit = point?.liveLeakUnit ?? point?.RL_unit ?? null;
+  return Boolean(
+    point
+    && point.segment?.trim().toUpperCase() === 'DPT'
+    && Number.isFinite(point.elapsedTimeSec)
+    && Number.isFinite(leakValue)
+    && (typeof leakUnit === 'string' && leakUnit.trim() !== ''),
+  );
+}
+
+export function PressureChart({ points, lastResult }: PressureChartProps) {
+  const pressureSeries = points
+    .filter(isValidPressurePoint)
+    .map((point) => ({ ...point, pressureMbar: Number.isFinite(point.pressureMbar) ? point.pressureMbar : (point.pressureBar ?? 0) * 1000 }));
+  const hasLine = pressureSeries.length >= 2;
   const width = 930;
   const height = 420;
   const plot = { left: 96, top: 36, right: 830, bottom: 326 };
-  const rlPoints = validPoints
+  const liveRlSeries = pressureSeries
+    .filter(isValidRlPoint)
     .map((point) => ({ ...point, leakValue: point.liveLeakValue ?? point.RL ?? null, leakUnit: point.liveLeakUnit ?? point.RL_unit ?? null }))
     .filter((point): point is typeof point & { leakValue: number } => Number.isFinite(point.leakValue));
-  const minX = validPoints.length ? Math.min(...validPoints.map((point) => point.elapsedTimeSec)) : 0;
-  const maxX = validPoints.length ? Math.max(...validPoints.map((point) => point.elapsedTimeSec)) : 1;
-  const rawMinY = validPoints.length ? Math.min(...validPoints.map((point) => point.pressureMbar)) : -1;
-  const rawMaxY = validPoints.length ? Math.max(...validPoints.map((point) => point.pressureMbar)) : 1;
+  const finalPoint = pressureSeries.at(-1) ?? null;
+  const finalRlPoint = lastResult?.leakValue !== null && lastResult?.leakValue !== undefined && Number.isFinite(lastResult.leakValue) && finalPoint
+    ? { ...finalPoint, leakValue: lastResult.leakValue, leakUnit: lastResult.leakUnit ?? 'Pa/s', segment: 'FINAL' }
+    : null;
+  const rlSeries = finalRlPoint ? [...liveRlSeries, finalRlPoint] : liveRlSeries;
+  const minX = pressureSeries.length ? Math.min(...pressureSeries.map((point) => point.elapsedTimeSec)) : 0;
+  const maxX = pressureSeries.length ? Math.max(...pressureSeries.map((point) => point.elapsedTimeSec)) : 1;
+  const rawMinY = pressureSeries.length ? Math.min(...pressureSeries.map((point) => point.pressureMbar)) : -1;
+  const rawMaxY = pressureSeries.length ? Math.max(...pressureSeries.map((point) => point.pressureMbar)) : 1;
   const yPadding = Math.max((rawMaxY - rawMinY) * 0.18, 0.05);
   const minY = rawMinY - yPadding;
   const maxY = rawMaxY + yPadding;
@@ -58,16 +82,15 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
   const yRange = maxY - minY || 1;
   const xScale = (x: number) => plot.left + ((x - minX) / xRange) * (plot.right - plot.left);
   const yScale = (y: number) => plot.bottom - ((y - minY) / yRange) * (plot.bottom - plot.top);
-  const rawMinRl = rlPoints.length ? Math.min(...rlPoints.map((point) => point.leakValue)) : 0;
-  const rawMaxRl = rlPoints.length ? Math.max(...rlPoints.map((point) => point.leakValue)) : 1;
+  const rawMinRl = rlSeries.length ? Math.min(...rlSeries.map((point) => point.leakValue)) : 0;
+  const rawMaxRl = rlSeries.length ? Math.max(...rlSeries.map((point) => point.leakValue)) : 1;
   const rlPadding = Math.max((rawMaxRl - rawMinRl) * 0.18, 0.5);
   const minRl = rawMinRl - rlPadding;
   const maxRl = rawMaxRl + rlPadding;
   const rlRange = maxRl - minRl || 1;
   const rlScale = (value: number) => plot.bottom - ((value - minRl) / rlRange) * (plot.bottom - plot.top);
-  const polyline = validPoints.map((point) => `${xScale(point.elapsedTimeSec)},${yScale(point.pressureMbar)}`).join(' ');
-  const rlPolyline = rlPoints.map((point) => `${xScale(point.elapsedTimeSec)},${rlScale(point.leakValue)}`).join(' ');
-  const finalPoint = validPoints.at(-1) ?? null;
+  const polyline = pressureSeries.map((point) => `${xScale(point.elapsedTimeSec)},${yScale(point.pressureMbar)}`).join(' ');
+  const rlPolyline = rlSeries.map((point) => `${xScale(point.elapsedTimeSec)},${rlScale(point.leakValue)}`).join(' ');
   const latestLiveLeakPoint = [...points].reverse().find((point) => point.liveLeakValue !== null && point.liveLeakValue !== undefined) ?? null;
   const latestLiveLeakLabel = latestLiveLeakPoint
     ? `RL ${formatMeasurement(latestLiveLeakPoint.liveLeakValue, latestLiveLeakPoint.liveLeakUnit, 3)}`
@@ -94,7 +117,7 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
   const xTicks = buildTicks(minX, maxX, 5);
   const yTicks = buildTicks(minY, maxY, 5);
   const rlTicks = buildTicks(minRl, maxRl, 5);
-  const phaseBadges = validPoints.reduce<Array<{ segment: string; label: string }>>((badges, point) => {
+  const phaseBadges = pressureSeries.reduce<Array<{ segment: string; label: string }>>((badges, point) => {
     if (!point.segment || badges.some((badge) => badge.segment === point.segment)) return badges;
     badges.push({ segment: point.segment, label: getSegmentDisplay(point.segment) });
     return badges;
@@ -131,18 +154,21 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
           </g>
         ))}
         {hasLine && <polyline className="chart-pressure-line" points={polyline} />}
-        {rlPoints.length >= 2 && <polyline className="chart-rl-line" points={rlPolyline} />}
-        {rlPoints.map((point) => (
+        {rlSeries.length >= 2 && <polyline className="chart-rl-line" points={rlPolyline} />}
+        {rlSeries.map((point) => (
           <circle key={`rl-${point.elapsedTimeSec}-${point.leakValue}`} className="chart-rl-point" cx={xScale(point.elapsedTimeSec)} cy={rlScale(point.leakValue)} r="4">
             <title>{`RL: ${formatMeasurement(point.leakValue, point.leakUnit, 3)}\nSegment: ${getSegmentDisplay(point.segment)}`}</title>
           </circle>
         ))}
-        {validPoints.map((point) => {
+        {pressureSeries.map((point) => {
           const leakValue = point.liveLeakValue ?? point.RL ?? null;
           const leakUnit = point.liveLeakUnit ?? point.RL_unit ?? null;
+          const title = Number.isFinite(leakValue)
+            ? `Ciśnienie: ${formatMeasurement(point.pressureBar ?? point.pressureMbar / 1000, 'bar', 6)}\nRL: ${formatMeasurement(leakValue, leakUnit, 3)}\nSegment: ${getSegmentDisplay(point.segment)}`
+            : `Ciśnienie: ${formatMeasurement(point.pressureBar ?? point.pressureMbar / 1000, 'bar', 6)}\nSegment: ${getSegmentDisplay(point.segment)}`;
           return (
             <circle key={`${point.elapsedTimeSec}-${point.segment}-${point.pressureMbar}`} className={`chart-point segment-${point.segment?.toLowerCase() ?? 'unknown'}`} cx={xScale(point.elapsedTimeSec)} cy={yScale(point.pressureMbar)} r={point.segment === 'DPT' ? 4 : 3}>
-              <title>{`Ciśnienie: ${formatMeasurement(point.pressureBar ?? point.pressureMbar / 1000, 'bar', 6)}\nRL: ${formatMeasurement(leakValue, leakUnit, 3)}\nSegment: ${getSegmentDisplay(point.segment)}`}</title>
+              <title>{title}</title>
             </circle>
           );
         })}
@@ -162,7 +188,7 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
         <text className="chart-label" x="80" y="26">Ciśnienie [mbar]</text>
         <text className="chart-label chart-label-rl" x="806" y="26">RL [Pa/s]</text>
       </svg>
-      {validPoints.length === 0 && <div className="chart-empty">Brak danych z testu</div>}
+      {pressureSeries.length === 0 && <div className="chart-empty">Brak danych z testu</div>}
       {lastResult && !finalPoint && (
         <div className={`chart-result-overlay ${finalClass}`}>
           <strong>{resultLabel}</strong>

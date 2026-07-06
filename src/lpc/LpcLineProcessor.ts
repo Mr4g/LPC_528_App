@@ -125,6 +125,16 @@ export class LpcLineProcessor {
 
       const streamPoint = parseLpcStream(rawLine);
       if (streamPoint) {
+        const activeSession = this.options.testSessionManager?.getStatus() ?? null;
+        if (this.isTerminalSession(activeSession?.status)) {
+          diagnostic.parsedAs = 'stream';
+          diagnostic.reason = 'stream-after-final-result';
+          this.storeRawLine(diagnostic);
+          if (this.options.debugPipeline) {
+            console.debug(`[LPC_CURVE] ignored stream after final_result testId=${activeSession?.activeTestId ?? 'unknown'} messageId=${streamPoint.messageId}`);
+          }
+          return diagnostic;
+        }
         const curvePoint = this.options.curveBuffer.addStreamPoint(streamPoint);
         this.lastStreamAt = receivedAt;
         this.options.testSessionManager?.markLpcData(receivedAt);
@@ -219,6 +229,10 @@ export class LpcLineProcessor {
     if (!this.options.autoSelectInterface || this.interfaceSelectionSent) return false;
 
     return rawLine.includes('TCP/IP INTERFACE SELECTION') || isInterfaceSelectionPrompt(rawLine);
+  }
+
+  private isTerminalSession(status: string | null | undefined): boolean {
+    return status === 'completed' || status === 'timeout' || status === 'error';
   }
 
   private attachCurrentTest(result: LpcResult): EnrichedLpcResult {

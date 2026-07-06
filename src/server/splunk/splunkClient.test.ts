@@ -4,7 +4,7 @@ import { cleanSplunkJsonPayload, createSplunkRequestOptions, normalizeSplunkHecU
 import type { SplunkHecEnvelope, SplunkRuntimeConfig } from './splunkTypes';
 
 const envelope: SplunkHecEnvelope = { time: 1710000000.123, index: 'machinedata_w16', source: 'LPC-528-01', sourcetype: '_json', event: { eventType: 'lpc_test_result' } };
-const baseConfig: SplunkRuntimeConfig = { enabled: true, url: 'http://127.0.0.1/services/collector', token: 'token-for-test', index: 'machinedata_w16', source: 'LPC-528-01', sourcetype: '_json', site: 'W16', line: 'PWT', workplace: 'LPC-528-01', device: 'LPC-528-01', timeoutMs: 1000, verifyTls: true, sendResult: true, sendCurve: true, bufferEnabled: true, bufferRetryIntervalMs: 30000, bufferMaxAttempts: 0, streamPointsMode: 'full', streamPointsMax: 5000, includeRawStream: false, rawStreamMax: 1000 };
+const baseConfig: SplunkRuntimeConfig = { enabled: true, url: 'http://127.0.0.1/services/collector', token: 'token-for-test', index: 'machinedata_w16', source: 'LPC-528-01', sourcetype: '_json', site: 'W16', line: 'PWT', workplace: 'LPC-528-01', device: 'LPC-528-01', timeoutMs: 1000, verifyTls: true, sendResult: true, sendCurve: false, sendCurveSummary: true, curveSampleIntervalSec: 1, curveSampleMaxPoints: 120, bufferEnabled: true, bufferRetryIntervalMs: 30000, bufferMaxAttempts: 0, streamPointsMode: 'full', streamPointsMax: 5000, includeRawStream: false, rawStreamMax: 1000 };
 const servers: http.Server[] = [];
 
 afterEach(() => {

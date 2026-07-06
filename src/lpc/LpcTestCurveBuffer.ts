@@ -44,6 +44,12 @@ export function isValidCurvePoint(point: LpcCurvePoint | null | undefined): poin
   );
 }
 
+function pressureMbar(point: LpcCurvePoint): number | null {
+  if (Number.isFinite(point.pressureMbar)) return point.pressureMbar;
+  if (Number.isFinite(point.pressureBar)) return (point.pressureBar ?? 0) * 1000;
+  return null;
+}
+
 export class LpcTestCurveBuffer {
   private readonly maxPoints: number;
   private readonly minElapsedStepSec: number;
@@ -63,6 +69,7 @@ export class LpcTestCurveBuffer {
     if (point.elapsedTimeSec === null) return null;
     const curvePoint = this.toCurvePoint({ ...point, elapsedTimeSec: point.elapsedTimeSec });
     if (!isValidCurvePoint(curvePoint)) return null;
+    if (this.isSingleZeroPressureArtifact(curvePoint)) return null;
     this.fullStreamPoints.push(curvePoint);
 
     this.points.push(curvePoint);
@@ -73,6 +80,19 @@ export class LpcTestCurveBuffer {
     }
 
     return curvePoint;
+  }
+
+  private isSingleZeroPressureArtifact(point: LpcCurvePoint): boolean {
+    const currentPressureMbar = pressureMbar(point);
+    const previousPressureMbar = this.points.length > 0 ? pressureMbar(this.points[this.points.length - 1]) : null;
+    const elapsedDelta = this.lastStoredElapsedTimeSec === null ? null : point.elapsedTimeSec - this.lastStoredElapsedTimeSec;
+    return currentPressureMbar === 0
+      && previousPressureMbar !== null
+      && previousPressureMbar > 1000
+      && elapsedDelta !== null
+      && elapsedDelta >= 0
+      && elapsedDelta <= 0.25
+      && point.segment !== 'EXH';
   }
 
   private toCurvePoint(point: LpcStreamPoint & { elapsedTimeSec: number }): LpcCurvePoint {

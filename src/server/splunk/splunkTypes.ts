@@ -54,6 +54,9 @@ export interface SplunkRuntimeConfig {
   verifyTls: boolean;
   sendResult: boolean;
   sendCurve: boolean;
+  sendCurveSummary: boolean;
+  curveSampleIntervalSec: number;
+  curveSampleMaxPoints: number;
   bufferEnabled: boolean;
   bufferRetryIntervalMs: number;
   bufferMaxAttempts: number;

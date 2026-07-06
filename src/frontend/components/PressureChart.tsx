@@ -26,6 +26,7 @@ function buildTicks(min: number, max: number, count: number): number[] {
 
 function getSegmentDisplay(segment: string | null | undefined): string {
   const normalized = segment?.trim().toUpperCase();
+  if (normalized === 'STG') return 'Stabilizacja';
   if (normalized === 'DPT') return 'Pomiar właściwy';
   if (normalized === 'EXH') return 'Spuszczanie / wydech';
   return segment?.trim() || '-';
@@ -42,7 +43,10 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
   const hasLine = validPoints.length >= 2;
   const width = 930;
   const height = 420;
-  const plot = { left: 96, top: 36, right: 900, bottom: 326 };
+  const plot = { left: 96, top: 36, right: 830, bottom: 326 };
+  const rlPoints = validPoints
+    .map((point) => ({ ...point, leakValue: point.liveLeakValue ?? point.RL ?? null, leakUnit: point.liveLeakUnit ?? point.RL_unit ?? null }))
+    .filter((point): point is typeof point & { leakValue: number } => Number.isFinite(point.leakValue));
   const minX = validPoints.length ? Math.min(...validPoints.map((point) => point.elapsedTimeSec)) : 0;
   const maxX = validPoints.length ? Math.max(...validPoints.map((point) => point.elapsedTimeSec)) : 1;
   const rawMinY = validPoints.length ? Math.min(...validPoints.map((point) => point.pressureMbar)) : -1;
@@ -54,7 +58,15 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
   const yRange = maxY - minY || 1;
   const xScale = (x: number) => plot.left + ((x - minX) / xRange) * (plot.right - plot.left);
   const yScale = (y: number) => plot.bottom - ((y - minY) / yRange) * (plot.bottom - plot.top);
+  const rawMinRl = rlPoints.length ? Math.min(...rlPoints.map((point) => point.leakValue)) : 0;
+  const rawMaxRl = rlPoints.length ? Math.max(...rlPoints.map((point) => point.leakValue)) : 1;
+  const rlPadding = Math.max((rawMaxRl - rawMinRl) * 0.18, 0.5);
+  const minRl = rawMinRl - rlPadding;
+  const maxRl = rawMaxRl + rlPadding;
+  const rlRange = maxRl - minRl || 1;
+  const rlScale = (value: number) => plot.bottom - ((value - minRl) / rlRange) * (plot.bottom - plot.top);
   const polyline = validPoints.map((point) => `${xScale(point.elapsedTimeSec)},${yScale(point.pressureMbar)}`).join(' ');
+  const rlPolyline = rlPoints.map((point) => `${xScale(point.elapsedTimeSec)},${rlScale(point.leakValue)}`).join(' ');
   const finalPoint = validPoints.at(-1) ?? null;
   const latestLiveLeakPoint = [...points].reverse().find((point) => point.liveLeakValue !== null && point.liveLeakValue !== undefined) ?? null;
   const latestLiveLeakLabel = latestLiveLeakPoint
@@ -81,6 +93,7 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
     : 0;
   const xTicks = buildTicks(minX, maxX, 5);
   const yTicks = buildTicks(minY, maxY, 5);
+  const rlTicks = buildTicks(minRl, maxRl, 5);
   const phaseBadges = validPoints.reduce<Array<{ segment: string; label: string }>>((badges, point) => {
     if (!point.segment || badges.some((badge) => badge.segment === point.segment)) return badges;
     badges.push({ segment: point.segment, label: getSegmentDisplay(point.segment) });
@@ -97,6 +110,7 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
       <svg className="pressure-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Ciśnienie w czasie">
         <line className="chart-axis" x1={plot.left} y1={plot.bottom} x2={plot.right} y2={plot.bottom} />
         <line className="chart-axis" x1={plot.left} y1={plot.top} x2={plot.left} y2={plot.bottom} />
+        <line className="chart-axis chart-axis-rl" x1={plot.right} y1={plot.top} x2={plot.right} y2={plot.bottom} />
         {xTicks.map((tick) => (
           <g key={`x-${tick}`} className="chart-tick">
             <line x1={xScale(tick)} y1={plot.bottom} x2={xScale(tick)} y2={plot.bottom + 8} />
@@ -110,7 +124,19 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
             <line className="chart-grid" x1={plot.left} y1={yScale(tick)} x2={plot.right} y2={yScale(tick)} />
           </g>
         ))}
+        {rlTicks.map((tick) => (
+          <g key={`rl-${tick}`} className="chart-tick chart-tick-rl">
+            <line x1={plot.right} y1={rlScale(tick)} x2={plot.right + 8} y2={rlScale(tick)} />
+            <text x={plot.right + 12} y={rlScale(tick) + 5}>{formatNumber(tick, 2)}</text>
+          </g>
+        ))}
         {hasLine && <polyline className="chart-pressure-line" points={polyline} />}
+        {rlPoints.length >= 2 && <polyline className="chart-rl-line" points={rlPolyline} />}
+        {rlPoints.map((point) => (
+          <circle key={`rl-${point.elapsedTimeSec}-${point.leakValue}`} className="chart-rl-point" cx={xScale(point.elapsedTimeSec)} cy={rlScale(point.leakValue)} r="4">
+            <title>{`RL: ${formatMeasurement(point.leakValue, point.leakUnit, 3)}\nSegment: ${getSegmentDisplay(point.segment)}`}</title>
+          </circle>
+        ))}
         {validPoints.map((point) => {
           const leakValue = point.liveLeakValue ?? point.RL ?? null;
           const leakUnit = point.liveLeakUnit ?? point.RL_unit ?? null;
@@ -134,6 +160,7 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
         )}
         <text className="chart-label" x="430" y="382">Czas [s]</text>
         <text className="chart-label" x="80" y="26">Ciśnienie [mbar]</text>
+        <text className="chart-label chart-label-rl" x="806" y="26">RL [Pa/s]</text>
       </svg>
       {validPoints.length === 0 && <div className="chart-empty">Brak danych z testu</div>}
       {lastResult && !finalPoint && (
@@ -144,6 +171,7 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
       )}
       <div className="chart-legend">
         <span><i className="legend-line" /> linia ciśnienia</span>
+        <span><i className="legend-rl-line" /> RL [Pa/s]</span>
         <span><i className="legend-dot" /> punkt końcowy testu</span>
         <span><i className={`legend-result ${finalClass}`} /> wynik końcowy</span>
         {latestLiveLeakLabel && <span className="legend-live-rl">{latestLiveLeakPoint?.segment} {latestLiveLeakLabel}</span>}

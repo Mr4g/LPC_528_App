@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createSplunkRequestOptions, normalizeSplunkHecUrl, SplunkClient } from './splunkClient';
+import { cleanSplunkJsonPayload, createSplunkRequestOptions, normalizeSplunkHecUrl, SplunkClient } from './splunkClient';
 import type { SplunkHecEnvelope, SplunkRuntimeConfig } from './splunkTypes';
 
 const envelope: SplunkHecEnvelope = { time: 1710000000.123, index: 'machinedata_w16', source: 'LPC-528-01', sourcetype: '_json', event: { eventType: 'lpc_test_result' } };
@@ -32,6 +32,13 @@ function listen(handler: http.RequestListener): Promise<{ url: string; requests:
 }
 
 describe('SplunkClient', () => {
+  it('cleans JSON payload diacritics and invisible whitespace while keeping valid JSON', () => {
+    const raw = JSON.stringify({ message: 'Zażółć\tgęślą\njaźń Łódź', value: 11.686662 });
+    const cleaned = cleanSplunkJsonPayload(raw);
+    expect(cleaned).not.toMatch(/[ąćęłńóśżźŁ\t\r\n]/);
+    expect(JSON.parse(cleaned)).toMatchObject({ message: 'Zazolc gesla jazn Lodz', value: 11.686662 });
+  });
+
   it('normalizes HEC event endpoint', () => {
     expect(normalizeSplunkHecUrl('https://splunk:8088/services/collector')).toBe('https://splunk:8088/services/collector/event');
     expect(normalizeSplunkHecUrl('https://splunk:8088/services/collector/event')).toBe('https://splunk:8088/services/collector/event');

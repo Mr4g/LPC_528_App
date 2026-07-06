@@ -748,6 +748,31 @@ input:disabled {
   filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.32));
 }
 
+.pressure-chart .chart-rl-line {
+  fill: none;
+  stroke: #f472b6;
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 8px rgba(244, 114, 182, 0.28));
+}
+
+.pressure-chart .chart-rl-point {
+  fill: #f9a8d4;
+  stroke: rgba(15, 23, 42, 0.72);
+  stroke-width: 1.5;
+}
+
+.pressure-chart .chart-axis-rl,
+.pressure-chart .chart-tick-rl line {
+  stroke: #f472b6;
+}
+
+.pressure-chart .chart-tick-rl text,
+.pressure-chart .chart-label-rl {
+  fill: #fbcfe8;
+}
+
 .pressure-chart .chart-point {
   fill: #dbeafe;
   stroke: rgba(15, 23, 42, 0.72);
@@ -877,6 +902,7 @@ input:disabled {
 }
 
 .legend-line,
+.legend-rl-line,
 .legend-dot,
 .legend-result {
   display: inline-block;
@@ -887,6 +913,13 @@ input:disabled {
   height: 5px;
   border-radius: 999px;
   background: #38bdf8;
+}
+
+.legend-rl-line {
+  width: 32px;
+  height: 4px;
+  border-radius: 999px;
+  background: #f472b6;
 }
 
 .legend-dot {

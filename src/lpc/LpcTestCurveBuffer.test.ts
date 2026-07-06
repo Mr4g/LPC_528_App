@@ -33,14 +33,14 @@ describe('LpcTestCurveBuffer', () => {
     ]);
   });
 
-  it('samples by minimum elapsed step', () => {
+  it('keeps every valid pressure point even when elapsed steps are close', () => {
     const buffer = new LpcTestCurveBuffer({ minElapsedStepSec: 0.1 });
 
     buffer.addStreamPoint(streamPoint(1.0));
     buffer.addStreamPoint(streamPoint(1.05));
     buffer.addStreamPoint(streamPoint(1.1));
 
-    expect(buffer.getPoints()).toHaveLength(2);
+    expect(buffer.getPoints()).toHaveLength(3);
     expect(buffer.getFullStreamPoints()).toHaveLength(3);
   });
 

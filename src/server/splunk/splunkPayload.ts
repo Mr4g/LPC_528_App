@@ -144,7 +144,12 @@ function measurementItems(result: SplunkResultContext['result']) {
 }
 
 function fields(config: SplunkRuntimeConfig) {
-  return Object.fromEntries(Object.entries({ site: config.site, line: config.line, workplace: config.workplace, device: config.device, workplaceName: config.workplace, isMachine: 'true', hostname: os.hostname() }).filter(([, value]) => value !== null && value !== '')) as Record<string, string>;
+  return Object.fromEntries(Object.entries({ site: config.site, line: config.line, workplace: config.workplace, device: config.device, workplaceName: config.workplace, isMachine: 'true', hostname: os.hostname(), app: 'lpc-528-app' }).filter(([, value]) => value !== null && value !== '')) as Record<string, string>;
+}
+
+function buildEventCounts(points: LpcCurvePoint[]) {
+  const valid = sanitizeCurvePoints(points);
+  return { curvePointCount: valid.length, dptPointCount: valid.filter((point) => point.segment === 'DPT' && Number.isFinite(point.liveLeakValue ?? point.RL)).length };
 }
 
 export function buildSplunkResultEnvelope(config: SplunkRuntimeConfig, context: SplunkResultContext): SplunkHecEnvelope {
@@ -155,92 +160,127 @@ export function buildSplunkResultEnvelope(config: SplunkRuntimeConfig, context: 
   const programText = result.currentTestProgramText ?? result.programText ?? result.program;
   const programNumber = result.currentTestProgram ?? (programText?.startsWith('P') ? Number(programText.slice(1)) : null);
   const matchedKey = result.currentTestBarcode ?? result.barcode;
-  const validContextPoints = sanitizeCurvePoints(context.curvePoints);
-  const selected = pickPoints(context.curvePoints, config);
-  const curves = buildCurves(selected.points);
-  const curve = buildNestedCurve(selected.points);
-  const fullSummary = buildSummary(validContextPoints);
-  const process = buildProcess(validContextPoints);
   const operatorLogin = result.operatorLogin ?? session?.operatorLogin ?? null;
   const status = resultStatus(result.result);
-  const items = measurementItems(result);
-  const mainMeasurement = result.leakType ? { name: result.leakType, value: result.leakValue, unit: result.leakUnit, text: leakText(result.leakValue, result.leakUnit)?.replace(',', '.') ?? null } : null;
-  const rawStream = validContextPoints.map((point) => point.raw).filter((line): line is string => Boolean(line));
-  const raw: Record<string, unknown> = { resultLine: result.raw, resultNormalized: result.normalized, streamFirstLine: rawStream[0] ?? null, streamLastLine: rawStream.at(-1) ?? null, streamLineCount: rawStream.length };
-  if (config.includeRawStream) raw.streamLines = rawStream.slice(0, config.rawStreamMax);
-  const contextBlock = { site: config.site, line: config.line, workplace: config.workplace, device: config.device };
-  const lpc = { resultFrameFormat: result.resultFrameFormat ?? context.config.LPC_RESULT_FRAME_FORMAT, messageId: result.lpcMessageId ?? result.messageId, messageType: result.lpcMessageType ?? result.messageType, channel: result.lpcChannel ?? result.channel, channelNumber: result.lpcChannelNumber ?? null, program: result.lpcProgram ?? programNumber, programText: result.lpcProgramText ?? programText, testerTime: result.lpcTesterTime ?? result.testerTime, testerDate: result.lpcTesterDate ?? result.testerDate, uniqueId: result.lpcUniqueId ?? result.uniqueId, programEvaluation: result.lpcProgramEvaluation ?? result.programEvaluation, testType: result.testType, testEvaluation: result.testEvaluation, spcFlag: result.lpcSpcFlag ?? result.spcFlag, allResultInformation: result.lpcAllResultInformation ?? result.resultDetailsRaw ?? null };
-  const resultBlock = { status, rawStatus: result.resultRawStatus ?? result.result, value: result.value ?? result.result, errorCode: result.errorCode ?? null, errorMessage: result.errorMessage ?? null, leak: mainMeasurement === null ? null : { type: mainMeasurement.name, value: mainMeasurement.value, unit: mainMeasurement.unit, text: mainMeasurement.text }, measurements: items, programEvaluation: lpc.programEvaluation, testType: result.testType, testEvaluation: result.testEvaluation, spcFlag: lpc.spcFlag, isOk: status === 'OK', isNok: status === 'NOK', isError: status === 'ERROR', lpc };
+  const { curvePointCount, dptPointCount } = buildEventCounts(context.curvePoints);
 
-  return { time: unixTime(endedAt), sourcetype: config.sourcetype, index: config.index, source: config.source, event: {
-    eventType: 'lpc_test_result', schemaVersion: 2, name: 'LPC.TestFinished', app: 'lpc-528-app', site: config.site, line: config.line, workplace: config.workplace, device: config.device,
-    context: contextBlock,
-    station: { site: config.site, line: config.line, workplace: config.workplace, device: config.device, source: config.source },
-    test: { id: session?.activeTestId ?? null, barcode: result.barcode, matchedKey, programNumber, programText, startedAt, endedAt, durationMs: ms, durationSec: ms === null ? null : ms / 1000, status: status === 'ERROR' ? 'error' : 'completed', activeTestEndReason: 'final_result', resultFrameFormat: result.resultFrameFormat ?? context.config.LPC_RESULT_FRAME_FORMAT },
-    operator: { id: session?.operatorUserId ?? operatorLogin, login: operatorLogin, role: result.operatorRole ?? null },
-    product: { barcode: result.barcode, matchedKey },
-    program: { number: programNumber, text: programText },
-    result: resultBlock,
-    lpc,
-    curve,
-    measurements: { main: mainMeasurement, items }, process, curves, summary: fullSummary, raw,
-    diagnostics: { splunkPayloadSchemaVersion: 2, bufferedStreamPoints: validContextPoints.length, sentStreamPoints: selected.points.length, streamPointsMode: config.streamPointsMode, truncated: selected.truncated, truncatedReason: selected.reason, parserWarnings: [] },
-    testId: session?.activeTestId ?? null, startedAt, endedAt, durationMs: ms, operatorLogin, operatorId: operatorLogin, barcode: result.barcode, matchedKey, programNumber, programText, resultStatus: status, resultRawStatus: result.resultRawStatus ?? result.result, leakValue: result.leakValue, leakUnit: result.leakUnit, leakText: leakText(result.leakValue, result.leakUnit), curvePointCount: curves.pointCount, curveUnit: result.leakUnit, curvePoints: legacyCurvePoints(selected.points), lpcResultFrameFormat: result.resultFrameFormat ?? 1, lpcMessageId: result.lpcMessageId ?? result.messageId, lpcMessageType: result.lpcMessageType ?? result.messageType, lpcChannel: result.lpcChannel ?? result.channel, lpcProgram: result.lpcProgram ?? programNumber, lpcProgramText: result.lpcProgramText ?? programText, lpcTesterTime: result.lpcTesterTime ?? result.testerTime, lpcTesterDate: result.lpcTesterDate ?? result.testerDate, lpcUniqueId: result.lpcUniqueId ?? result.uniqueId, lpcProgramEvaluation: result.lpcProgramEvaluation ?? result.programEvaluation, lpcSpcFlag: result.lpcSpcFlag ?? result.spcFlag, lpcAllResultInformation: result.lpcAllResultInformation ?? null, RL: result.RL, RL_unit: result.RL_unit, Pt: result.Pt, Pt_unit: result.Pt_unit, EDC: result.EDC, EDC_unit: result.EDC_unit, PL: result.PL, PL_unit: result.PL_unit, LLR: result.LLR, LLR_unit: result.LLR_unit, HLR: result.HLR, HLR_unit: result.HLR_unit, FPR: result.FPR, FPR_unit: result.FPR_unit, errorCode: result.errorCode ?? null, errorMessage: result.errorMessage ?? null,
-  }, fields: fields(config) };
-}
-
-export function buildSplunkErrorEnvelope(config: SplunkRuntimeConfig, context: SplunkErrorContext): SplunkHecEnvelope {
-  const endedAt = context.session.completedAt ?? context.session.timeoutAt ?? new Date().toISOString();
-  const startedAt = context.session.startedAt;
-  const ms = durationMs(startedAt, endedAt);
-  const selected = pickPoints(context.curvePoints, config);
-  const curves = buildCurves(selected.points);
-  const curve = buildNestedCurve(selected.points);
-  const contextBlock = { site: config.site, line: config.line, workplace: config.workplace, device: config.device };
-  const operatorLogin = context.session.operatorLogin ?? null;
   return {
     time: unixTime(endedAt),
     sourcetype: config.sourcetype,
     index: config.index,
     source: config.source,
     event: {
-      eventType: 'lpc_test_result',
-      schemaVersion: 2,
       name: 'LPC.TestFinished',
-      app: 'lpc-528-app',
-      context: contextBlock,
-      station: { ...contextBlock, source: config.source },
-      test: { id: context.session.activeTestId, barcode: context.session.barcode, matchedKey: context.session.barcode, programNumber: context.session.programNumber, programText: context.session.programText, startedAt, endedAt, durationMs: ms, durationSec: ms === null ? null : ms / 1000, status: 'error', activeTestEndReason: context.reason, resultFrameFormat: context.config.LPC_RESULT_FRAME_FORMAT },
-      operator: { id: context.session.operatorUserId ?? operatorLogin, login: operatorLogin, role: null },
-      product: { barcode: context.session.barcode, matchedKey: context.session.barcode },
-      program: { number: context.session.programNumber, text: context.session.programText },
-      result: { status: 'ERROR', rawStatus: context.reason, value: 'ERROR', errorCode: context.reason, errorMessage: context.message, leak: null, measurements: {}, isOk: false, isNok: false, isError: true },
-      lpc: { resultFrameFormat: context.config.LPC_RESULT_FRAME_FORMAT, messageId: null, messageType: null, channel: null, channelNumber: null, program: context.session.programNumber, programText: context.session.programText, testerTime: null, testerDate: null, uniqueId: null, programEvaluation: null, testType: null, testEvaluation: null, spcFlag: null, allResultInformation: null },
-      curve,
-      measurements: { main: null, items: {} },
-      process: buildProcess(sanitizeCurvePoints(context.curvePoints)),
-      curves,
-      summary: buildSummary(sanitizeCurvePoints(context.curvePoints)),
-      raw: { resultLine: null, resultNormalized: null, streamFirstLine: null, streamLastLine: null, streamLineCount: sanitizeCurvePoints(context.curvePoints).length },
-      diagnostics: { splunkPayloadSchemaVersion: 2, bufferedStreamPoints: sanitizeCurvePoints(context.curvePoints).length, sentStreamPoints: selected.points.length, streamPointsMode: config.streamPointsMode, truncated: selected.truncated, truncatedReason: selected.reason, parserWarnings: [] },
-      testId: context.session.activeTestId,
+      eventType: 'lpc_test_result',
+      resultStatus: status,
+      result: result.value ?? result.result,
+      resultRawStatus: result.resultRawStatus ?? result.result,
+      barcode: result.barcode,
+      matchedKey,
+      programNumber,
+      programText,
+      operatorLogin,
+      operatorId: operatorLogin,
+      testId: session?.activeTestId ?? null,
       startedAt,
       endedAt,
       durationMs: ms,
-      operatorLogin,
-      operatorId: operatorLogin,
+      leakType: result.leakType,
+      leakValue: result.leakValue,
+      leakUnit: result.leakUnit,
+      leakText: leakText(result.leakValue, result.leakUnit),
+      lpcMessageId: result.lpcMessageId ?? result.messageId,
+      lpcMessageType: result.lpcMessageType ?? result.messageType,
+      lpcChannel: result.lpcChannel ?? result.channel,
+      lpcProgram: result.lpcProgram ?? programNumber,
+      lpcProgramText: result.lpcProgramText ?? programText,
+      lpcTesterTime: result.lpcTesterTime ?? result.testerTime,
+      lpcTesterDate: result.lpcTesterDate ?? result.testerDate,
+      lpcUniqueId: result.lpcUniqueId ?? result.uniqueId,
+      lpcProgramEvaluation: result.lpcProgramEvaluation ?? result.programEvaluation,
+      lpcTestType: result.testType,
+      lpcTestEvaluation: result.testEvaluation,
+      lpcSpcFlag: result.lpcSpcFlag ?? result.spcFlag,
+      RL: result.RL,
+      RL_unit: result.RL_unit,
+      Pt: result.Pt,
+      Pt_unit: result.Pt_unit,
+      EDC: result.EDC,
+      EDC_unit: result.EDC_unit,
+      PL: result.PL,
+      PL_unit: result.PL_unit,
+      LLR: result.LLR,
+      LLR_unit: result.LLR_unit,
+      HLR: result.HLR,
+      HLR_unit: result.HLR_unit,
+      FPR: result.FPR,
+      FPR_unit: result.FPR_unit,
+      curvePointCount,
+      dptPointCount,
+      errorCode: result.errorCode ?? null,
+      errorMessage: result.errorMessage ?? null,
+    },
+    fields: fields(config),
+  };
+}
+
+export function buildSplunkErrorEnvelope(config: SplunkRuntimeConfig, context: SplunkErrorContext): SplunkHecEnvelope {
+  const endedAt = context.session.completedAt ?? context.session.timeoutAt ?? new Date().toISOString();
+  const ms = durationMs(context.session.startedAt, endedAt);
+  const { curvePointCount, dptPointCount } = buildEventCounts(context.curvePoints);
+  return {
+    time: unixTime(endedAt),
+    sourcetype: config.sourcetype,
+    index: config.index,
+    source: config.source,
+    event: {
+      name: 'LPC.TestFinished',
+      eventType: 'lpc_test_result',
+      resultStatus: 'ERROR',
+      result: 'ERROR',
+      resultRawStatus: context.reason,
       barcode: context.session.barcode,
       matchedKey: context.session.barcode,
       programNumber: context.session.programNumber,
       programText: context.session.programText,
-      resultStatus: 'ERROR',
-      resultRawStatus: context.reason,
+      operatorLogin: context.session.operatorLogin ?? null,
+      operatorId: context.session.operatorLogin ?? null,
+      testId: context.session.activeTestId,
+      startedAt: context.session.startedAt,
+      endedAt,
+      durationMs: ms,
+      leakType: null,
       leakValue: null,
       leakUnit: null,
       leakText: null,
-      curvePointCount: curve.pointCount,
-      curveUnit: null,
-      curvePoints: legacyCurvePoints(selected.points),
+      lpcMessageId: null,
+      lpcMessageType: null,
+      lpcChannel: null,
+      lpcProgram: context.session.programNumber,
+      lpcProgramText: context.session.programText,
+      lpcTesterTime: null,
+      lpcTesterDate: null,
+      lpcUniqueId: null,
+      lpcProgramEvaluation: null,
+      lpcTestType: null,
+      lpcTestEvaluation: null,
+      lpcSpcFlag: null,
+      RL: null,
+      RL_unit: null,
+      Pt: null,
+      Pt_unit: null,
+      EDC: null,
+      EDC_unit: null,
+      PL: null,
+      PL_unit: null,
+      LLR: null,
+      LLR_unit: null,
+      HLR: null,
+      HLR_unit: null,
+      FPR: null,
+      FPR_unit: null,
+      curvePointCount,
+      dptPointCount,
       errorCode: context.reason,
       errorMessage: context.message,
     },

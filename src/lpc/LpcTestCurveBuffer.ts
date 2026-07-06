@@ -65,8 +65,6 @@ export class LpcTestCurveBuffer {
     if (!isValidCurvePoint(curvePoint)) return null;
     this.fullStreamPoints.push(curvePoint);
 
-    if (this.lastStoredElapsedTimeSec !== null && point.elapsedTimeSec - this.lastStoredElapsedTimeSec < this.minElapsedStepSec) return null;
-
     this.points.push(curvePoint);
     this.lastStoredElapsedTimeSec = point.elapsedTimeSec;
 

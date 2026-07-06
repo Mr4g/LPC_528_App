@@ -72,16 +72,16 @@ describe('LpcLineProcessor', () => {
     expect(emitted.find((item) => item.event === 'lpc:stream')?.payload).toMatchObject({ segment: 'DPT', pressureMbar: 5990.978, liveLeakValue: 3.788533, liveLeakUnit: 'Pa/s' });
   });
 
-  it('does not emit curve-updated when parsed stream did not add a valid curve point', () => {
+  it('emits curve-updated for every valid pressure point even when elapsed steps are close', () => {
     const sampledCurveBuffer = new LpcTestCurveBuffer({ minElapsedStepSec: 1 });
     const { processor, emitted } = createProcessor({ curveBuffer: sampledCurveBuffer });
 
     processor.processLine('9369034 S C01,P01,PRF,ET 5.20 sec,T 19.80 sec,P 1.00000 bar');
     processor.processLine('9369035 S C01,P01,PRF,ET 5.25 sec,T 19.75 sec,P 1.10000 bar');
 
-    expect(sampledCurveBuffer.getPoints()).toHaveLength(1);
+    expect(sampledCurveBuffer.getPoints()).toHaveLength(2);
     expect(emitted.filter((item) => item.event === 'lpc:stream')).toHaveLength(2);
-    expect(emitted.filter((item) => item.event === 'lpc:curve-updated')).toHaveLength(1);
+    expect(emitted.filter((item) => item.event === 'lpc:curve-updated')).toHaveLength(2);
   });
 
   it('recognizes result, stores it and emits completion events', () => {

@@ -1622,7 +1622,7 @@ function App() {
 
 
   function canShowLlControlAction(result: EnrichedLpcResult | null): boolean {
-    const visible = Boolean(result && authUser && result.barcode && !testSession?.locked && ['NOK', 'REJECT', 'UNKNOWN'].includes(String(result.result).toUpperCase()));
+    const visible = Boolean(result && authUser?.role === 'operator' && result.barcode && !testSession?.locked && ['NOK', 'REJECT', 'UNKNOWN'].includes(String(result.result).toUpperCase()));
     console.debug(`[LL_CONTROL_UI] visible=${visible} reason=${result?.result ?? 'none'} barcode=${result?.barcode ?? '-'}`);
     return visible;
   }
@@ -2001,17 +2001,15 @@ function App() {
 
         <aside className="panel result-column">
           <LastResultPanel result={lastResult} llControlAction={{ visible: canShowLlControlAction(lastResult), loading: llFlagging, message: llFlagMessage, onClick: () => void flagLastResultForLl() }} />
-          {isManager(authUser) && (
+          {isManager(authUser) && openLlFlags.length > 0 && (
             <section className="ll-open-panel compact">
               <div className="panel-header"><span>Oczekujące kontrole LL</span></div>
-              {openLlFlags.length === 0 ? <p className="empty-state">Brak oczekujących kontroli LL</p> : (
-                <div className="ll-open-table results-table" aria-label="Skrócona lista kontroli LL">
-                  <div className="ll-open-row ll-open-row-header"><span>Barcode</span><span>Program</span><span>Wynik</span><span>Od kiedy</span><span>Oznaczył</span></div>
-                  {openLlFlags.slice(0, 2).map((flag) => (
-                    <div className="ll-open-row compact" key={flag.id}><strong>{flag.barcode}</strong><span>{flag.createdFromProgramText ?? '-'}</span><span>{flag.createdFromResultStatus ?? 'OPEN'}</span><span>{formatDateTime(flag.createdAt)}</span><span>{flag.createdByLogin ?? '-'}</span></div>
-                  ))}
-                </div>
-              )}
+              <div className="ll-open-table results-table" aria-label="Skrócona lista kontroli LL">
+                <div className="ll-open-row ll-open-row-header"><span>Barcode</span><span>Program</span><span>Wynik</span><span>Od kiedy</span><span>Oznaczył</span></div>
+                {openLlFlags.slice(0, 2).map((flag) => (
+                  <div className="ll-open-row compact" key={flag.id}><strong>{flag.barcode}</strong><span>{flag.createdFromProgramText ?? '-'}</span><span>{flag.createdFromResultStatus ?? 'OPEN'}</span><span>{formatDateTime(flag.createdAt)}</span><span>{flag.createdByLogin ?? '-'}</span></div>
+                ))}
+              </div>
               {openLlFlags.length > 2 && <button type="button" className="results-cta ll-full-list-button" onClick={() => void openLlControlsModal()}><strong>Pełna lista</strong><span>{openLlFlags.length} oczekujących kontroli</span></button>}
             </section>
           )}

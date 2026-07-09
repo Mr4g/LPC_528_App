@@ -195,7 +195,7 @@ input:disabled {
   box-sizing: border-box;
 }
 .scan-form input {
-  min-height: 76px;
+  min-height: 62px;
   padding: 0 24px;
   color: #0f172a;
   background: #f8fafc;
@@ -212,7 +212,7 @@ input:disabled {
   opacity: 1;
 }
 .scan-form button {
-  min-height: 76px;
+  min-height: 62px;
   color: #052e2b;
   background: #5eead4;
   font-size: clamp(24px, 2vw, 34px);
@@ -1606,7 +1606,7 @@ body.theme-dark .users-table-wrap td {
 }
 
 .results-cta strong {
-  font-size: clamp(20px, 1.4vw, 28px);
+  font-size: clamp(18px, 1.18vw, 24px);
   line-height: 1;
 }
 
@@ -2432,8 +2432,21 @@ body.theme-dark .login-info-message {
 .chart-quality-action span { font-size: 0.84rem; font-weight: 700; opacity: .9; }
 .chart-quality-action small { font-size: 0.78rem; color: #f59e0b; font-weight: 700; }
 .ll-control-button.compact { min-height: 40px; padding: 0.55rem 0.85rem; font-size: 0.9rem; }
+
+.result-column {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 12px;
+}
+.result-column .results-preview {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .ll-open-panel.compact {
-  margin-top: 0.75rem;
+  margin-top: 0;
   border: 1px solid var(--border);
   border-radius: 22px;
   background: var(--surface-muted);
@@ -2451,7 +2464,7 @@ body.theme-dark .login-info-message {
 }
 .last-result-ll-action .ll-control-button.compact.horizontal {
   width: 100%;
-  min-height: 76px;
+  min-height: 62px;
   border: 1px solid color-mix(in srgb, var(--status-warning) 70%, var(--border));
   border-radius: 22px;
   background: linear-gradient(135deg, #f59e0b, #ea580c);
@@ -2459,18 +2472,18 @@ body.theme-dark .login-info-message {
   display: grid;
   align-content: center;
   justify-items: start;
-  gap: 5px;
-  padding: 16px 20px;
+  gap: 3px;
+  padding: 12px 18px;
   box-shadow: 0 18px 44px rgba(245, 158, 11, 0.22);
   text-align: left;
 }
 .last-result-ll-action .ll-control-button.compact.horizontal strong {
-  font-size: clamp(20px, 1.4vw, 28px);
+  font-size: clamp(18px, 1.18vw, 24px);
   line-height: 1;
 }
 .last-result-ll-action .ll-control-button.compact.horizontal small,
 .last-result-ll-action .ll-control-status {
-  font-size: .96rem;
+  font-size: .84rem;
   font-weight: 800;
   opacity: .86;
   line-height: 1.15;

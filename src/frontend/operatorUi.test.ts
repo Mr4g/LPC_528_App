@@ -66,6 +66,11 @@ describe('LL control ergonomic UI layout', () => {
     expect(mainSource).toContain('payload.llControl?.resolvedByThisTest');
   });
 
+  it('shows the inline LL button only for operators and hides empty manager LL panel', () => {
+    expect(mainSource).toContain("authUser?.role === 'operator'");
+    expect(mainSource).toContain('isManager(authUser) && openLlFlags.length > 0');
+  });
+
   it('renders a polished block modal for operator LL-control stops', () => {
     expect(mainSource).toContain('ll-block-modal');
     expect(mainSource).toContain('Wymagana kontrola LL');

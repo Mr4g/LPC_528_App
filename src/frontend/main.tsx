@@ -126,6 +126,7 @@ interface EnrichedLpcResult extends LpcResult {
   currentTestProgramText?: string;
   currentTestSelectedAt?: string;
   cachedLimitsAtStart?: ProgramLimitSnapshot | null;
+  llControl?: { resolvedByThisTest?: boolean };
 }
 
 type SocketHandler<TPayload> = (payload: TPayload) => void;
@@ -1023,7 +1024,6 @@ function App() {
   const [openLlFlags, setOpenLlFlags] = useState<LlControlFlag[]>([]);
   const [llListModalOpen, setLlListModalOpen] = useState(false);
   const [masterSampleStatus, setMasterSampleStatus] = useState<MasterSampleStatus>({ enabled: false });
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [eventCounters, setEventCounters] = useState({
     streamEvents: 0,
     resultEvents: 0,
@@ -1214,7 +1214,11 @@ function App() {
     if (nextStatus) setLpcStatus(nextStatus);
   }
 
-  async function refreshOpenLlFlags() { if (isManager(authUser)) setOpenLlFlags(await fetchOpenLlFlags()); }
+  async function refreshOpenLlFlags(): Promise<LlControlFlag[]> {
+    const flags = await fetchOpenLlFlags();
+    setOpenLlFlags(flags);
+    return flags;
+  }
 
   async function refreshSplunkStatus() {
     const nextStatus = await fetchSplunkStatus();
@@ -1420,6 +1424,7 @@ function App() {
         setFinalMarkerResult(buildFinalMarker(payload, getLastKnownCurvePoint()));
         setResultHistory((results) => mergeResultIntoHistory(results, payload, 50));
         void refreshSplunkStatus();
+        if (payload.llControl?.resolvedByThisTest) void refreshOpenLlFlags();
         focusBarcodeInput(180);
       });
 
@@ -1455,7 +1460,7 @@ function App() {
         setResultHistory((results) => mergeResultIntoHistory(results, payload, 50));
         void refreshSplunkStatus();
         focusBarcodeInput(220);
-        void refreshOpenLlFlags();
+        if (payload.llControl?.resolvedByThisTest) void refreshOpenLlFlags();
       });
 
       socket.on('master-sample:updated', setMasterSampleStatus);
@@ -1608,7 +1613,11 @@ function App() {
     console.debug(`[LL_CONTROL_UI] response ok=${response.ok} created=${payload.created ?? false} existing=${payload.existing ?? false}`);
     setLlFlagging(false);
     setLlFlagMessage(response.ok ? (payload.existing ? 'Sztuka już oczekuje na kontrolę LL' : 'Oznaczono do kontroli LL') : (payload.message ?? 'Nie udało się oznaczyć kontroli LL.'));
-    await refreshOpenLlFlags();
+    if (response.ok) {
+      console.debug('[LL_CONTROL_UI] flag created, refreshing open list');
+      const flags = await refreshOpenLlFlags();
+      console.debug(`[LL_CONTROL_UI] open list refreshed count=${flags.length}`);
+    }
   }
 
 
@@ -1631,8 +1640,6 @@ function App() {
     if (response.ok) {
       const next = await response.json() as MasterSampleStatus;
       setMasterSampleStatus(next);
-      setToastMessage(next.enabled ? 'Test wzorcowy aktywny' : 'Test wzorcowy wyłączony');
-      window.setTimeout(() => setToastMessage(null), 3500);
     }
     setUserMenuOpen(false);
     focusBarcodeInput(120);
@@ -1841,8 +1848,6 @@ function App() {
           </button>
         </div>
         <div className="top-bar-actions">
-          {masterSampleStatus.enabled && <div className="master-sample-badge"><strong>TEST WZORCOWY AKTYWNY</strong><small>Po wyniku OK zostaną wydrukowane 2 etykiety. LL: {masterSampleStatus.requestedByLogin ?? '-'}</small></div>}
-          {toastMessage && <div className="toast-message">{toastMessage}</div>}
           <div className={`connection-badge ${connectionClass}`}>
             <span className="connection-dot" />
             <div>
@@ -1972,7 +1977,7 @@ function App() {
           )}
         </aside>
 
-        <section className="panel live-panel">
+        <section className={`panel live-panel${masterSampleStatus.enabled ? ' live-panel--master-sample' : ''}`}>
           <div className="panel-header">
             <span>Live test</span>
             <strong>{lastStream ? liveSegment : 'Oczekiwanie na dane LPC'}</strong>
@@ -1997,8 +2002,16 @@ function App() {
         <aside className="panel result-column">
           <LastResultPanel result={lastResult} llControlAction={{ visible: canShowLlControlAction(lastResult), loading: llFlagging, message: llFlagMessage, onClick: () => void flagLastResultForLl() }} />
           {isManager(authUser) && (
-            <section className="ll-open-panel compact"><div className="panel-header"><span>Oczekujące kontrole LL</span><button type="button" onClick={() => void refreshOpenLlFlags()}>Odśwież</button></div>
-              {openLlFlags.length === 0 ? <p className="empty-state">Brak oczekujących kontroli LL</p> : openLlFlags.slice(0, 2).map((flag) => <div className="ll-open-row compact" key={flag.id}><strong>{flag.barcode}</strong><span>{flag.createdAt}</span><span>Program: {flag.createdFromProgramText ?? '-'}</span><span>{flag.createdByLogin ?? '-'} · OPEN</span></div>)}
+            <section className="ll-open-panel compact">
+              <div className="panel-header"><span>Oczekujące kontrole LL</span></div>
+              {openLlFlags.length === 0 ? <p className="empty-state">Brak oczekujących kontroli LL</p> : (
+                <div className="ll-open-table results-table" aria-label="Skrócona lista kontroli LL">
+                  <div className="ll-open-row ll-open-row-header"><span>Barcode</span><span>Program</span><span>Wynik</span><span>Od kiedy</span><span>Oznaczył</span></div>
+                  {openLlFlags.slice(0, 2).map((flag) => (
+                    <div className="ll-open-row compact" key={flag.id}><strong>{flag.barcode}</strong><span>{flag.createdFromProgramText ?? '-'}</span><span>{flag.createdFromResultStatus ?? 'OPEN'}</span><span>{formatDateTime(flag.createdAt)}</span><span>{flag.createdByLogin ?? '-'}</span></div>
+                  ))}
+                </div>
+              )}
               {openLlFlags.length > 2 && <button type="button" className="results-cta ll-full-list-button" onClick={() => void openLlControlsModal()}><strong>Pełna lista</strong><span>{openLlFlags.length} oczekujących kontroli</span></button>}
             </section>
           )}
@@ -2023,18 +2036,23 @@ function App() {
         }}>
           <section className="app-modal ll-list-modal" role="dialog" aria-modal="true" aria-label="Oczekujące kontrole LL">
             <header className="modal-header"><div><span className="eyebrow">Kontrola LL</span><h2>Oczekujące kontrole LL</h2></div><button type="button" className="modal-close" onClick={() => setLlListModalOpen(false)}>×</button></header>
-            <div className="ll-modal-list">
-              {openLlFlags.length === 0 ? <p className="empty-state">Brak oczekujących kontroli LL</p> : openLlFlags.map((flag) => (
-                <article className="ll-modal-row" key={flag.id}>
-                  <strong>{flag.barcode}</strong><span>{flag.createdAt}</span><span>{flag.createdByLogin ?? '-'} / {flag.createdByRole ?? '-'}</span><span>{flag.createdFromProgramText ?? '-'} · {flag.createdFromResultStatus ?? '-'}</span><span>{formatMeasurement(flag.createdFromLeakValue, flag.createdFromLeakUnit, 3)}</span><small>{flag.createdFromUniqueId ?? '-'}</small>
-                </article>
-              ))}
+            <div className="ll-modal-list results-table">
+              {openLlFlags.length === 0 ? <p className="empty-state">Brak oczekujących kontroli LL</p> : (
+                <>
+                  <div className="ll-modal-row ll-modal-row-header"><span>Barcode</span><span>Program</span><span>Wynik</span><span>RL</span><span>UniqueId</span><span>Oznaczył</span><span>Data</span></div>
+                  {openLlFlags.map((flag) => (
+                    <div className="ll-modal-row" key={flag.id}>
+                      <strong>{flag.barcode}</strong><span>{flag.createdFromProgramText ?? '-'}</span><span>{flag.createdFromResultStatus ?? '-'}</span><span>{formatMeasurement(flag.createdFromLeakValue, flag.createdFromLeakUnit, 3)}</span><small>{flag.createdFromUniqueId ?? '-'}</small><span>{flag.createdByLogin ?? '-'} / {flag.createdByRole ?? '-'}</span><span>{formatDateTime(flag.createdAt)}</span>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
           </section>
         </div>
       )}
 
-      {llModal && (<div className="app-modal-backdrop" role="presentation"><section className="app-modal" role="dialog" aria-modal="true"><header className="modal-header"><div><span className="eyebrow">Kontrola LL</span><h2>Wymagana kontrola LL</h2></div></header><p>{llModal}</p><button type="button" className="scan-submit" onClick={() => { setLlModal(null); setBarcode(''); focusBarcodeInput(100); }}>OK</button></section></div>)}
+      {llModal && (<div className="app-modal-backdrop ll-block-backdrop" role="presentation"><section className="app-modal ll-block-modal" role="dialog" aria-modal="true" aria-labelledby="ll-block-title"><div className="ll-block-icon" aria-hidden="true">!</div><header className="modal-header"><div><span className="eyebrow">Kontrola LL</span><h2 id="ll-block-title">Wymagana kontrola LL</h2></div></header><p>Ta sztuka wymaga kontroli lidera linii. Zaloguj LL, aby wykonać test.</p><small>{llModal}</small><button type="button" className="scan-submit" onClick={() => { setLlModal(null); setBarcode(''); focusBarcodeInput(100); }}>OK</button></section></div>)}
 
       {resultsOpen && (
         <div className="app-modal-backdrop" role="presentation" onMouseDown={(event) => {

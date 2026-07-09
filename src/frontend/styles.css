@@ -2424,10 +2424,6 @@ body.theme-dark .login-info-message {
 .ll-control-button:disabled { opacity: 0.75; cursor: wait; }
 .ll-open-panel { margin-top: 1rem; }
 .ll-open-row { display: grid; gap: 0.25rem; padding: 0.65rem; border-top: 1px solid var(--border-color, #334155); font-size: 0.85rem; }
-.master-sample-badge { border: 2px solid #f59e0b; background: rgba(245, 158, 11, 0.16); color: var(--text-color, #f8fafc); border-radius: 14px; padding: 0.45rem 0.7rem; display: grid; gap: 0.1rem; min-width: 220px; }
-.master-sample-badge strong { font-size: 0.82rem; letter-spacing: 0.04em; }
-.master-sample-badge small { font-size: 0.72rem; opacity: 0.9; }
-.toast-message { position: fixed; right: 1rem; bottom: 1rem; z-index: 20; background: #0f172a; color: white; border: 1px solid #38bdf8; border-radius: 12px; padding: 0.75rem 1rem; box-shadow: 0 12px 30px rgba(0,0,0,.25); }
 .chart-hlr-limit line { stroke: #ef4444; stroke-width: 2.5; }
 .chart-hlr-limit text { fill: #ef4444; font-size: 14px; font-weight: 800; }
 .legend-hlr-line { display: inline-block; width: 28px; border-top: 3px dashed #ef4444; transform: translateY(-3px); }
@@ -2437,12 +2433,87 @@ body.theme-dark .login-info-message {
 .chart-quality-action small { font-size: 0.78rem; color: #f59e0b; font-weight: 700; }
 .ll-control-button.compact { min-height: 40px; padding: 0.55rem 0.85rem; font-size: 0.9rem; }
 .ll-open-panel.compact { margin-top: .75rem; }
-.ll-open-row.compact { grid-template-columns: 1fr; gap: .15rem; padding: .5rem .6rem; font-size: .78rem; }
 .ll-full-list-button { margin-top: .45rem; width: 100%; }
 .ll-list-modal { max-width: 920px; }
-.ll-modal-list { max-height: 62vh; overflow: auto; display: grid; gap: .45rem; padding-right: .25rem; }
-.ll-modal-row { display: grid; grid-template-columns: minmax(150px, 1.2fr) minmax(150px, 1fr) minmax(120px, .8fr) minmax(120px, .8fr) minmax(90px, .6fr) minmax(120px, .8fr); gap: .5rem; align-items: center; padding: .65rem; border: 1px solid rgba(148,163,184,.25); border-radius: 12px; font-size: .82rem; }
-@media (max-width: 900px) { .ll-modal-row { grid-template-columns: 1fr; } .chart-quality-action { display: flex; width: auto; } }
-.last-result-ll-action { margin-top: .55rem; display: flex; align-items: center; gap: .65rem; padding: .45rem .55rem; border: 1px solid rgba(245,158,11,.45); border-radius: 12px; background: rgba(245,158,11,.10); }
-.last-result-ll-action span { color: #f59e0b; font-size: .82rem; font-weight: 800; }
+.last-result-ll-action { margin-top: .45rem; display: flex; align-items: center; gap: .55rem; padding: .28rem .45rem; border: 1px solid rgba(245,158,11,.42); border-radius: 10px; background: rgba(245,158,11,.09); }
+.last-result-ll-action::after { content: 'Oznacz sztukę do kontroli lidera'; color: rgba(248,250,252,.72); font-size: .74rem; font-weight: 700; }
+.last-result-ll-action span { color: #f59e0b; font-size: .78rem; font-weight: 800; margin-left: auto; }
 .ll-control-button.horizontal { flex: 0 0 auto; }
+.last-result-ll-action .ll-control-button.compact.horizontal { min-height: 34px; padding: .35rem .7rem; font-size: .82rem; border-radius: 9px; }
+
+.live-panel--master-sample {
+  border-color: rgba(245, 158, 11, 0.9);
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.35), 0 0 24px rgba(245, 158, 11, 0.18);
+}
+
+.ll-open-table,
+.ll-modal-list.results-table {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 14px;
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.48);
+}
+
+.ll-open-row,
+.ll-modal-row {
+  display: grid;
+  align-items: center;
+  gap: .55rem;
+  min-height: 34px;
+  padding: .42rem .55rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+  font-size: .76rem;
+}
+
+.ll-open-row { grid-template-columns: 1.25fr .75fr .65fr .9fr .85fr; }
+.ll-modal-row { grid-template-columns: minmax(135px, 1.2fr) minmax(80px, .7fr) minmax(80px, .65fr) minmax(85px, .7fr) minmax(105px, .8fr) minmax(125px, .95fr) minmax(140px, 1fr); }
+.ll-open-row:first-child,
+.ll-modal-row:first-child { border-top: 0; }
+.ll-open-row-header,
+.ll-modal-row-header {
+  min-height: 30px;
+  background: rgba(30, 41, 59, 0.72);
+  color: rgba(203, 213, 225, .9);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  font-weight: 900;
+  font-size: .66rem;
+}
+.ll-open-row.compact:hover,
+.ll-modal-row:not(.ll-modal-row-header):hover { background: rgba(59, 130, 246, 0.08); }
+.ll-open-row strong,
+.ll-modal-row strong { color: #f8fafc; font-weight: 900; }
+.ll-open-row span,
+.ll-modal-row span,
+.ll-modal-row small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ll-block-backdrop { background: rgba(2, 6, 23, 0.72); backdrop-filter: blur(4px); }
+.ll-block-modal {
+  max-width: 520px;
+  text-align: center;
+  border: 1px solid rgba(245, 158, 11, 0.48);
+  box-shadow: 0 24px 80px rgba(0,0,0,.38), 0 0 0 1px rgba(245,158,11,.18);
+}
+.ll-block-modal .modal-header { justify-content: center; }
+.ll-block-modal p { margin: .35rem auto .55rem; max-width: 430px; color: #e2e8f0; font-weight: 800; }
+.ll-block-modal small { display: block; color: rgba(203,213,225,.78); margin-bottom: 1rem; }
+.ll-block-icon {
+  width: 46px;
+  height: 46px;
+  margin: 0 auto .75rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(245,158,11,.18);
+  border: 1px solid rgba(245,158,11,.55);
+  color: #fbbf24;
+  font-weight: 1000;
+  font-size: 1.5rem;
+}
+
+@media (max-width: 900px) {
+  .ll-open-row,
+  .ll-modal-row { grid-template-columns: 1fr; }
+  .last-result-ll-action { align-items: stretch; flex-direction: column; }
+  .last-result-ll-action span { margin-left: 0; }
+}

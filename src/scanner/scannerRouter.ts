@@ -69,7 +69,9 @@ export function createScannerRouter(options: {
     }
 
     const openLlFlag = options.database?.findOpenLlControlFlag(mapping.currentTest.barcode) ?? null;
+    console.log(`[LL_CONTROL] check before start barcode=${mapping.currentTest.barcode} role=${req.user?.role ?? '-'} openFlag=${openLlFlag?.id ?? 'none'}`);
     if (openLlFlag && !hasLlRole(req.user?.role)) {
+      console.log(`[LL_CONTROL] blocked barcode=${mapping.currentTest.barcode} flagId=${openLlFlag.id}`);
       emitLlBlocked(options.splunkBuffer, options.splunkConfig, openLlFlag, { login: req.user?.login, role: req.user?.role });
       options.io.emit('scan:rejected', { barcode: mapping.currentTest.barcode, error: 'LL_CONTROL_REQUIRED', code: 'LL_CONTROL_REQUIRED', errorCode: 'LL_CONTROL_REQUIRED', message: LL_REQUIRED_MESSAGE, llControl: { flagId: openLlFlag.id } });
       return res.status(403).json({ ok: false, error: 'LL_CONTROL_REQUIRED', code: 'LL_CONTROL_REQUIRED', errorCode: 'LL_CONTROL_REQUIRED', barcode: mapping.currentTest.barcode, message: LL_REQUIRED_MESSAGE, llControl: { flagId: openLlFlag.id } });

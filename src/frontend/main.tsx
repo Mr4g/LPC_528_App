@@ -1596,19 +1596,26 @@ function App() {
   }
 
   async function flagLastResultForLl() {
-    if (!lastResult?.barcode || !lastResult.id) return;
+    const testId = lastResult?.id ?? testSession?.activeTestId ?? null;
+    console.debug(`[LL_CONTROL_UI] flag click barcode=${lastResult?.barcode ?? '-'} testId=${testId ?? '-'} resultStatus=${lastResult?.result ?? '-'}`);
+    if (!lastResult?.barcode || !testId) {
+      setLlFlagMessage('Nie można oznaczyć sztuki — brak barcode lub ID testu.');
+      return;
+    }
     setLlFlagging(true); setLlFlagMessage(null);
-    const response = await fetch('/api/ll-control/flag', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ barcode: lastResult.barcode, testId: lastResult.id, reason: 'Operator requested LL control after NOK' }) });
-    const payload = await response.json() as { ok: boolean; existing?: boolean; message?: string };
+    const response = await fetch('/api/ll-control/flag', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ barcode: lastResult.barcode, testId, reason: 'Operator requested LL control after reject' }) });
+    const payload = await response.json() as { ok: boolean; created?: boolean; existing?: boolean; message?: string };
+    console.debug(`[LL_CONTROL_UI] response ok=${response.ok} created=${payload.created ?? false} existing=${payload.existing ?? false}`);
     setLlFlagging(false);
     setLlFlagMessage(response.ok ? (payload.existing ? 'Sztuka już oczekuje na kontrolę LL' : 'Oznaczono do kontroli LL') : (payload.message ?? 'Nie udało się oznaczyć kontroli LL.'));
-    void refreshOpenLlFlags();
+    await refreshOpenLlFlags();
   }
 
 
   function canShowLlControlAction(result: EnrichedLpcResult | null): boolean {
-    if (!result || !authUser || !result.barcode || testSession?.locked) return false;
-    return ['NOK', 'REJECT', 'UNKNOWN'].includes(String(result.result).toUpperCase());
+    const visible = Boolean(result && authUser && result.barcode && !testSession?.locked && ['NOK', 'REJECT', 'UNKNOWN'].includes(String(result.result).toUpperCase()));
+    console.debug(`[LL_CONTROL_UI] visible=${visible} reason=${result?.result ?? 'none'} barcode=${result?.barcode ?? '-'}`);
+    return visible;
   }
 
   async function openLlControlsModal() {
@@ -1984,11 +1991,11 @@ function App() {
             )}
           </div>
 
-          <PressureChart points={displayedCurvePoints} lastResult={finalMarkerResult?.result ?? chartFinalResult} limit={activeLimit} llControlAction={{ visible: canShowLlControlAction(finalMarkerResult?.result ?? chartFinalResult), loading: llFlagging, message: llFlagMessage, onClick: () => void flagLastResultForLl() }} />
+          <PressureChart points={displayedCurvePoints} lastResult={finalMarkerResult?.result ?? chartFinalResult} limit={activeLimit} />
         </section>
 
         <aside className="panel result-column">
-          <LastResultPanel result={lastResult} />
+          <LastResultPanel result={lastResult} llControlAction={{ visible: canShowLlControlAction(lastResult), loading: llFlagging, message: llFlagMessage, onClick: () => void flagLastResultForLl() }} />
           {isManager(authUser) && (
             <section className="ll-open-panel compact"><div className="panel-header"><span>Oczekujące kontrole LL</span><button type="button" onClick={() => void refreshOpenLlFlags()}>Odśwież</button></div>
               {openLlFlags.length === 0 ? <p className="empty-state">Brak oczekujących kontroli LL</p> : openLlFlags.slice(0, 2).map((flag) => <div className="ll-open-row compact" key={flag.id}><strong>{flag.barcode}</strong><span>{flag.createdAt}</span><span>Program: {flag.createdFromProgramText ?? '-'}</span><span>{flag.createdByLogin ?? '-'} · OPEN</span></div>)}

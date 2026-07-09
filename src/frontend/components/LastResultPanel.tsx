@@ -24,8 +24,9 @@ function getTotalAbsId(result: LpcResult): string {
   return result.uniqueId ?? result.totalAbs ?? '-';
 }
 
-export function LastResultPanel({ result }: { result: LpcResult | null }) {
+export function LastResultPanel({ result, llControlAction = null }: { result: LpcResult | null; llControlAction?: { visible: boolean; loading?: boolean; message?: string | null; onClick?: () => void } | null }) {
   return (
+    <>
     <section className="last-result-panel">
       <div className={`result-status ${result ? getResultClass(result.result) : 'status-unknown'}`}>
         <span>Ostatni wynik</span>
@@ -44,5 +45,14 @@ export function LastResultPanel({ result }: { result: LpcResult | null }) {
         <p className="empty-state">Brak końcowego wyniku testu</p>
       )}
     </section>
+    {llControlAction?.visible && (
+      <div className="last-result-ll-action">
+        <button type="button" className="ll-control-button compact horizontal" title="Oznacz sztukę jako wymagającą kontroli lidera linii." onClick={llControlAction.onClick} disabled={llControlAction.loading}>
+          {llControlAction.loading ? 'Oznaczanie...' : 'Kontrola LL'}
+        </button>
+        {llControlAction.message && <span>{llControlAction.message}</span>}
+      </div>
+    )}
+    </>
   );
 }

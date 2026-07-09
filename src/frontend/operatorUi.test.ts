@@ -40,10 +40,10 @@ describe('LL control ergonomic UI layout', () => {
   const lastResultPanelSource = readFileSync(new URL('./components/LastResultPanel.tsx', import.meta.url), 'utf8');
   const chartSource = readFileSync(new URL('./components/PressureChart.tsx', import.meta.url), 'utf8');
 
-  it('moves the Kontrola LL action out of the last-result panel and into the chart before legend', () => {
-    expect(lastResultPanelSource).not.toContain('ll-control-button');
-    expect(chartSource.indexOf('chart-quality-action')).toBeGreaterThan(-1);
-    expect(chartSource.indexOf('chart-quality-action')).toBeLessThan(chartSource.indexOf('chart-legend'));
+  it('renders the Kontrola LL action under the last-result panel instead of the chart', () => {
+    expect(lastResultPanelSource).toContain('last-result-ll-action');
+    expect(lastResultPanelSource).toContain('ll-control-button');
+    expect(chartSource).not.toContain('chart-quality-action');
   });
 
   it('limits the inline LL controls list to two items and exposes Pełna lista', () => {

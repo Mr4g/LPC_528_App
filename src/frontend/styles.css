@@ -2443,3 +2443,6 @@ body.theme-dark .login-info-message {
 .ll-modal-list { max-height: 62vh; overflow: auto; display: grid; gap: .45rem; padding-right: .25rem; }
 .ll-modal-row { display: grid; grid-template-columns: minmax(150px, 1.2fr) minmax(150px, 1fr) minmax(120px, .8fr) minmax(120px, .8fr) minmax(90px, .6fr) minmax(120px, .8fr); gap: .5rem; align-items: center; padding: .65rem; border: 1px solid rgba(148,163,184,.25); border-radius: 12px; font-size: .82rem; }
 @media (max-width: 900px) { .ll-modal-row { grid-template-columns: 1fr; } .chart-quality-action { display: flex; width: auto; } }
+.last-result-ll-action { margin-top: .55rem; display: flex; align-items: center; gap: .65rem; padding: .45rem .55rem; border: 1px solid rgba(245,158,11,.45); border-radius: 12px; background: rgba(245,158,11,.10); }
+.last-result-ll-action span { color: #f59e0b; font-size: .82rem; font-weight: 800; }
+.ll-control-button.horizontal { flex: 0 0 auto; }

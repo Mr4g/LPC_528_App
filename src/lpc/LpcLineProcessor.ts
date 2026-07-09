@@ -173,6 +173,7 @@ export class LpcLineProcessor {
       if (result) {
         const enrichedResult = this.attachCurrentTest(result);
         const activeSessionBeforeComplete = this.options.testSessionManager?.getStatus() ?? null;
+        if (activeSessionBeforeComplete?.activeTestId) enrichedResult.id = activeSessionBeforeComplete.activeTestId;
         const completedCurve = this.options.curveBuffer.completeAndClear();
         const resolvedLlFlag = this.resolveLlControlIfNeeded(enrichedResult, activeSessionBeforeComplete);
         this.updateLimitCache(enrichedResult);
@@ -297,7 +298,10 @@ export class LpcLineProcessor {
     let resolved = null;
     if (flag && hasLlRole(result.operatorRole) && resolvesLlControl(result.result)) {
       resolved = this.options.database?.resolveLlControlFlag(result.barcode, { resolvedByUserId: session?.operatorUserId ?? null, resolvedByLogin: result.operatorLogin ?? session?.operatorLogin ?? null, resolvedByRole: result.operatorRole ?? null, resolvedByTestId: session?.activeTestId ?? null, resolvedByProgramText: result.currentTestProgramText ?? result.programText ?? result.program, resolvedByProgramNumber: result.currentTestProgram ?? null, resolvedByUniqueId: result.uniqueId ?? null }) ?? null;
-      if (resolved) emitLlResolved(this.options.splunkBuffer, this.options.splunkConfig, resolved);
+      if (resolved) {
+        console.log(`[LL_CONTROL] resolved barcode=${result.barcode} testId=${session?.activeTestId ?? 'unknown'}`);
+        emitLlResolved(this.options.splunkBuffer, this.options.splunkConfig, resolved);
+      }
     }
     result.llControl = { requiredAtStart, flagId: result.llControl?.flagId ?? flag?.id ?? null, testAllowedByRole: !flag || hasLlRole(result.operatorRole), performedByRequiredRole: requiredAtStart ? hasLlRole(result.operatorRole) : false, resolvedByThisTest: Boolean(resolved) };
     return resolved;

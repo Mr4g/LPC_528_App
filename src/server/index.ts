@@ -30,6 +30,7 @@ import { SplunkClient } from './splunk/splunkClient';
 import { SplunkBuffer } from './splunk/splunkBuffer';
 import { buildSplunkErrorEnvelope } from './splunk/splunkPayload';
 import { createSplunkRouter } from './splunk/splunkRouter';
+import { createLlControlRouter } from './ll-control';
 
 const config = loadConfig();
 const app = express();
@@ -179,6 +180,7 @@ app.use('/api/test-session', createTestSessionRouter(testSessionManager));
 app.use('/api/backup', createBackupRouter());
 app.use('/api/zebra', createZebraRouter(database, zebraPrinter));
 app.use('/api/splunk', createSplunkRouter(splunkClient, splunkBuffer));
+app.use('/api/ll-control', createLlControlRouter({ database, splunkBuffer, splunkConfig }));
 app.use('/api/programs', requireAuth, createProgramsRouter({ config, programStarter, programMappingService }));
 app.use('/api/program-mappings', createProgramMappingsRouter(programMappingService));
 app.use('/api/lpc', createLpcRouter({
@@ -191,7 +193,7 @@ app.use('/api/lpc', createLpcRouter({
   database,
   getSocketClientsCount: () => io.engine.clientsCount,
 }));
-app.use('/api', createScannerRouter({ config, io, programStarter, currentTestStore, programMappingService, testSessionManager, authService }));
+app.use('/api', createScannerRouter({ config, io, programStarter, currentTestStore, programMappingService, testSessionManager, authService, database, splunkBuffer, splunkConfig }));
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'lpc-528-app' });

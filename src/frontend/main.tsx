@@ -23,9 +23,9 @@ interface ScanAcceptedPayload {
 interface ScanRejectedPayload {
   ok?: false;
   barcode: string;
-  error: 'NO_MAPPING' | 'TEST_IN_PROGRESS';
-  code?: 'TEST_IN_PROGRESS';
-  errorCode?: 'TEST_IN_PROGRESS';
+  error: 'NO_MAPPING' | 'TEST_IN_PROGRESS' | 'LL_CONTROL_REQUIRED';
+  code?: 'TEST_IN_PROGRESS' | 'LL_CONTROL_REQUIRED';
+  errorCode?: 'TEST_IN_PROGRESS' | 'LL_CONTROL_REQUIRED';
   message: string;
   activeTest?: TestSessionState;
 }
@@ -189,6 +189,8 @@ interface FinalMarkerResult {
   receivedAt: string;
 }
 
+interface LlControlFlag { id: string; barcode: string; createdAt: string; createdByLogin: string | null; createdFromProgramText: string | null; createdFromResultStatus: string | null; createdFromLeakValue: number | null; createdFromLeakUnit: string | null; createdFromUniqueId: string | null; }
+
 interface AuthUser {
   id: string;
   login: string;
@@ -304,6 +306,11 @@ async function fetchLpcStatus(): Promise<LpcStatusPayload | null> {
 
 async function fetchTestSessionStatus(): Promise<TestSessionState | null> {
   return fetchJson<TestSessionState>('/api/test-session/status');
+}
+
+async function fetchOpenLlFlags(): Promise<LlControlFlag[]> {
+  const payload = await fetchJson<{ ok: true; flags: LlControlFlag[] }>('/api/ll-control/open');
+  return payload?.flags ?? [];
 }
 
 async function fetchSplunkStatus(): Promise<SplunkStatusPayload | null> {
@@ -999,6 +1006,10 @@ function App() {
   const [splunkStatus, setSplunkStatus] = useState<SplunkStatusPayload | null>(null);
   const [idleLogoutMessage, setIdleLogoutMessage] = useState<string | null>(null);
   const [idleTimeoutMs, setIdleTimeoutMs] = useState(15 * 60 * 1000);
+  const [llModal, setLlModal] = useState<string | null>(null);
+  const [llFlagMessage, setLlFlagMessage] = useState<string | null>(null);
+  const [llFlagging, setLlFlagging] = useState(false);
+  const [openLlFlags, setOpenLlFlags] = useState<LlControlFlag[]>([]);
   const [eventCounters, setEventCounters] = useState({
     streamEvents: 0,
     resultEvents: 0,
@@ -1189,6 +1200,8 @@ function App() {
     if (nextStatus) setLpcStatus(nextStatus);
   }
 
+  async function refreshOpenLlFlags() { if (isManager(authUser)) setOpenLlFlags(await fetchOpenLlFlags()); }
+
   async function refreshSplunkStatus() {
     const nextStatus = await fetchSplunkStatus();
     if (nextStatus) setSplunkStatus(nextStatus);
@@ -1341,8 +1354,7 @@ function App() {
       });
 
       socket.on('scan:rejected', (payload: ScanRejectedPayload) => {
-        setLastRejected(payload);
-        setStatus('no-mapping');
+        if (payload.errorCode === 'LL_CONTROL_REQUIRED' || payload.code === 'LL_CONTROL_REQUIRED') { setLlModal(payload.message); setBarcode(''); scanBufferRef.current = ''; setStatus('ready'); window.setTimeout(() => setLlModal(null), 10_000); } else { setLastRejected(payload); setStatus('no-mapping'); }
       });
 
       socket.on('lpc:status', setLpcStatus);
@@ -1425,6 +1437,7 @@ function App() {
         setResultHistory((results) => mergeResultIntoHistory(results, payload, 50));
         void refreshSplunkStatus();
         focusBarcodeInput(220);
+        void refreshOpenLlFlags();
       });
 
       socket.on('test-session:updated', (payload) => {
@@ -1538,6 +1551,7 @@ function App() {
 
     if (!response.ok || !('programStart' in payload)) {
       const rejectedPayload = payload as ScanRejectedPayload;
+      if (rejectedPayload.errorCode === 'LL_CONTROL_REQUIRED' || rejectedPayload.code === 'LL_CONTROL_REQUIRED') { setLlModal(rejectedPayload.message); setBarcode(''); scanBufferRef.current = ''; setStatus('ready'); window.setTimeout(() => setLlModal(null), 10_000); focusBarcodeInput(0); return; }
       if (rejectedPayload.errorCode === 'TEST_IN_PROGRESS' || rejectedPayload.code === 'TEST_IN_PROGRESS') {
         setLastRejected(rejectedPayload);
         if (rejectedPayload.activeTest) setTestSession(rejectedPayload.activeTest);
@@ -1557,6 +1571,16 @@ function App() {
     if (payload.activeTest) setTestSession(payload.activeTest);
     await loadInstructionForMapping(payload.currentTest.mappingId);
     if (!payload.programStart.success) focusBarcodeInput(0);
+  }
+
+  async function flagLastResultForLl() {
+    if (!lastResult?.barcode || !lastResult.id) return;
+    setLlFlagging(true); setLlFlagMessage(null);
+    const response = await fetch('/api/ll-control/flag', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ barcode: lastResult.barcode, testId: lastResult.id, reason: 'Operator requested LL control after NOK' }) });
+    const payload = await response.json() as { ok: boolean; existing?: boolean; message?: string };
+    setLlFlagging(false);
+    setLlFlagMessage(response.ok ? (payload.existing ? 'Sztuka już oczekuje na kontrolę LL' : 'Oznaczono do kontroli LL') : (payload.message ?? 'Nie udało się oznaczyć kontroli LL.'));
+    void refreshOpenLlFlags();
   }
 
   async function submitScan(event: FormEvent<HTMLFormElement>) {
@@ -1910,7 +1934,12 @@ function App() {
         </section>
 
         <aside className="panel result-column">
-          <LastResultPanel result={lastResult} />
+          <LastResultPanel result={lastResult} currentUser={authUser} onLlControl={flagLastResultForLl} llControlMessage={llFlagMessage} llControlLoading={llFlagging} />
+          {isManager(authUser) && (
+            <section className="ll-open-panel"><div className="panel-header"><span>Oczekujące kontrole LL</span><button type="button" onClick={() => void refreshOpenLlFlags()}>Odśwież</button></div>
+              {openLlFlags.length === 0 ? <p className="empty-state">Brak oczekujących kontroli LL</p> : openLlFlags.map((flag) => <div className="ll-open-row" key={flag.id}><strong>{flag.barcode}</strong><span>{flag.createdAt}</span><span>{flag.createdByLogin ?? '-'} / {flag.createdFromProgramText ?? '-'}</span><span>{flag.createdFromResultStatus ?? '-'} {formatMeasurement(flag.createdFromLeakValue, flag.createdFromLeakUnit, 3)}</span><small>{flag.createdFromUniqueId ?? '-'}</small></div>)}
+            </section>
+          )}
           <section className="results-preview" aria-label="Wyniki testów">
             <div className="results-preview-header">
               <span>Wyniki testów</span>
@@ -1924,6 +1953,8 @@ function App() {
           </section>
         </aside>
       </section>
+
+      {llModal && (<div className="app-modal-backdrop" role="presentation"><section className="app-modal" role="dialog" aria-modal="true"><header className="modal-header"><div><span className="eyebrow">Kontrola LL</span><h2>Wymagana kontrola LL</h2></div></header><p>{llModal}</p><button type="button" className="scan-submit" onClick={() => { setLlModal(null); setBarcode(''); focusBarcodeInput(100); }}>OK</button></section></div>)}
 
       {resultsOpen && (
         <div className="app-modal-backdrop" role="presentation" onMouseDown={(event) => {

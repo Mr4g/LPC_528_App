@@ -10,6 +10,7 @@ export interface LpcMeasurementMap {
 }
 
 export interface LpcResult {
+  id?: string;
   source: string;
   receivedAt: string;
   messageId: string | null;
@@ -116,6 +117,7 @@ export interface CurrentTest {
   operatorLogin?: string;
   operatorRole?: string;
   labelPrintMode?: LabelPrintMode;
+  llControl?: { requiredAtStart: boolean; flagId: string | null; testAllowedByRole: boolean; performedByRequiredRole: boolean; resolvedByThisTest: boolean };
 }
 
 
@@ -147,5 +149,6 @@ export interface ProgramStartRequest {
   operatorLogin?: string;
   operatorRole?: string;
   labelPrintMode?: LabelPrintMode;
+  llControl?: { requiredAtStart: boolean; flagId: string | null; testAllowedByRole: boolean; performedByRequiredRole: boolean; resolvedByThisTest: boolean };
 }
 

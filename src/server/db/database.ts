@@ -18,6 +18,14 @@ export interface TestResultQuery {
   dateTo?: string;
 }
 
+export interface LlControlFlag {
+  id: string; barcode: string; status: string; createdAt: string; updatedAt: string;
+  createdByUserId: string | null; createdByLogin: string | null; createdByRole: string | null;
+  createdFromTestId: string | null; createdFromProgramText: string | null; createdFromProgramNumber: number | null; createdFromResultStatus: string | null; createdFromResultRawStatus: string | null; createdFromLeakValue: number | null; createdFromLeakUnit: string | null; createdFromUniqueId: string | null;
+  resolvedAt: string | null; resolvedByUserId: string | null; resolvedByLogin: string | null; resolvedByRole: string | null; resolvedByTestId: string | null; resolvedByProgramText: string | null; resolvedByProgramNumber: number | null; resolvedByUniqueId: string | null;
+  reason: string | null;
+}
+
 export interface StoredTestSession {
   id: string;
   status: string;
@@ -90,6 +98,12 @@ function rowToProgramMapping(row: Record<string, unknown>): ProgramMappingRecord
   };
 }
 
+function rowToLlFlag(row: Record<string, unknown>): LlControlFlag {
+  const str = (name: string) => row[name] === null || row[name] === undefined ? null : String(row[name]);
+  const num = (name: string) => row[name] === null || row[name] === undefined ? null : Number(row[name]);
+  return { id: String(row.id), barcode: String(row.barcode), status: String(row.status), createdAt: String(row.createdAt), updatedAt: String(row.updatedAt), createdByUserId: str('createdByUserId'), createdByLogin: str('createdByLogin'), createdByRole: str('createdByRole'), createdFromTestId: str('createdFromTestId'), createdFromProgramText: str('createdFromProgramText'), createdFromProgramNumber: num('createdFromProgramNumber'), createdFromResultStatus: str('createdFromResultStatus'), createdFromResultRawStatus: str('createdFromResultRawStatus'), createdFromLeakValue: num('createdFromLeakValue'), createdFromLeakUnit: str('createdFromLeakUnit'), createdFromUniqueId: str('createdFromUniqueId'), resolvedAt: str('resolvedAt'), resolvedByUserId: str('resolvedByUserId'), resolvedByLogin: str('resolvedByLogin'), resolvedByRole: str('resolvedByRole'), resolvedByTestId: str('resolvedByTestId'), resolvedByProgramText: str('resolvedByProgramText'), resolvedByProgramNumber: num('resolvedByProgramNumber'), resolvedByUniqueId: str('resolvedByUniqueId'), reason: str('reason') };
+}
+
 function rowToSession(row: Record<string, unknown>): StoredTestSession {
   return {
     id: String(row.id),
@@ -129,6 +143,7 @@ function rowToSplunkBuffer(row: Record<string, unknown>): SplunkEventBufferRecor
 
 function rowToResult(row: Record<string, unknown>): LpcResult {
   return {
+    id: row.id === null || row.id === undefined ? undefined : String(row.id),
     source: String(row.source ?? ''),
     receivedAt: String(row.receivedAt),
     messageId: row.messageId === null ? null : String(row.messageId),
@@ -303,6 +318,40 @@ export class AppDatabase {
     return row ? rowToResult(row) : null;
   }
 
+  findTestResultById(id: string): LpcResult | null {
+    const row = this.db.prepare('SELECT * FROM test_results WHERE id = ? OR currentTestId = ? ORDER BY receivedAt DESC LIMIT 1').get(id, id) as Record<string, unknown> | undefined;
+    return row ? rowToResult(row) : null;
+  }
+
+  findOpenLlControlFlag(barcode: string): LlControlFlag | null {
+    const row = this.db.prepare("SELECT * FROM ll_control_flags WHERE barcode = ? AND status = 'OPEN' ORDER BY createdAt DESC LIMIT 1").get(barcode) as Record<string, unknown> | undefined;
+    return row ? rowToLlFlag(row) : null;
+  }
+
+  insertLlControlFlag(flag: Omit<LlControlFlag, 'resolvedAt' | 'resolvedByUserId' | 'resolvedByLogin' | 'resolvedByRole' | 'resolvedByTestId' | 'resolvedByProgramText' | 'resolvedByProgramNumber' | 'resolvedByUniqueId'>): LlControlFlag {
+    this.db.prepare(`INSERT INTO ll_control_flags (id, barcode, status, createdAt, updatedAt, createdByUserId, createdByLogin, createdByRole, createdFromTestId, createdFromProgramText, createdFromProgramNumber, createdFromResultStatus, createdFromResultRawStatus, createdFromLeakValue, createdFromLeakUnit, createdFromUniqueId, reason) VALUES (${Array.from({ length: 17 }, () => '?').join(', ')})`)
+      .run(flag.id, flag.barcode, flag.status, flag.createdAt, flag.updatedAt, flag.createdByUserId, flag.createdByLogin, flag.createdByRole, flag.createdFromTestId, flag.createdFromProgramText, flag.createdFromProgramNumber, flag.createdFromResultStatus, flag.createdFromResultRawStatus, flag.createdFromLeakValue, flag.createdFromLeakUnit, flag.createdFromUniqueId, flag.reason);
+    return this.findOpenLlControlFlag(flag.barcode)!;
+  }
+
+  listOpenLlControlFlags(): LlControlFlag[] {
+    return (this.db.prepare("SELECT * FROM ll_control_flags WHERE status = 'OPEN' ORDER BY createdAt DESC").all() as Record<string, unknown>[]).map(rowToLlFlag);
+  }
+
+  listLlControlHistory(barcode?: string): LlControlFlag[] {
+    const rows = barcode ? this.db.prepare('SELECT * FROM ll_control_flags WHERE barcode = ? ORDER BY createdAt DESC').all(barcode) : this.db.prepare('SELECT * FROM ll_control_flags ORDER BY createdAt DESC LIMIT 500').all();
+    return (rows as Record<string, unknown>[]).map(rowToLlFlag);
+  }
+
+  resolveLlControlFlag(barcode: string, patch: { resolvedByUserId: string | null; resolvedByLogin: string | null; resolvedByRole: string | null; resolvedByTestId: string | null; resolvedByProgramText: string | null; resolvedByProgramNumber: number | null; resolvedByUniqueId: string | null }): LlControlFlag | null {
+    const existing = this.findOpenLlControlFlag(barcode);
+    if (!existing) return null;
+    const now = new Date().toISOString();
+    this.db.prepare("UPDATE ll_control_flags SET status = 'RESOLVED', updatedAt = ?, resolvedAt = ?, resolvedByUserId = ?, resolvedByLogin = ?, resolvedByRole = ?, resolvedByTestId = ?, resolvedByProgramText = ?, resolvedByProgramNumber = ?, resolvedByUniqueId = ? WHERE id = ?")
+      .run(now, now, patch.resolvedByUserId, patch.resolvedByLogin, patch.resolvedByRole, patch.resolvedByTestId, patch.resolvedByProgramText, patch.resolvedByProgramNumber, patch.resolvedByUniqueId, existing.id);
+    return this.listLlControlHistory(barcode).find((flag) => flag.id === existing.id) ?? null;
+  }
+
   upsertTestSession(session: StoredTestSession): void {
     this.db.prepare(`INSERT INTO test_sessions (id, status, barcode, programNumber, programText, operatorUserId, operatorLogin, startedAt, completedAt, firstLpcDataAt, lastLpcDataAt, lastStreamAt, finalResultAt, timeoutAt, message)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -376,6 +425,9 @@ export class AppDatabase {
       CREATE INDEX IF NOT EXISTS idx_test_results_programText ON test_results(programText);
       CREATE TABLE IF NOT EXISTS test_sessions (id TEXT PRIMARY KEY, status TEXT NOT NULL, barcode TEXT, programNumber INTEGER, programText TEXT, operatorUserId TEXT, operatorLogin TEXT, startedAt TEXT, completedAt TEXT, firstLpcDataAt TEXT, lastLpcDataAt TEXT, lastStreamAt TEXT, finalResultAt TEXT, timeoutAt TEXT, message TEXT);
       CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT NULL);
+      CREATE TABLE IF NOT EXISTS ll_control_flags (id TEXT PRIMARY KEY, barcode TEXT NOT NULL, status TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, createdByUserId TEXT NULL, createdByLogin TEXT NULL, createdByRole TEXT NULL, createdFromTestId TEXT NULL, createdFromProgramText TEXT NULL, createdFromProgramNumber INTEGER NULL, createdFromResultStatus TEXT NULL, createdFromResultRawStatus TEXT NULL, createdFromLeakValue REAL NULL, createdFromLeakUnit TEXT NULL, createdFromUniqueId TEXT NULL, resolvedAt TEXT NULL, resolvedByUserId TEXT NULL, resolvedByLogin TEXT NULL, resolvedByRole TEXT NULL, resolvedByTestId TEXT NULL, resolvedByProgramText TEXT NULL, resolvedByProgramNumber INTEGER NULL, resolvedByUniqueId TEXT NULL, reason TEXT NULL);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_ll_control_flags_open_barcode ON ll_control_flags(barcode) WHERE status = 'OPEN';
+      CREATE INDEX IF NOT EXISTS idx_ll_control_flags_status_created ON ll_control_flags(status, createdAt);
       CREATE TABLE IF NOT EXISTS splunk_event_buffer (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, next_attempt_at TEXT, sent_at TEXT, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, status TEXT NOT NULL DEFAULT 'pending', event_type TEXT NOT NULL, test_id TEXT, payload_json TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS idx_splunk_event_buffer_status_next ON splunk_event_buffer(status, next_attempt_at);
       CREATE INDEX IF NOT EXISTS idx_splunk_event_buffer_test_id ON splunk_event_buffer(test_id);

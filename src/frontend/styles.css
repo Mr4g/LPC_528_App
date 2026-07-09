@@ -2419,3 +2419,8 @@ body.theme-dark .login-info-message {
   color: #bbf7d0;
   font-weight: 900;
 }
+.ll-control-actions { grid-column: 1 / -1; }
+.ll-control-button { min-height: 48px; border: 0; border-radius: 12px; padding: 0.8rem 1rem; font-weight: 800; background: #f59e0b; color: #111827; cursor: pointer; }
+.ll-control-button:disabled { opacity: 0.75; cursor: wait; }
+.ll-open-panel { margin-top: 1rem; }
+.ll-open-row { display: grid; gap: 0.25rem; padding: 0.65rem; border-top: 1px solid var(--border-color, #334155); font-size: 0.85rem; }

@@ -15,6 +15,7 @@ import { isValidCurvePoint, LpcTestCurveBuffer } from './LpcTestCurveBuffer';
 import { shouldPrintForResult, type ZebraPrinter } from '../zebra/ZebraPrinter';
 import type { SplunkBuffer } from '../server/splunk/splunkBuffer';
 import { buildSplunkResultEnvelope } from '../server/splunk/splunkPayload';
+import { emitLlResolved, hasLlRole, resolvesLlControl } from '../server/ll-control';
 import type { SplunkRuntimeConfig } from '../server/splunk/splunkTypes';
 import type { AppConfig } from '../config';
 
@@ -28,6 +29,7 @@ export interface EnrichedLpcResult extends LpcResult {
   currentTestSelectedAt?: string;
   operatorLogin?: string | null;
   operatorRole?: string | null;
+  llControl?: { requiredAtStart: boolean; flagId: string | null; testAllowedByRole: boolean; performedByRequiredRole: boolean; resolvedByThisTest: boolean };
 }
 
 export interface LpcRawLineDiagnostic {
@@ -168,6 +170,7 @@ export class LpcLineProcessor {
         const enrichedResult = this.attachCurrentTest(result);
         const activeSessionBeforeComplete = this.options.testSessionManager?.getStatus() ?? null;
         const completedCurve = this.options.curveBuffer.completeAndClear();
+        const resolvedLlFlag = this.resolveLlControlIfNeeded(enrichedResult, activeSessionBeforeComplete);
         this.options.database?.insertTestResult(enrichedResult, this.options.testSessionManager?.getActiveTestId() ?? null);
         this.options.lastResultStore?.set(enrichedResult);
         this.options.resultHistoryStore?.add(enrichedResult);
@@ -252,11 +255,24 @@ export class LpcLineProcessor {
       currentTestSelectedAt: currentTest.selectedAt,
       operatorLogin: currentTest.operatorLogin ?? null,
       operatorRole: currentTest.operatorRole ?? null,
+      llControl: currentTest.llControl,
       labelPrintMode: currentTest.labelPrintMode ?? 'ok_only',
       barcode: this.resolveBarcode(result, currentTest),
       program: currentTest.programText,
       programText: currentTest.programText,
     };
+  }
+
+  private resolveLlControlIfNeeded(result: EnrichedLpcResult, session: ReturnType<TestSessionManager['getStatus']> | null): unknown {
+    const flag = result.barcode ? this.options.database?.findOpenLlControlFlag(result.barcode) : null;
+    const requiredAtStart = Boolean(result.llControl?.requiredAtStart || flag);
+    let resolved = null;
+    if (flag && hasLlRole(result.operatorRole) && resolvesLlControl(result.result)) {
+      resolved = this.options.database?.resolveLlControlFlag(result.barcode, { resolvedByUserId: session?.operatorUserId ?? null, resolvedByLogin: result.operatorLogin ?? session?.operatorLogin ?? null, resolvedByRole: result.operatorRole ?? null, resolvedByTestId: session?.activeTestId ?? null, resolvedByProgramText: result.currentTestProgramText ?? result.programText ?? result.program, resolvedByProgramNumber: result.currentTestProgram ?? null, resolvedByUniqueId: result.uniqueId ?? null }) ?? null;
+      if (resolved) emitLlResolved(this.options.splunkBuffer, this.options.splunkConfig, resolved);
+    }
+    result.llControl = { requiredAtStart, flagId: result.llControl?.flagId ?? flag?.id ?? null, testAllowedByRole: !flag || hasLlRole(result.operatorRole), performedByRequiredRole: requiredAtStart ? hasLlRole(result.operatorRole) : false, resolvedByThisTest: Boolean(resolved) };
+    return resolved;
   }
 
   private sendSplunkResult(result: EnrichedLpcResult, session: ReturnType<TestSessionManager['getStatus']> | null, curvePoints: ReturnType<LpcTestCurveBuffer['getPoints']>): void {

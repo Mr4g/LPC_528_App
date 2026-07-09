@@ -9,6 +9,10 @@ import type { ProgramMappingService } from '../programs/programMappingStore';
 import type { TestSessionManager } from '../server/test-session/testSessionManager';
 import type { AuthService } from '../server/auth/authService';
 import { CurrentTestStore } from './currentTestStore';
+import type { AppDatabase } from '../server/db/database';
+import type { SplunkBuffer } from '../server/splunk/splunkBuffer';
+import type { SplunkRuntimeConfig } from '../server/splunk/splunkTypes';
+import { emitLlBlocked, hasLlRole, LL_REQUIRED_MESSAGE } from '../server/ll-control';
 
 export function createScannerRouter(options: {
   config: AppConfig;
@@ -18,6 +22,9 @@ export function createScannerRouter(options: {
   programMappingService?: ProgramMappingService;
   testSessionManager?: TestSessionManager;
   authService?: AuthService;
+  database?: AppDatabase;
+  splunkBuffer?: SplunkBuffer;
+  splunkConfig?: SplunkRuntimeConfig;
 }): Router {
   const router = Router();
 
@@ -58,12 +65,19 @@ export function createScannerRouter(options: {
       return res.status(400).json({ ok: false, error: mapping.error, barcode: mapping.barcode, message });
     }
 
+    const openLlFlag = options.database?.findOpenLlControlFlag(mapping.currentTest.barcode) ?? null;
+    if (openLlFlag && !hasLlRole(req.user?.role)) {
+      emitLlBlocked(options.splunkBuffer, options.splunkConfig, openLlFlag, { login: req.user?.login, role: req.user?.role });
+      options.io.emit('scan:rejected', { barcode: mapping.currentTest.barcode, error: 'LL_CONTROL_REQUIRED', code: 'LL_CONTROL_REQUIRED', errorCode: 'LL_CONTROL_REQUIRED', message: LL_REQUIRED_MESSAGE, llControl: { flagId: openLlFlag.id } });
+      return res.status(403).json({ ok: false, error: 'LL_CONTROL_REQUIRED', code: 'LL_CONTROL_REQUIRED', errorCode: 'LL_CONTROL_REQUIRED', barcode: mapping.currentTest.barcode, message: LL_REQUIRED_MESSAGE, llControl: { flagId: openLlFlag.id } });
+    }
+
     const operatorContext = {
       operatorUserId: req.user?.id,
       operatorLogin: req.user?.login,
       operatorRole: req.user?.role,
     };
-    const currentTest = { ...mapping.currentTest, ...operatorContext };
+    const currentTest = { ...mapping.currentTest, ...operatorContext, llControl: { requiredAtStart: Boolean(openLlFlag), flagId: openLlFlag?.id ?? null, testAllowedByRole: true, performedByRequiredRole: openLlFlag ? hasLlRole(req.user?.role) : false, resolvedByThisTest: false } };
     const programStartRequest = { ...mapping.programStartRequest, ...operatorContext };
 
     options.currentTestStore.set(currentTest);

@@ -6,11 +6,15 @@ interface UserMenuProps {
   canManageUsers: boolean;
   canManagePrograms: boolean;
   canOpenDiagnostics: boolean;
+  canUseMasterSample: boolean;
+  masterSampleEnabled: boolean;
+  onMasterSampleToggle: () => void;
   open: boolean;
   onToggle: () => void;
   onUsers: () => void;
   onPrograms: () => void;
   onResults: () => void;
+  onLlControls: () => void;
   onDiagnostics: () => void;
   onThemeChange: (theme: 'light' | 'dark') => void;
   onLogout: () => void;
@@ -50,9 +54,11 @@ export function UserMenu(props: UserMenuProps) {
       {props.open && (
         <div className="user-menu-popover">
           <button type="button" onClick={props.onResults}>Wyniki testów</button>
+          <button type="button" onClick={props.onLlControls}>Kontrole LL</button>
           {props.canManageUsers && <button type="button" onClick={props.onUsers}>Użytkownicy</button>}
           {props.canManagePrograms && <button type="button" onClick={props.onPrograms}>Programy</button>}
           {props.canOpenDiagnostics && <button type="button" onClick={props.onDiagnostics}>Diagnostyka</button>}
+          {props.canUseMasterSample && <button type="button" title="Następny test OK wydrukuje 2 etykiety z loginem LL." onClick={props.onMasterSampleToggle}>{props.masterSampleEnabled ? 'Wyłącz test wzorcowy' : 'Test wzorcowy'}</button>}
           <div className="theme-switch" role="group" aria-label="Motyw">
             <button type="button" className={props.theme === 'light' ? 'active' : ''} onClick={() => props.onThemeChange('light')}>Light</button>
             <button type="button" className={props.theme === 'dark' ? 'active' : ''} onClick={() => props.onThemeChange('dark')}>Dark</button>

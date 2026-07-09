@@ -34,3 +34,52 @@ describe('operator top bar and PDF modal layout', () => {
     expect(mainSource).toContain('Wylogowano z powodu bezczynności.');
   });
 });
+
+describe('LL control ergonomic UI layout', () => {
+  const mainSource = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8');
+  const lastResultPanelSource = readFileSync(new URL('./components/LastResultPanel.tsx', import.meta.url), 'utf8');
+  const chartSource = readFileSync(new URL('./components/PressureChart.tsx', import.meta.url), 'utf8');
+  const cssSource = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+
+  it('renders the Kontrola LL action under the last-result panel instead of the chart', () => {
+    expect(lastResultPanelSource).toContain('last-result-ll-action');
+    expect(lastResultPanelSource).toContain('ll-control-button');
+    expect(chartSource).not.toContain('chart-quality-action');
+  });
+
+  it('limits the inline LL controls list to two table rows and exposes Pełna lista without manual refresh', () => {
+    expect(mainSource).toContain('openLlFlags.slice(0, 2).map');
+    expect(mainSource).toContain('ll-open-table results-table');
+    expect(mainSource).toContain('Pełna lista');
+    expect(mainSource).toContain('llListModalOpen');
+    expect(mainSource).not.toContain('>Odśwież<');
+  });
+
+  it('adds Kontrole LL to the burger menu and opens the shared modal', () => {
+    expect(mainSource).toContain('onLlControls={() => void openLlControlsModal()}');
+    expect(mainSource).toContain('Oczekujące kontrole LL');
+  });
+
+  it('refreshes the open LL list after flagging and after resolved test events', () => {
+    expect(mainSource).toContain('[LL_CONTROL_UI] flag created, refreshing open list');
+    expect(mainSource).toContain('[LL_CONTROL_UI] open list refreshed count=');
+    expect(mainSource).toContain('payload.llControl?.resolvedByThisTest');
+  });
+
+  it('shows the inline LL button only for operators and hides empty manager LL panel', () => {
+    expect(mainSource).toContain("authUser?.role === 'operator'");
+    expect(mainSource).toContain('isManager(authUser) && openLlFlags.length > 0');
+  });
+
+  it('renders a polished block modal for operator LL-control stops', () => {
+    expect(mainSource).toContain('ll-block-modal');
+    expect(mainSource).toContain('Wymagana kontrola LL');
+    expect(mainSource).toContain('Ta sztuka wymaga kontroli lidera linii. Zaloguj LL, aby wykonać test.');
+  });
+
+  it('signals master-sample mode on the LIVE panel instead of the top bar', () => {
+    expect(mainSource).toContain('live-panel--master-sample');
+    expect(mainSource).not.toContain('master-sample-badge');
+    expect(cssSource).toContain('.live-panel--master-sample');
+  });
+});

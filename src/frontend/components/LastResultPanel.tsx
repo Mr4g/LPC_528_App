@@ -13,13 +13,20 @@ function getMainMeasurement(result: LpcResult): string {
   return `${measurementName} ${formatMeasurement(value, unit, 3)}`.trim();
 }
 
+function getHlrText(result: LpcResult): string | null {
+  const value = result.HLR ?? result.limits?.fromResult?.HLR ?? result.limits?.cachedAtStart?.HLR ?? null;
+  const unit = result.HLR_unit ?? result.limits?.fromResult?.HLR_unit ?? result.limits?.cachedAtStart?.HLR_unit ?? null;
+  return value === null || value === undefined ? null : formatMeasurement(value, unit, 3);
+}
+
 function getTotalAbsId(result: LpcResult): string {
   if (result.totalAbs && result.uniqueId) return `${result.totalAbs} / ${result.uniqueId}`;
   return result.uniqueId ?? result.totalAbs ?? '-';
 }
 
-export function LastResultPanel({ result }: { result: LpcResult | null }) {
+export function LastResultPanel({ result, llControlAction = null }: { result: LpcResult | null; llControlAction?: { visible: boolean; loading?: boolean; message?: string | null; onClick?: () => void } | null }) {
   return (
+    <>
     <section className="last-result-panel">
       <div className={`result-status ${result ? getResultClass(result.result) : 'status-unknown'}`}>
         <span>Ostatni wynik</span>
@@ -32,10 +39,21 @@ export function LastResultPanel({ result }: { result: LpcResult | null }) {
           <div><span>Program</span><strong>{result.programText ?? result.program ?? '-'}</strong></div>
           <div><span>TotalAbs / ID</span><strong>{getTotalAbsId(result)}</strong></div>
           <div><span>Data / czas</span><strong>{result.testerDate ?? '-'} {result.testerTime ?? ''}</strong></div>
+          {getHlrText(result) && <div className="limit-hlr-row"><span>Limit HLR</span><strong>{getHlrText(result)}</strong></div>}
         </div>
       ) : (
         <p className="empty-state">Brak końcowego wyniku testu</p>
       )}
     </section>
+    {llControlAction?.visible && (
+      <div className="last-result-ll-action">
+        <button type="button" className="ll-control-button compact horizontal" title="Oznacz sztukę jako wymagającą kontroli lidera linii." onClick={llControlAction.onClick} disabled={llControlAction.loading}>
+          <strong>{llControlAction.loading ? 'Oznaczanie...' : 'Kontrola LL'}</strong>
+          <small>Oznacz sztukę do kontroli lidera</small>
+          {llControlAction.message && <span className="ll-control-status">{llControlAction.message}</span>}
+        </button>
+      </div>
+    )}
+    </>
   );
 }

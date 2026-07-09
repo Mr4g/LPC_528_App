@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import type { LpcResult } from '../../shared/types';
+import type { LpcResult, ProgramLimitSnapshot } from '../../shared/types';
 import { formatMeasurement, formatNumber, getResultBadgeClass, getResultDisplayLabel } from '../formatters';
 
 export interface PressureChartPoint {
@@ -26,6 +26,7 @@ export const CHART_MAX_RENDER_POINTS = 120;
 interface PressureChartProps {
   points: PressureChartPoint[];
   lastResult: LpcResult | null;
+  limit?: ProgramLimitSnapshot | null;
 }
 
 function buildTicks(min: number, max: number, count: number): number[] {
@@ -170,7 +171,7 @@ export function buildChartRenderPoints(points: PressureChartPoint[]): PressureCh
   return downsampleChartPoints(getVisibleChartPoints(buildChartPressurePoints(points)));
 }
 
-export function PressureChart({ points, lastResult }: PressureChartProps) {
+export function PressureChart({ points, lastResult, limit = null }: PressureChartProps) {
   const pressureSeries = useMemo(() => buildChartRenderPoints(points), [points]);
   const hasLine = pressureSeries.length >= 2;
   const width = 930;
@@ -194,8 +195,11 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
   const yRange = maxY - minY || 1;
   const xScale = (x: number) => plot.left + ((x - minX) / xRange) * (plot.right - plot.left);
   const yScale = (y: number) => plot.bottom - ((y - minY) / yRange) * (plot.bottom - plot.top);
-  const rawMinRl = rlSeries.length ? Math.min(...rlSeries.map((point) => point.leakValue)) : 0;
-  const rawMaxRl = rlSeries.length ? Math.max(...rlSeries.map((point) => point.leakValue)) : 1;
+  const hlrLimit = Number.isFinite(lastResult?.HLR ?? null) ? { HLR: lastResult!.HLR, HLR_unit: lastResult!.HLR_unit } : limit;
+  const hlrValue = Number.isFinite(hlrLimit?.HLR ?? null) ? hlrLimit!.HLR as number : null;
+  const rlValuesForScale = [...rlSeries.map((point) => point.leakValue), ...(hlrValue !== null ? [hlrValue] : [])];
+  const rawMinRl = rlValuesForScale.length ? Math.min(...rlValuesForScale) : 0;
+  const rawMaxRl = rlValuesForScale.length ? Math.max(...rlValuesForScale) : 1;
   const rlPadding = Math.max((rawMaxRl - rawMinRl) * 0.18, 0.5);
   const minRl = rawMinRl - rlPadding;
   const maxRl = rawMaxRl + rlPadding;
@@ -203,6 +207,8 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
   const rlScale = (value: number) => plot.bottom - ((value - minRl) / rlRange) * (plot.bottom - plot.top);
   const polyline = pressureSeries.map((point) => `${xScale(point.elapsedTimeSec)},${yScale(point.pressureBar)}`).join(' ');
   const rlPolyline = rlSeries.map((point) => `${xScale(point.elapsedTimeSec)},${rlScale(point.leakValue)}`).join(' ');
+  const hlrY = hlrValue !== null ? rlScale(hlrValue) : null;
+  const hlrLabel = hlrValue !== null ? `HLR ${formatMeasurement(hlrValue, hlrLimit?.HLR_unit ?? 'Pa/s', 3)}` : null;
   const latestLiveLeakPoint = [...liveRlSeries].reverse().find((point) => point.liveLeakValue !== null && point.liveLeakValue !== undefined) ?? null;
   const latestLiveLeakLabel = latestLiveLeakPoint
     ? `RL ${formatMeasurement(latestLiveLeakPoint.liveLeakValue, latestLiveLeakPoint.liveLeakUnit, 3)}`
@@ -267,6 +273,12 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
             <text x={plot.right + 12} y={rlScale(tick) + 5}>{formatNumber(tick, 2)}</text>
           </g>
         ))}
+        {hlrY !== null && (
+          <g className="chart-hlr-limit">
+            <line x1={plot.left} y1={hlrY} x2={plot.right} y2={hlrY} strokeDasharray="8 6" />
+            <text x={plot.right - 8} y={Math.max(plot.top + 14, hlrY - 8)} textAnchor="end">{hlrLabel}</text>
+          </g>
+        )}
         {hasLine && <polyline className="chart-pressure-line" points={polyline} />}
         {rlSeries.length >= 2 && <polyline className="chart-rl-line" points={rlPolyline} />}
         {rlSeries.map((point) => (
@@ -312,6 +324,7 @@ export function PressureChart({ points, lastResult }: PressureChartProps) {
       <div className="chart-legend">
         <span><i className="legend-line" /> linia ciśnienia</span>
         <span><i className="legend-rl-line" /> RL [Pa/s]</span>
+        {hlrLabel && <span><i className="legend-hlr-line" /> {hlrLabel}</span>}
         <span><i className="legend-dot" /> punkt końcowy testu</span>
         <span><i className={`legend-result ${finalClass}`} /> wynik końcowy</span>
         {latestLiveLeakLabel && <span className="legend-live-rl">{latestLiveLeakPoint?.segment} {latestLiveLeakLabel}</span>}

@@ -1,7 +1,7 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { getLatestEstimatedLeakTrend, normalizeEstimatedLeakWindowPoints } from '../shared/estimatedLeakTrend';
-import type { BarcodeScan, CurrentTest, LpcResult, LpcStreamPoint, ProgramStartRequest, ProgramStartResult } from '../shared/types';
+import type { BarcodeScan, CurrentTest, LpcResult, ProgramLimitSnapshot, LpcStreamPoint, ProgramStartRequest, ProgramStartResult } from '../shared/types';
 import { formatDateTime, formatMeasurement, formatNumber, formatResultLabel, getConnectionLabel, getResultClass } from './formatters';
 import { LastResultPanel } from './components/LastResultPanel';
 import carrierLogo from './assets/carrier-logo.svg';
@@ -23,9 +23,9 @@ interface ScanAcceptedPayload {
 interface ScanRejectedPayload {
   ok?: false;
   barcode: string;
-  error: 'NO_MAPPING' | 'TEST_IN_PROGRESS';
-  code?: 'TEST_IN_PROGRESS';
-  errorCode?: 'TEST_IN_PROGRESS';
+  error: 'NO_MAPPING' | 'TEST_IN_PROGRESS' | 'LL_CONTROL_REQUIRED';
+  code?: 'TEST_IN_PROGRESS' | 'LL_CONTROL_REQUIRED';
+  errorCode?: 'TEST_IN_PROGRESS' | 'LL_CONTROL_REQUIRED';
   message: string;
   activeTest?: TestSessionState;
 }
@@ -61,6 +61,8 @@ interface LpcStatusPayload {
   socketDestroyed?: boolean;
   socketWritable?: boolean;
 }
+
+interface MasterSampleStatus { ok?: true; enabled: boolean; requestedByUserId?: string | null; requestedByLogin?: string | null; requestedByRole?: string | null; requestedAt?: string | null; labelCopiesOnOk?: number; }
 
 interface SplunkStatusPayload {
   ok: true;
@@ -123,6 +125,8 @@ interface EnrichedLpcResult extends LpcResult {
   currentTestProgram?: number;
   currentTestProgramText?: string;
   currentTestSelectedAt?: string;
+  cachedLimitsAtStart?: ProgramLimitSnapshot | null;
+  llControl?: { resolvedByThisTest?: boolean };
 }
 
 type SocketHandler<TPayload> = (payload: TPayload) => void;
@@ -141,6 +145,7 @@ interface SocketLike {
   on(event: 'lpc:curve-completed', handler: SocketHandler<{ points: LpcCurvePoint[] }>): void;
   on(event: 'lpc:results-updated', handler: SocketHandler<{ results: EnrichedLpcResult[] }>): void;
   on(event: 'test:completed', handler: SocketHandler<EnrichedLpcResult>): void;
+  on(event: 'master-sample:updated', handler: SocketHandler<MasterSampleStatus>): void;
   on(event: 'test-session:updated', handler: SocketHandler<TestSessionState>): void;
   off(event: string): void;
   disconnect(): void;
@@ -177,6 +182,7 @@ interface TestSessionState {
   completedAt: string | null;
   timeoutAt: string | null;
   message: string | null;
+  masterSample?: MasterSampleStatus;
 }
 
 interface FinalMarkerResult {
@@ -188,6 +194,8 @@ interface FinalMarkerResult {
   point: LpcCurvePoint | null;
   receivedAt: string;
 }
+
+interface LlControlFlag { id: string; barcode: string; createdAt: string; createdByLogin: string | null; createdByRole?: string | null; createdFromProgramText: string | null; createdFromResultStatus: string | null; createdFromLeakValue: number | null; createdFromLeakUnit: string | null; createdFromUniqueId: string | null; }
 
 interface AuthUser {
   id: string;
@@ -304,6 +312,16 @@ async function fetchLpcStatus(): Promise<LpcStatusPayload | null> {
 
 async function fetchTestSessionStatus(): Promise<TestSessionState | null> {
   return fetchJson<TestSessionState>('/api/test-session/status');
+}
+
+async function fetchMasterSampleStatus(): Promise<MasterSampleStatus> {
+  const payload = await fetchJson<MasterSampleStatus>('/api/master-sample/status');
+  return payload ?? { enabled: false };
+}
+
+async function fetchOpenLlFlags(): Promise<LlControlFlag[]> {
+  const payload = await fetchJson<{ ok: true; flags: LlControlFlag[] }>('/api/ll-control/open');
+  return payload?.flags ?? [];
 }
 
 async function fetchSplunkStatus(): Promise<SplunkStatusPayload | null> {
@@ -999,6 +1017,13 @@ function App() {
   const [splunkStatus, setSplunkStatus] = useState<SplunkStatusPayload | null>(null);
   const [idleLogoutMessage, setIdleLogoutMessage] = useState<string | null>(null);
   const [idleTimeoutMs, setIdleTimeoutMs] = useState(15 * 60 * 1000);
+  const [llModal, setLlModal] = useState<string | null>(null);
+  const [llFlagMessage, setLlFlagMessage] = useState<string | null>(null);
+  const [llFlagging, setLlFlagging] = useState(false);
+  const [activeLimit, setActiveLimit] = useState<ProgramLimitSnapshot | null>(null);
+  const [openLlFlags, setOpenLlFlags] = useState<LlControlFlag[]>([]);
+  const [llListModalOpen, setLlListModalOpen] = useState(false);
+  const [masterSampleStatus, setMasterSampleStatus] = useState<MasterSampleStatus>({ enabled: false });
   const [eventCounters, setEventCounters] = useState({
     streamEvents: 0,
     resultEvents: 0,
@@ -1189,6 +1214,12 @@ function App() {
     if (nextStatus) setLpcStatus(nextStatus);
   }
 
+  async function refreshOpenLlFlags(): Promise<LlControlFlag[]> {
+    const flags = await fetchOpenLlFlags();
+    setOpenLlFlags(flags);
+    return flags;
+  }
+
   async function refreshSplunkStatus() {
     const nextStatus = await fetchSplunkStatus();
     if (nextStatus) setSplunkStatus(nextStatus);
@@ -1285,6 +1316,7 @@ function App() {
   useEffect(() => {
     void refreshLpcStatus();
     void refreshSplunkStatus();
+    void fetchMasterSampleStatus().then(setMasterSampleStatus);
     void fetchTestSessionStatus().then((payload) => {
       if (payload) {
         setTestSession(payload);
@@ -1337,12 +1369,12 @@ function App() {
         setStatus(payload.programStart.success ? 'program-selected' : 'start-error');
         if (payload.activeTest) setTestSession(payload.activeTest);
         void loadInstructionForMapping(payload.currentTest.mappingId);
+        setActiveLimit(payload.currentTest.cachedLimitsAtStart ?? null);
         if (payload.programStart.success && (isNewTest || !hasLiveCurveRef.current)) resetChartForNewTest();
       });
 
       socket.on('scan:rejected', (payload: ScanRejectedPayload) => {
-        setLastRejected(payload);
-        setStatus('no-mapping');
+        if (payload.errorCode === 'LL_CONTROL_REQUIRED' || payload.code === 'LL_CONTROL_REQUIRED') { setLlModal(payload.message); setBarcode(''); scanBufferRef.current = ''; setStatus('ready'); window.setTimeout(() => setLlModal(null), 10_000); } else { setLastRejected(payload); setStatus('no-mapping'); }
       });
 
       socket.on('lpc:status', setLpcStatus);
@@ -1382,6 +1414,8 @@ function App() {
 
       socket.on('lpc:result', (payload) => {
         setEventCounters((counters) => ({ ...counters, resultEvents: counters.resultEvents + 1 }));
+        setActiveLimit(payload.limits?.fromResult ?? payload.cachedLimitsAtStart ?? null);
+        setActiveLimit(payload.limits?.fromResult ?? payload.cachedLimitsAtStart ?? null);
         setLastResult(payload);
         chartStatusRef.current = 'completed';
         setChartStatus('completed');
@@ -1390,6 +1424,7 @@ function App() {
         setFinalMarkerResult(buildFinalMarker(payload, getLastKnownCurvePoint()));
         setResultHistory((results) => mergeResultIntoHistory(results, payload, 50));
         void refreshSplunkStatus();
+        if (payload.llControl?.resolvedByThisTest) void refreshOpenLlFlags();
         focusBarcodeInput(180);
       });
 
@@ -1425,7 +1460,10 @@ function App() {
         setResultHistory((results) => mergeResultIntoHistory(results, payload, 50));
         void refreshSplunkStatus();
         focusBarcodeInput(220);
+        if (payload.llControl?.resolvedByThisTest) void refreshOpenLlFlags();
       });
+
+      socket.on('master-sample:updated', setMasterSampleStatus);
 
       socket.on('test-session:updated', (payload) => {
         setTestSession(payload);
@@ -1449,6 +1487,7 @@ function App() {
       activeSocket?.off('lpc:curve-updated');
       activeSocket?.off('lpc:curve-completed');
       activeSocket?.off('test:completed');
+      activeSocket?.off('master-sample:updated');
       activeSocket?.off('test-session:updated');
       if (chartUpdateTimerRef.current !== null) window.clearTimeout(chartUpdateTimerRef.current);
       chartUpdateTimerRef.current = null;
@@ -1538,6 +1577,7 @@ function App() {
 
     if (!response.ok || !('programStart' in payload)) {
       const rejectedPayload = payload as ScanRejectedPayload;
+      if (rejectedPayload.errorCode === 'LL_CONTROL_REQUIRED' || rejectedPayload.code === 'LL_CONTROL_REQUIRED') { setLlModal(rejectedPayload.message); setBarcode(''); scanBufferRef.current = ''; setStatus('ready'); window.setTimeout(() => setLlModal(null), 10_000); focusBarcodeInput(0); return; }
       if (rejectedPayload.errorCode === 'TEST_IN_PROGRESS' || rejectedPayload.code === 'TEST_IN_PROGRESS') {
         setLastRejected(rejectedPayload);
         if (rejectedPayload.activeTest) setTestSession(rejectedPayload.activeTest);
@@ -1550,6 +1590,7 @@ function App() {
     }
 
     resetChartForNewTest();
+    setActiveLimit(payload.currentTest.cachedLimitsAtStart ?? null);
     setLastAccepted(payload);
     setLastRejected(null);
     setBarcode('');
@@ -1557,6 +1598,51 @@ function App() {
     if (payload.activeTest) setTestSession(payload.activeTest);
     await loadInstructionForMapping(payload.currentTest.mappingId);
     if (!payload.programStart.success) focusBarcodeInput(0);
+  }
+
+  async function flagLastResultForLl() {
+    const testId = lastResult?.id ?? testSession?.activeTestId ?? null;
+    console.debug(`[LL_CONTROL_UI] flag click barcode=${lastResult?.barcode ?? '-'} testId=${testId ?? '-'} resultStatus=${lastResult?.result ?? '-'}`);
+    if (!lastResult?.barcode || !testId) {
+      setLlFlagMessage('Nie można oznaczyć sztuki — brak barcode lub ID testu.');
+      return;
+    }
+    setLlFlagging(true); setLlFlagMessage(null);
+    const response = await fetch('/api/ll-control/flag', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ barcode: lastResult.barcode, testId, reason: 'Operator requested LL control after reject' }) });
+    const payload = await response.json() as { ok: boolean; created?: boolean; existing?: boolean; message?: string };
+    console.debug(`[LL_CONTROL_UI] response ok=${response.ok} created=${payload.created ?? false} existing=${payload.existing ?? false}`);
+    setLlFlagging(false);
+    setLlFlagMessage(response.ok ? (payload.existing ? 'Sztuka już oczekuje na kontrolę LL' : 'Oznaczono do kontroli LL') : (payload.message ?? 'Nie udało się oznaczyć kontroli LL.'));
+    if (response.ok) {
+      console.debug('[LL_CONTROL_UI] flag created, refreshing open list');
+      const flags = await refreshOpenLlFlags();
+      console.debug(`[LL_CONTROL_UI] open list refreshed count=${flags.length}`);
+    }
+  }
+
+
+  function canShowLlControlAction(result: EnrichedLpcResult | null): boolean {
+    const visible = Boolean(result && authUser?.role === 'operator' && result.barcode && !testSession?.locked && ['NOK', 'REJECT', 'UNKNOWN'].includes(String(result.result).toUpperCase()));
+    console.debug(`[LL_CONTROL_UI] visible=${visible} reason=${result?.result ?? 'none'} barcode=${result?.barcode ?? '-'}`);
+    return visible;
+  }
+
+  async function openLlControlsModal() {
+    await refreshOpenLlFlags();
+    setLlListModalOpen(true);
+    setUserMenuOpen(false);
+  }
+
+  async function toggleMasterSample() {
+    if (!isManager(authUser)) return;
+    const action = masterSampleStatus.enabled ? 'disable' : 'enable';
+    const response = await fetch(`/api/master-sample/${action}`, { method: 'POST', credentials: 'include' });
+    if (response.ok) {
+      const next = await response.json() as MasterSampleStatus;
+      setMasterSampleStatus(next);
+    }
+    setUserMenuOpen(false);
+    focusBarcodeInput(120);
   }
 
   async function submitScan(event: FormEvent<HTMLFormElement>) {
@@ -1778,6 +1864,9 @@ function App() {
             canManageUsers={isManager(authUser)}
             canManagePrograms={canManagePrograms(authUser)}
             canOpenDiagnostics={canOpenDiagnostics(authUser)}
+            canUseMasterSample={isManager(authUser)}
+            masterSampleEnabled={masterSampleStatus.enabled}
+            onMasterSampleToggle={() => void toggleMasterSample()}
             open={userMenuOpen}
             onToggle={() => setUserMenuOpen((open) => {
               const nextOpen = !open;
@@ -1792,6 +1881,7 @@ function App() {
               setUserMenuOpen(false);
               setResultsOpen(true);
             }}
+            onLlControls={() => void openLlControlsModal()}
             onUsers={() => {
               setUserMenuOpen(false);
               navigateTo('/admin/users', setRoute);
@@ -1887,7 +1977,7 @@ function App() {
           )}
         </aside>
 
-        <section className="panel live-panel">
+        <section className={`panel live-panel${masterSampleStatus.enabled ? ' live-panel--master-sample' : ''}`}>
           <div className="panel-header">
             <span>Live test</span>
             <strong>{lastStream ? liveSegment : 'Oczekiwanie na dane LPC'}</strong>
@@ -1906,11 +1996,23 @@ function App() {
             )}
           </div>
 
-          <PressureChart points={displayedCurvePoints} lastResult={finalMarkerResult?.result ?? chartFinalResult} />
+          <PressureChart points={displayedCurvePoints} lastResult={finalMarkerResult?.result ?? chartFinalResult} limit={activeLimit} />
         </section>
 
         <aside className="panel result-column">
-          <LastResultPanel result={lastResult} />
+          <LastResultPanel result={lastResult} llControlAction={{ visible: canShowLlControlAction(lastResult), loading: llFlagging, message: llFlagMessage, onClick: () => void flagLastResultForLl() }} />
+          {isManager(authUser) && openLlFlags.length > 0 && (
+            <section className="ll-open-panel compact">
+              <div className="panel-header"><span>Oczekujące kontrole LL</span></div>
+              <div className="ll-open-table results-table" aria-label="Skrócona lista kontroli LL">
+                <div className="ll-open-row ll-open-row-header"><span>Barcode</span><span>Program</span><span>Wynik</span><span>Od kiedy</span><span>Oznaczył</span></div>
+                {openLlFlags.slice(0, 2).map((flag) => (
+                  <div className="ll-open-row compact" key={flag.id}><strong>{flag.barcode}</strong><span>{flag.createdFromProgramText ?? '-'}</span><span>{flag.createdFromResultStatus ?? 'OPEN'}</span><span>{formatDateTime(flag.createdAt)}</span><span>{flag.createdByLogin ?? '-'}</span></div>
+                ))}
+              </div>
+              {openLlFlags.length > 2 && <button type="button" className="results-cta ll-full-list-button" onClick={() => void openLlControlsModal()}><strong>Pełna lista</strong><span>{openLlFlags.length} oczekujących kontroli</span></button>}
+            </section>
+          )}
           <section className="results-preview" aria-label="Wyniki testów">
             <div className="results-preview-header">
               <span>Wyniki testów</span>
@@ -1924,6 +2026,31 @@ function App() {
           </section>
         </aside>
       </section>
+
+
+      {llListModalOpen && (
+        <div className="app-modal-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setLlListModalOpen(false);
+        }}>
+          <section className="app-modal ll-list-modal" role="dialog" aria-modal="true" aria-label="Oczekujące kontrole LL">
+            <header className="modal-header"><div><span className="eyebrow">Kontrola LL</span><h2>Oczekujące kontrole LL</h2></div><button type="button" className="modal-close" onClick={() => setLlListModalOpen(false)}>×</button></header>
+            <div className="ll-modal-list results-table">
+              {openLlFlags.length === 0 ? <p className="empty-state">Brak oczekujących kontroli LL</p> : (
+                <>
+                  <div className="ll-modal-row ll-modal-row-header"><span>Barcode</span><span>Program</span><span>Wynik</span><span>RL</span><span>UniqueId</span><span>Oznaczył</span><span>Data</span></div>
+                  {openLlFlags.map((flag) => (
+                    <div className="ll-modal-row" key={flag.id}>
+                      <strong>{flag.barcode}</strong><span>{flag.createdFromProgramText ?? '-'}</span><span>{flag.createdFromResultStatus ?? '-'}</span><span>{formatMeasurement(flag.createdFromLeakValue, flag.createdFromLeakUnit, 3)}</span><small>{flag.createdFromUniqueId ?? '-'}</small><span>{flag.createdByLogin ?? '-'} / {flag.createdByRole ?? '-'}</span><span>{formatDateTime(flag.createdAt)}</span>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {llModal && (<div className="app-modal-backdrop ll-block-backdrop" role="presentation"><section className="app-modal ll-block-modal" role="dialog" aria-modal="true" aria-labelledby="ll-block-title"><div className="ll-block-icon" aria-hidden="true">!</div><header className="modal-header"><div><span className="eyebrow">Kontrola LL</span><h2 id="ll-block-title">Wymagana kontrola LL</h2></div></header><p>Ta sztuka wymaga kontroli lidera linii. Zaloguj LL, aby wykonać test.</p><small>{llModal}</small><button type="button" className="scan-submit" onClick={() => { setLlModal(null); setBarcode(''); focusBarcodeInput(100); }}>OK</button></section></div>)}
 
       {resultsOpen && (
         <div className="app-modal-backdrop" role="presentation" onMouseDown={(event) => {

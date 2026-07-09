@@ -138,3 +138,15 @@ it('renders cached HLR limit on the RL axis and hides it when absent', () => {
   expect(withLimit).toContain('HLR 10,788 Pa/s');
   expect(withoutLimit).not.toContain('chart-hlr-limit');
 });
+
+it('renders compact Kontrola LL action before the chart legend for NOK-like results', () => {
+  const points = [
+    { elapsedTimeSec: 1, pressureMbar: 5900, pressureBar: 5.9, segment: 'STG' },
+    { elapsedTimeSec: 2, pressureMbar: 5990, pressureBar: 5.99, segment: 'DPT', liveLeakValue: 3.7, liveLeakUnit: 'Pa/s' },
+  ];
+  const html = renderToStaticMarkup(React.createElement(PressureChart, { lastResult: { result: 'REJECT', leakValue: 12, leakUnit: 'Pa/s', leakType: 'RL', barcode: 'B1' } as never, points, llControlAction: { visible: true, message: 'Oznaczono do kontroli LL' } }));
+
+  expect(html).toContain('Kontrola jakości:');
+  expect(html).toContain('Kontrola LL');
+  expect(html.indexOf('chart-quality-action')).toBeLessThan(html.indexOf('chart-legend'));
+});

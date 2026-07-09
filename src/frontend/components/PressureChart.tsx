@@ -27,6 +27,7 @@ interface PressureChartProps {
   points: PressureChartPoint[];
   lastResult: LpcResult | null;
   limit?: ProgramLimitSnapshot | null;
+  llControlAction?: { visible: boolean; loading?: boolean; message?: string | null; onClick?: () => void } | null;
 }
 
 function buildTicks(min: number, max: number, count: number): number[] {
@@ -171,7 +172,7 @@ export function buildChartRenderPoints(points: PressureChartPoint[]): PressureCh
   return downsampleChartPoints(getVisibleChartPoints(buildChartPressurePoints(points)));
 }
 
-export function PressureChart({ points, lastResult, limit = null }: PressureChartProps) {
+export function PressureChart({ points, lastResult, limit = null, llControlAction = null }: PressureChartProps) {
   const pressureSeries = useMemo(() => buildChartRenderPoints(points), [points]);
   const hasLine = pressureSeries.length >= 2;
   const width = 930;
@@ -319,6 +320,15 @@ export function PressureChart({ points, lastResult, limit = null }: PressureChar
         <div className={`chart-result-overlay ${finalClass}`}>
           <strong>{resultLabel}</strong>
           <span>{measurementLabel}</span>
+        </div>
+      )}
+      {llControlAction?.visible && (
+        <div className="chart-quality-action" data-testid="chart-ll-control-action">
+          <span>Kontrola jakości:</span>
+          <button type="button" className="ll-control-button compact" title="Oznacz sztukę do kontroli lidera linii" onClick={llControlAction.onClick} disabled={llControlAction.loading}>
+            {llControlAction.loading ? 'Oznaczanie...' : 'Kontrola LL'}
+          </button>
+          {llControlAction.message && <small>{llControlAction.message}</small>}
         </div>
       )}
       <div className="chart-legend">

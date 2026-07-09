@@ -34,3 +34,26 @@ describe('operator top bar and PDF modal layout', () => {
     expect(mainSource).toContain('Wylogowano z powodu bezczynności.');
   });
 });
+
+describe('LL control ergonomic UI layout', () => {
+  const mainSource = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8');
+  const lastResultPanelSource = readFileSync(new URL('./components/LastResultPanel.tsx', import.meta.url), 'utf8');
+  const chartSource = readFileSync(new URL('./components/PressureChart.tsx', import.meta.url), 'utf8');
+
+  it('moves the Kontrola LL action out of the last-result panel and into the chart before legend', () => {
+    expect(lastResultPanelSource).not.toContain('ll-control-button');
+    expect(chartSource.indexOf('chart-quality-action')).toBeGreaterThan(-1);
+    expect(chartSource.indexOf('chart-quality-action')).toBeLessThan(chartSource.indexOf('chart-legend'));
+  });
+
+  it('limits the inline LL controls list to two items and exposes Pełna lista', () => {
+    expect(mainSource).toContain('openLlFlags.slice(0, 2).map');
+    expect(mainSource).toContain('Pełna lista');
+    expect(mainSource).toContain('llListModalOpen');
+  });
+
+  it('adds Kontrole LL to the burger menu and opens the shared modal', () => {
+    expect(mainSource).toContain('onLlControls={() => void openLlControlsModal()}');
+    expect(mainSource).toContain('Oczekujące kontrole LL');
+  });
+});

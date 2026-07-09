@@ -56,7 +56,7 @@ export function createLlControlRouter(options: { database: AppDatabase; splunkBu
     const flag = options.database.insertLlControlFlag({ id: crypto.randomUUID(), barcode, status: LL_OPEN, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), createdByUserId: req.user?.id ?? null, createdByLogin: req.user?.login ?? null, createdByRole: req.user?.role ?? null, createdFromTestId: testId, createdFromProgramText: result.programText, createdFromProgramNumber: result.programText?.startsWith('P') ? Number(result.programText.slice(1)) : null, createdFromResultStatus: normalizeResultStatus(result.result), createdFromResultRawStatus: result.resultRawStatus ?? result.result, createdFromLeakValue: result.leakValue ?? result.RL, createdFromLeakUnit: result.leakUnit ?? result.RL_unit, createdFromUniqueId: result.uniqueId, reason: String(req.body?.reason ?? 'Operator requested LL control after NOK') });
     emitLlFlagged(options.splunkBuffer, options.splunkConfig, flag); res.json({ ok: true, existing: false, flag });
   });
-  router.get('/open', requireRole(['admin', 'line_leader']), (_req, res) => res.json({ ok: true, flags: options.database.listOpenLlControlFlags() }));
+  router.get('/open', (_req, res) => res.json({ ok: true, flags: options.database.listOpenLlControlFlags() }));
   router.get('/history', requireRole(['admin', 'line_leader']), (req, res) => res.json({ ok: true, flags: options.database.listLlControlHistory(typeof req.query.barcode === 'string' ? req.query.barcode : undefined) }));
   return router;
 }

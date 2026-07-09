@@ -14,6 +14,7 @@ interface UserMenuProps {
   onUsers: () => void;
   onPrograms: () => void;
   onResults: () => void;
+  onLlControls: () => void;
   onDiagnostics: () => void;
   onThemeChange: (theme: 'light' | 'dark') => void;
   onLogout: () => void;
@@ -53,6 +54,7 @@ export function UserMenu(props: UserMenuProps) {
       {props.open && (
         <div className="user-menu-popover">
           <button type="button" onClick={props.onResults}>Wyniki testów</button>
+          <button type="button" onClick={props.onLlControls}>Kontrole LL</button>
           {props.canManageUsers && <button type="button" onClick={props.onUsers}>Użytkownicy</button>}
           {props.canManagePrograms && <button type="button" onClick={props.onPrograms}>Programy</button>}
           {props.canOpenDiagnostics && <button type="button" onClick={props.onDiagnostics}>Diagnostyka</button>}

@@ -2432,3 +2432,14 @@ body.theme-dark .login-info-message {
 .chart-hlr-limit text { fill: #ef4444; font-size: 14px; font-weight: 800; }
 .legend-hlr-line { display: inline-block; width: 28px; border-top: 3px dashed #ef4444; transform: translateY(-3px); }
 .limit-hlr-row strong { color: #ef4444; }
+.chart-quality-action { display: inline-flex; align-items: center; gap: 0.6rem; margin: 0.45rem 0 0.25rem; padding: 0.35rem 0.55rem; border: 1px solid rgba(245,158,11,.45); border-radius: 12px; background: rgba(245,158,11,.10); width: fit-content; max-width: 100%; }
+.chart-quality-action span { font-size: 0.84rem; font-weight: 700; opacity: .9; }
+.chart-quality-action small { font-size: 0.78rem; color: #f59e0b; font-weight: 700; }
+.ll-control-button.compact { min-height: 40px; padding: 0.55rem 0.85rem; font-size: 0.9rem; }
+.ll-open-panel.compact { margin-top: .75rem; }
+.ll-open-row.compact { grid-template-columns: 1fr; gap: .15rem; padding: .5rem .6rem; font-size: .78rem; }
+.ll-full-list-button { margin-top: .45rem; width: 100%; }
+.ll-list-modal { max-width: 920px; }
+.ll-modal-list { max-height: 62vh; overflow: auto; display: grid; gap: .45rem; padding-right: .25rem; }
+.ll-modal-row { display: grid; grid-template-columns: minmax(150px, 1.2fr) minmax(150px, 1fr) minmax(120px, .8fr) minmax(120px, .8fr) minmax(90px, .6fr) minmax(120px, .8fr); gap: .5rem; align-items: center; padding: .65rem; border: 1px solid rgba(148,163,184,.25); border-radius: 12px; font-size: .82rem; }
+@media (max-width: 900px) { .ll-modal-row { grid-template-columns: 1fr; } .chart-quality-action { display: flex; width: auto; } }

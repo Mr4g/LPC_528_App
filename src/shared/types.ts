@@ -1,6 +1,20 @@
 export type MeasurementValue = number | null;
 export type LpcResultValue = 'ACCEPT' | 'REJECT' | 'ERROR' | 'UNKNOWN';
 export type LabelPrintMode = 'ok_only' | 'ok_and_nok';
+export interface MasterSampleMetadata {
+  enabled: boolean;
+  requestedByUserId?: string | null;
+  requestedByLogin?: string | null;
+  requestedByRole?: string | null;
+  requestedAt?: string | null;
+  labelCopiesOnOk?: number;
+  labelCopiesRequested?: number;
+  labelCopiesPrinted?: number;
+  printTriggered?: boolean;
+  resetAfterTest?: boolean;
+  printError?: string | null;
+}
+
 
 export interface LpcMeasurementMap {
   [key: string]: {
@@ -56,6 +70,7 @@ export interface LpcResult {
   operatorLogin?: string | null;
   operatorRole?: string | null;
   labelPrintMode?: LabelPrintMode;
+  masterSample?: MasterSampleMetadata;
   resultFrameFormat?: 1 | 2;
   resultRawStatus?: string | null;
   errorCode?: string | null;
@@ -117,6 +132,7 @@ export interface CurrentTest {
   operatorLogin?: string;
   operatorRole?: string;
   labelPrintMode?: LabelPrintMode;
+  masterSample?: MasterSampleMetadata;
   llControl?: { requiredAtStart: boolean; flagId: string | null; testAllowedByRole: boolean; performedByRequiredRole: boolean; resolvedByThisTest: boolean };
 }
 
@@ -149,6 +165,7 @@ export interface ProgramStartRequest {
   operatorLogin?: string;
   operatorRole?: string;
   labelPrintMode?: LabelPrintMode;
+  masterSample?: MasterSampleMetadata;
   llControl?: { requiredAtStart: boolean; flagId: string | null; testAllowedByRole: boolean; performedByRequiredRole: boolean; resolvedByThisTest: boolean };
 }
 

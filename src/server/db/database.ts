@@ -188,6 +188,7 @@ function rowToResult(row: Record<string, unknown>): LpcResult {
     normalized: String(row.normalized ?? ''),
     operatorLogin: row.operatorLogin === null ? null : String(row.operatorLogin),
     operatorRole: row.operatorRole === null ? null : String(row.operatorRole),
+    masterSample: row.masterSampleEnabled === undefined ? undefined : { enabled: Boolean(row.masterSampleEnabled), requestedByLogin: row.masterSampleRequestedByLogin === null || row.masterSampleRequestedByLogin === undefined ? null : String(row.masterSampleRequestedByLogin), requestedAt: row.masterSampleRequestedAt === null || row.masterSampleRequestedAt === undefined ? null : String(row.masterSampleRequestedAt), labelCopiesPrinted: row.masterSampleLabelCopiesPrinted === null || row.masterSampleLabelCopiesPrinted === undefined ? 0 : Number(row.masterSampleLabelCopiesPrinted) },
   };
 }
 
@@ -282,15 +283,15 @@ export class AppDatabase {
       id, receivedAt, source, messageId, messageType, channel, port, program, programText, programNumber, linkInfo, result,
       testerTime, testerDate, uniqueId, totalAbs, programEvaluation, spcFlag, barcode, barcodeFromResult, operatorLogin, operatorRole,
       testType, testEvaluation, leakType, leakValue, leakUnit, RL, RL_unit, Pt, Pt_unit, EDC, EDC_unit, PL, PL_unit, LLR, LLR_unit,
-      HLR, HLR_unit, FPR, FPR_unit, measurementsJson, raw, normalized, currentTestId, createdAt
-    ) VALUES (${Array.from({ length: 46 }, () => '?').join(', ')})`).run(
+      HLR, HLR_unit, FPR, FPR_unit, measurementsJson, raw, normalized, currentTestId, createdAt, masterSampleEnabled, masterSampleRequestedByLogin, masterSampleRequestedAt, masterSampleLabelCopiesPrinted
+    ) VALUES (${Array.from({ length: 50 }, () => '?').join(', ')})`).run(
       id, result.receivedAt, result.source, result.messageId, result.messageType, result.channel, result.port, result.program, result.programText,
       result.programText?.startsWith('P') ? Number(result.programText.slice(1)) : null, result.linkInfo, result.result,
       result.testerTime, result.testerDate, result.uniqueId, result.totalAbs, result.programEvaluation, result.spcFlag, result.barcode,
       result.barcodeFromResult, result.operatorLogin ?? null, result.operatorRole ?? null, result.testType, result.testEvaluation, result.leakType,
       result.leakValue, result.leakUnit, result.RL, result.RL_unit, result.Pt, result.Pt_unit, result.EDC, result.EDC_unit, result.PL,
       result.PL_unit, result.LLR, result.LLR_unit, result.HLR, result.HLR_unit, result.FPR, result.FPR_unit, JSON.stringify(result.measurements ?? {}),
-      result.raw, result.normalized, currentTestId, createdAt,
+      result.raw, result.normalized, currentTestId, createdAt, result.masterSample?.enabled ? 1 : 0, result.masterSample?.requestedByLogin ?? null, result.masterSample?.requestedAt ?? null, result.masterSample?.labelCopiesPrinted ?? 0,
     );
   }
 
@@ -350,6 +351,12 @@ export class AppDatabase {
     this.db.prepare("UPDATE ll_control_flags SET status = 'RESOLVED', updatedAt = ?, resolvedAt = ?, resolvedByUserId = ?, resolvedByLogin = ?, resolvedByRole = ?, resolvedByTestId = ?, resolvedByProgramText = ?, resolvedByProgramNumber = ?, resolvedByUniqueId = ? WHERE id = ?")
       .run(now, now, patch.resolvedByUserId, patch.resolvedByLogin, patch.resolvedByRole, patch.resolvedByTestId, patch.resolvedByProgramText, patch.resolvedByProgramNumber, patch.resolvedByUniqueId, existing.id);
     return this.listLlControlHistory(barcode).find((flag) => flag.id === existing.id) ?? null;
+  }
+
+  updateTestResultMasterSample(currentTestId: string | null, metadata: { enabled?: boolean; requestedByLogin?: string | null; requestedAt?: string | null; labelCopiesPrinted?: number }): void {
+    if (!currentTestId) return;
+    this.db.prepare('UPDATE test_results SET masterSampleEnabled = ?, masterSampleRequestedByLogin = ?, masterSampleRequestedAt = ?, masterSampleLabelCopiesPrinted = ? WHERE currentTestId = ?')
+      .run(metadata.enabled ? 1 : 0, metadata.requestedByLogin ?? null, metadata.requestedAt ?? null, metadata.labelCopiesPrinted ?? 0, currentTestId);
   }
 
   upsertTestSession(session: StoredTestSession): void {
@@ -416,7 +423,7 @@ export class AppDatabase {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, login TEXT UNIQUE NOT NULL, passwordHash TEXT NOT NULL, role TEXT NOT NULL, isActive INTEGER NOT NULL DEFAULT 1, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, lastLoginAt TEXT NULL, createdBy TEXT NULL);
       CREATE TABLE IF NOT EXISTS program_mappings (id TEXT PRIMARY KEY, barcodePattern TEXT NOT NULL, programNumber INTEGER NOT NULL, programText TEXT NOT NULL, description TEXT NULL, isActive INTEGER NOT NULL DEFAULT 1, matchType TEXT NOT NULL DEFAULT 'exact', labelPrintMode TEXT NOT NULL DEFAULT 'ok_only', createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, createdBy TEXT NULL, updatedBy TEXT NULL);
-      CREATE TABLE IF NOT EXISTS test_results (id TEXT PRIMARY KEY, receivedAt TEXT NOT NULL, source TEXT, messageId TEXT, messageType TEXT, channel TEXT, port TEXT, program TEXT, programText TEXT, programNumber INTEGER, linkInfo TEXT, result TEXT, testerTime TEXT, testerDate TEXT, uniqueId TEXT, totalAbs TEXT, programEvaluation TEXT, spcFlag TEXT, barcode TEXT, barcodeFromResult TEXT, operatorLogin TEXT, operatorRole TEXT, testType TEXT, testEvaluation TEXT, leakType TEXT, leakValue REAL, leakUnit TEXT, RL REAL, RL_unit TEXT, Pt REAL, Pt_unit TEXT, EDC REAL, EDC_unit TEXT, PL REAL, PL_unit TEXT, LLR REAL, LLR_unit TEXT, HLR REAL, HLR_unit TEXT, FPR REAL, FPR_unit TEXT, measurementsJson TEXT, raw TEXT, normalized TEXT, currentTestId TEXT NULL, createdAt TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS test_results (id TEXT PRIMARY KEY, receivedAt TEXT NOT NULL, source TEXT, messageId TEXT, messageType TEXT, channel TEXT, port TEXT, program TEXT, programText TEXT, programNumber INTEGER, linkInfo TEXT, result TEXT, testerTime TEXT, testerDate TEXT, uniqueId TEXT, totalAbs TEXT, programEvaluation TEXT, spcFlag TEXT, barcode TEXT, barcodeFromResult TEXT, operatorLogin TEXT, operatorRole TEXT, testType TEXT, testEvaluation TEXT, leakType TEXT, leakValue REAL, leakUnit TEXT, RL REAL, RL_unit TEXT, Pt REAL, Pt_unit TEXT, EDC REAL, EDC_unit TEXT, PL REAL, PL_unit TEXT, LLR REAL, LLR_unit TEXT, HLR REAL, HLR_unit TEXT, FPR REAL, FPR_unit TEXT, measurementsJson TEXT, raw TEXT, normalized TEXT, currentTestId TEXT NULL, createdAt TEXT NOT NULL, masterSampleEnabled INTEGER NOT NULL DEFAULT 0, masterSampleRequestedByLogin TEXT NULL, masterSampleRequestedAt TEXT NULL, masterSampleLabelCopiesPrinted INTEGER NOT NULL DEFAULT 0);
       CREATE INDEX IF NOT EXISTS idx_test_results_receivedAt ON test_results(receivedAt DESC);
       CREATE INDEX IF NOT EXISTS idx_test_results_barcode ON test_results(barcode);
       CREATE INDEX IF NOT EXISTS idx_test_results_uniqueId ON test_results(uniqueId);
@@ -439,6 +446,12 @@ export class AppDatabase {
     addUserColumn('card_assigned_at', 'ALTER TABLE users ADD COLUMN card_assigned_at TEXT');
     addUserColumn('last_test_at', 'ALTER TABLE users ADD COLUMN last_test_at TEXT');
     addUserColumn('deleted_at', 'ALTER TABLE users ADD COLUMN deleted_at TEXT');
+    const resultColumns = this.db.prepare('PRAGMA table_info(test_results)').all() as Array<{ name: string }>;
+    const addResultColumn = (name: string, sql: string) => { if (!resultColumns.some((column) => column.name === name)) this.db.prepare(sql).run(); };
+    addResultColumn('masterSampleEnabled', 'ALTER TABLE test_results ADD COLUMN masterSampleEnabled INTEGER NOT NULL DEFAULT 0');
+    addResultColumn('masterSampleRequestedByLogin', 'ALTER TABLE test_results ADD COLUMN masterSampleRequestedByLogin TEXT');
+    addResultColumn('masterSampleRequestedAt', 'ALTER TABLE test_results ADD COLUMN masterSampleRequestedAt TEXT');
+    addResultColumn('masterSampleLabelCopiesPrinted', 'ALTER TABLE test_results ADD COLUMN masterSampleLabelCopiesPrinted INTEGER NOT NULL DEFAULT 0');
     const sessionColumns = this.db.prepare('PRAGMA table_info(test_sessions)').all() as Array<{ name: string }>;
     if (!sessionColumns.some((column) => column.name === 'operatorUserId')) this.db.prepare('ALTER TABLE test_sessions ADD COLUMN operatorUserId TEXT').run();
     const addSessionColumn = (name: string, sql: string) => { if (!sessionColumns.some((column) => column.name === name)) this.db.prepare(sql).run(); };

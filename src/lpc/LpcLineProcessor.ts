@@ -1,5 +1,5 @@
 import type { Server } from 'socket.io';
-import type { CurrentTest, LpcResult } from '../shared/types';
+import type { CurrentTest, LpcResult, MasterSampleMetadata } from '../shared/types';
 import type { CurrentTestStore } from '../scanner/currentTestStore';
 import type { LastResultStore } from './LastResultStore';
 import type { ResultHistoryStore } from './ResultHistoryStore';
@@ -18,6 +18,7 @@ import { buildSplunkResultEnvelope } from '../server/splunk/splunkPayload';
 import { emitLlResolved, hasLlRole, resolvesLlControl } from '../server/ll-control';
 import type { SplunkRuntimeConfig } from '../server/splunk/splunkTypes';
 import type { AppConfig } from '../config';
+import { MasterSampleService, MASTER_SAMPLE_LABEL_COPIES } from '../server/master-sample';
 
 export type LpcParsedAs = 'stream' | 'result' | 'ignored' | 'error';
 
@@ -29,6 +30,7 @@ export interface EnrichedLpcResult extends LpcResult {
   currentTestSelectedAt?: string;
   operatorLogin?: string | null;
   operatorRole?: string | null;
+  masterSample?: MasterSampleMetadata;
   llControl?: { requiredAtStart: boolean; flagId: string | null; testAllowedByRole: boolean; performedByRequiredRole: boolean; resolvedByThisTest: boolean };
 }
 
@@ -71,6 +73,7 @@ export interface LpcLineProcessorOptions {
   zebraPrintOnResult?: boolean;
   splunkBuffer?: SplunkBuffer;
   splunkConfig?: SplunkRuntimeConfig;
+  masterSampleService?: MasterSampleService;
   config?: Pick<AppConfig, 'LPC_HOST' | 'LPC_PORT' | 'LPC_INTERFACE_SELECTION' | 'LPC_RESULT_FRAME_FORMAT' | 'LPC_RESULT_OK_CODES' | 'LPC_RESULT_NOK_CODES'>;
 }
 
@@ -176,8 +179,13 @@ export class LpcLineProcessor {
         this.options.resultHistoryStore?.add(enrichedResult);
         this.options.testSessionManager?.complete(enrichedResult.resultRawStatus ?? enrichedResult.result);
         this.options.authService?.markTestActivity(activeSessionBeforeComplete?.operatorUserId);
-        void this.autoPrint(enrichedResult);
-        this.sendSplunkResult(enrichedResult, activeSessionBeforeComplete, completedCurve.points);
+        void this.autoPrint(enrichedResult).then(() => {
+          this.resetMasterSampleIfOk(enrichedResult);
+          this.options.database?.updateTestResultMasterSample(activeSessionBeforeComplete?.activeTestId ?? null, enrichedResult.masterSample ?? { enabled: false });
+          this.sendSplunkResult(enrichedResult, activeSessionBeforeComplete, completedCurve.points);
+        });
+        // Splunk is sent after print metadata is finalized in autoPrint().
+        // this.sendSplunkResult(enrichedResult, activeSessionBeforeComplete, completedCurve.points);
         this.lastResultAt = receivedAt;
         this.resultCount += 1;
         diagnostic.parsedAs = 'result';
@@ -255,6 +263,7 @@ export class LpcLineProcessor {
       currentTestSelectedAt: currentTest.selectedAt,
       operatorLogin: currentTest.operatorLogin ?? null,
       operatorRole: currentTest.operatorRole ?? null,
+      masterSample: currentTest.masterSample ?? { enabled: false },
       llControl: currentTest.llControl,
       labelPrintMode: currentTest.labelPrintMode ?? 'ok_only',
       barcode: this.resolveBarcode(result, currentTest),
@@ -281,10 +290,34 @@ export class LpcLineProcessor {
     void this.options.splunkBuffer.sendOrQueue(envelope).catch((error) => console.warn('[SPLUNK] failed status=internal error=' + (error instanceof Error ? error.message : 'unknown')));
   }
 
+  private isOkResult(result: LpcResult): boolean { return result.result === 'ACCEPT'; }
+
+  private resetMasterSampleIfOk(result: EnrichedLpcResult): void {
+    if (result.masterSample?.enabled && this.isOkResult(result)) {
+      this.options.masterSampleService?.disable(result.operatorLogin ?? null);
+      result.masterSample.resetAfterTest = true;
+    }
+  }
+
   private async autoPrint(result: EnrichedLpcResult): Promise<void> {
+    const masterSampleActive = Boolean(result.masterSample?.enabled);
+    if (masterSampleActive) {
+      result.masterSample = { enabled: true, ...result.masterSample, labelCopiesRequested: MASTER_SAMPLE_LABEL_COPIES, labelCopiesPrinted: 0, printTriggered: false, resetAfterTest: false, printError: null };
+    }
     if (!this.options.zebraEnabled || !this.options.zebraPrintOnResult || !this.options.zebraPrinter) return;
     if (this.options.database?.getSetting('zebra.autoPrintEnabled') === 'false') {
       console.log('[ZEBRA] Auto print globally disabled');
+      return;
+    }
+    if (masterSampleActive && this.isOkResult(result)) {
+      try {
+        result.masterSample!.printTriggered = true;
+        for (let copy = 0; copy < MASTER_SAMPLE_LABEL_COPIES; copy += 1) await this.options.zebraPrinter.printResult(result);
+        result.masterSample!.labelCopiesPrinted = MASTER_SAMPLE_LABEL_COPIES;
+      } catch (error) {
+        result.masterSample!.printError = error instanceof Error ? error.message : 'Unknown print error';
+        console.error('[ZEBRA] Master sample print failed', error);
+      }
       return;
     }
     if (!shouldPrintForResult(result.result, result.labelPrintMode ?? 'ok_only')) {

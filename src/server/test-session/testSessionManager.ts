@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { Server } from 'socket.io';
-import type { CurrentTest } from '../../shared/types';
+import type { CurrentTest, MasterSampleMetadata } from '../../shared/types';
 import type { AppDatabase, StoredTestSession } from '../db/database';
 
 export type TestSessionStatus = 'idle' | 'program_selected' | 'starting' | 'running' | 'waiting_for_result' | 'completed' | 'timeout' | 'error';
@@ -25,6 +25,7 @@ export interface TestSessionState {
   completedAt: string | null;
   timeoutAt: string | null;
   message: string | null;
+  masterSample?: MasterSampleMetadata;
 }
 
 export class TestSessionManager {
@@ -84,6 +85,7 @@ export class TestSessionManager {
       completedAt: null,
       timeoutAt: null,
       message: 'Test w toku — poczekaj na wynik',
+      masterSample: currentTest.masterSample,
     };
     this.persistAndEmit();
     this.scheduleTimeoutCheck();
@@ -217,11 +219,11 @@ export class TestSessionManager {
   }
 
   private idle(): TestSessionState {
-    return { ok: true, status: 'idle', locked: false, activeTestId: null, barcode: null, programNumber: null, programText: null, operatorUserId: null, operatorLogin: null, startedAt: null, firstLpcDataAt: null, lastLpcDataAt: null, lastStreamAt: null, finalResultAt: null, completedAt: null, timeoutAt: null, message: null };
+    return { ok: true, status: 'idle', locked: false, activeTestId: null, barcode: null, programNumber: null, programText: null, operatorUserId: null, operatorLogin: null, startedAt: null, firstLpcDataAt: null, lastLpcDataAt: null, lastStreamAt: null, finalResultAt: null, completedAt: null, timeoutAt: null, message: null, masterSample: { enabled: false } };
   }
 
   private fromStored(stored: StoredTestSession, status: TestSessionStatus, locked: boolean, message: string | null): TestSessionState {
-    return { ok: true, status, locked, activeTestId: stored.id, barcode: stored.barcode, programNumber: stored.programNumber, programText: stored.programText, operatorUserId: stored.operatorUserId, operatorLogin: stored.operatorLogin, startedAt: stored.startedAt, firstLpcDataAt: stored.firstLpcDataAt, lastLpcDataAt: stored.lastLpcDataAt ?? stored.lastStreamAt, lastStreamAt: stored.lastStreamAt, finalResultAt: stored.finalResultAt, completedAt: stored.completedAt, timeoutAt: stored.timeoutAt, message };
+    return { ok: true, status, locked, activeTestId: stored.id, barcode: stored.barcode, programNumber: stored.programNumber, programText: stored.programText, operatorUserId: stored.operatorUserId, operatorLogin: stored.operatorLogin, startedAt: stored.startedAt, firstLpcDataAt: stored.firstLpcDataAt, lastLpcDataAt: stored.lastLpcDataAt ?? stored.lastStreamAt, lastStreamAt: stored.lastStreamAt, finalResultAt: stored.finalResultAt, completedAt: stored.completedAt, timeoutAt: stored.timeoutAt, message, masterSample: { enabled: false } };
   }
 
   private toStoredSession(state = this.state): StoredTestSession {

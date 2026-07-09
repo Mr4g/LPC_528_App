@@ -13,6 +13,7 @@ import type { AppDatabase } from '../server/db/database';
 import type { SplunkBuffer } from '../server/splunk/splunkBuffer';
 import type { SplunkRuntimeConfig } from '../server/splunk/splunkTypes';
 import { emitLlBlocked, hasLlRole, LL_REQUIRED_MESSAGE } from '../server/ll-control';
+import type { MasterSampleService } from '../server/master-sample';
 
 export function createScannerRouter(options: {
   config: AppConfig;
@@ -25,6 +26,7 @@ export function createScannerRouter(options: {
   database?: AppDatabase;
   splunkBuffer?: SplunkBuffer;
   splunkConfig?: SplunkRuntimeConfig;
+  masterSampleService?: MasterSampleService;
 }): Router {
   const router = Router();
 
@@ -77,8 +79,9 @@ export function createScannerRouter(options: {
       operatorLogin: req.user?.login,
       operatorRole: req.user?.role,
     };
-    const currentTest = { ...mapping.currentTest, ...operatorContext, llControl: { requiredAtStart: Boolean(openLlFlag), flagId: openLlFlag?.id ?? null, testAllowedByRole: true, performedByRequiredRole: openLlFlag ? hasLlRole(req.user?.role) : false, resolvedByThisTest: false } };
-    const programStartRequest = { ...mapping.programStartRequest, ...operatorContext };
+    const masterSample = options.masterSampleService?.snapshot() ?? { enabled: false };
+    const currentTest = { ...mapping.currentTest, ...operatorContext, masterSample, llControl: { requiredAtStart: Boolean(openLlFlag), flagId: openLlFlag?.id ?? null, testAllowedByRole: true, performedByRequiredRole: openLlFlag ? hasLlRole(req.user?.role) : false, resolvedByThisTest: false } };
+    const programStartRequest = { ...mapping.programStartRequest, ...operatorContext, masterSample };
 
     options.currentTestStore.set(currentTest);
     const activeTest = options.testSessionManager?.start(currentTest) ?? null;

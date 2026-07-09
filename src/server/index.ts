@@ -31,6 +31,7 @@ import { SplunkBuffer } from './splunk/splunkBuffer';
 import { buildSplunkErrorEnvelope } from './splunk/splunkPayload';
 import { createSplunkRouter } from './splunk/splunkRouter';
 import { createLlControlRouter } from './ll-control';
+import { createMasterSampleRouter, MasterSampleService } from './master-sample';
 
 const config = loadConfig();
 const app = express();
@@ -59,6 +60,7 @@ if (adminSeed.action === 'reset') console.warn('[AUTH] DEV ONLY: default admin w
 if (adminSeed.action === 'none') console.info('[AUTH] default admin already exists');
 if (config.AUTH_RESET_DEFAULT_ADMIN && config.NODE_ENV === 'production') console.warn('[AUTH] AUTH_RESET_DEFAULT_ADMIN is ignored in production.');
 const currentTestStore = new CurrentTestStore();
+const masterSampleService = new MasterSampleService(database, (status) => io.emit('master-sample:updated', { ok: true, ...status }));
 const programMappingService = new ProgramMappingService(database);
 programMappingService.seedFromFallbackMap(config.BARCODE_PROGRAM_MAP);
 const splunkConfig = getSplunkConfig(config);
@@ -130,6 +132,7 @@ const lpcLineProcessor = new LpcLineProcessor({
   splunkBuffer,
   splunkConfig,
   config,
+  masterSampleService,
 });
 
 lpcTcpClient.on('status', (state) => {
@@ -181,6 +184,7 @@ app.use('/api/backup', createBackupRouter());
 app.use('/api/zebra', createZebraRouter(database, zebraPrinter));
 app.use('/api/splunk', createSplunkRouter(splunkClient, splunkBuffer));
 app.use('/api/ll-control', createLlControlRouter({ database, splunkBuffer, splunkConfig }));
+app.use('/api/master-sample', createMasterSampleRouter(masterSampleService));
 app.use('/api/programs', requireAuth, createProgramsRouter({ config, programStarter, programMappingService }));
 app.use('/api/program-mappings', createProgramMappingsRouter(programMappingService));
 app.use('/api/lpc', createLpcRouter({
@@ -193,7 +197,7 @@ app.use('/api/lpc', createLpcRouter({
   database,
   getSocketClientsCount: () => io.engine.clientsCount,
 }));
-app.use('/api', createScannerRouter({ config, io, programStarter, currentTestStore, programMappingService, testSessionManager, authService, database, splunkBuffer, splunkConfig }));
+app.use('/api', createScannerRouter({ config, io, programStarter, currentTestStore, programMappingService, testSessionManager, authService, database, splunkBuffer, splunkConfig, masterSampleService }));
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'lpc-528-app' });

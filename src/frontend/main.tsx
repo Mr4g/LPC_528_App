@@ -62,6 +62,8 @@ interface LpcStatusPayload {
   socketWritable?: boolean;
 }
 
+interface MasterSampleStatus { ok?: true; enabled: boolean; requestedByUserId?: string | null; requestedByLogin?: string | null; requestedByRole?: string | null; requestedAt?: string | null; labelCopiesOnOk?: number; }
+
 interface SplunkStatusPayload {
   ok: true;
   enabled: boolean;
@@ -141,6 +143,7 @@ interface SocketLike {
   on(event: 'lpc:curve-completed', handler: SocketHandler<{ points: LpcCurvePoint[] }>): void;
   on(event: 'lpc:results-updated', handler: SocketHandler<{ results: EnrichedLpcResult[] }>): void;
   on(event: 'test:completed', handler: SocketHandler<EnrichedLpcResult>): void;
+  on(event: 'master-sample:updated', handler: SocketHandler<MasterSampleStatus>): void;
   on(event: 'test-session:updated', handler: SocketHandler<TestSessionState>): void;
   off(event: string): void;
   disconnect(): void;
@@ -177,6 +180,7 @@ interface TestSessionState {
   completedAt: string | null;
   timeoutAt: string | null;
   message: string | null;
+  masterSample?: MasterSampleStatus;
 }
 
 interface FinalMarkerResult {
@@ -306,6 +310,11 @@ async function fetchLpcStatus(): Promise<LpcStatusPayload | null> {
 
 async function fetchTestSessionStatus(): Promise<TestSessionState | null> {
   return fetchJson<TestSessionState>('/api/test-session/status');
+}
+
+async function fetchMasterSampleStatus(): Promise<MasterSampleStatus> {
+  const payload = await fetchJson<MasterSampleStatus>('/api/master-sample/status');
+  return payload ?? { enabled: false };
 }
 
 async function fetchOpenLlFlags(): Promise<LlControlFlag[]> {
@@ -1010,6 +1019,8 @@ function App() {
   const [llFlagMessage, setLlFlagMessage] = useState<string | null>(null);
   const [llFlagging, setLlFlagging] = useState(false);
   const [openLlFlags, setOpenLlFlags] = useState<LlControlFlag[]>([]);
+  const [masterSampleStatus, setMasterSampleStatus] = useState<MasterSampleStatus>({ enabled: false });
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [eventCounters, setEventCounters] = useState({
     streamEvents: 0,
     resultEvents: 0,
@@ -1298,6 +1309,7 @@ function App() {
   useEffect(() => {
     void refreshLpcStatus();
     void refreshSplunkStatus();
+    void fetchMasterSampleStatus().then(setMasterSampleStatus);
     void fetchTestSessionStatus().then((payload) => {
       if (payload) {
         setTestSession(payload);
@@ -1440,6 +1452,8 @@ function App() {
         void refreshOpenLlFlags();
       });
 
+      socket.on('master-sample:updated', setMasterSampleStatus);
+
       socket.on('test-session:updated', (payload) => {
         setTestSession(payload);
         activeTestIdRef.current = payload.activeTestId;
@@ -1462,6 +1476,7 @@ function App() {
       activeSocket?.off('lpc:curve-updated');
       activeSocket?.off('lpc:curve-completed');
       activeSocket?.off('test:completed');
+      activeSocket?.off('master-sample:updated');
       activeSocket?.off('test-session:updated');
       if (chartUpdateTimerRef.current !== null) window.clearTimeout(chartUpdateTimerRef.current);
       chartUpdateTimerRef.current = null;
@@ -1581,6 +1596,20 @@ function App() {
     setLlFlagging(false);
     setLlFlagMessage(response.ok ? (payload.existing ? 'Sztuka już oczekuje na kontrolę LL' : 'Oznaczono do kontroli LL') : (payload.message ?? 'Nie udało się oznaczyć kontroli LL.'));
     void refreshOpenLlFlags();
+  }
+
+  async function toggleMasterSample() {
+    if (!isManager(authUser)) return;
+    const action = masterSampleStatus.enabled ? 'disable' : 'enable';
+    const response = await fetch(`/api/master-sample/${action}`, { method: 'POST', credentials: 'include' });
+    if (response.ok) {
+      const next = await response.json() as MasterSampleStatus;
+      setMasterSampleStatus(next);
+      setToastMessage(next.enabled ? 'Test wzorcowy aktywny' : 'Test wzorcowy wyłączony');
+      window.setTimeout(() => setToastMessage(null), 3500);
+    }
+    setUserMenuOpen(false);
+    focusBarcodeInput(120);
   }
 
   async function submitScan(event: FormEvent<HTMLFormElement>) {
@@ -1786,6 +1815,8 @@ function App() {
           </button>
         </div>
         <div className="top-bar-actions">
+          {masterSampleStatus.enabled && <div className="master-sample-badge"><strong>TEST WZORCOWY AKTYWNY</strong><small>Po wyniku OK zostaną wydrukowane 2 etykiety. LL: {masterSampleStatus.requestedByLogin ?? '-'}</small></div>}
+          {toastMessage && <div className="toast-message">{toastMessage}</div>}
           <div className={`connection-badge ${connectionClass}`}>
             <span className="connection-dot" />
             <div>
@@ -1802,6 +1833,9 @@ function App() {
             canManageUsers={isManager(authUser)}
             canManagePrograms={canManagePrograms(authUser)}
             canOpenDiagnostics={canOpenDiagnostics(authUser)}
+            canUseMasterSample={isManager(authUser)}
+            masterSampleEnabled={masterSampleStatus.enabled}
+            onMasterSampleToggle={() => void toggleMasterSample()}
             open={userMenuOpen}
             onToggle={() => setUserMenuOpen((open) => {
               const nextOpen = !open;

@@ -2424,3 +2424,7 @@ body.theme-dark .login-info-message {
 .ll-control-button:disabled { opacity: 0.75; cursor: wait; }
 .ll-open-panel { margin-top: 1rem; }
 .ll-open-row { display: grid; gap: 0.25rem; padding: 0.65rem; border-top: 1px solid var(--border-color, #334155); font-size: 0.85rem; }
+.master-sample-badge { border: 2px solid #f59e0b; background: rgba(245, 158, 11, 0.16); color: var(--text-color, #f8fafc); border-radius: 14px; padding: 0.45rem 0.7rem; display: grid; gap: 0.1rem; min-width: 220px; }
+.master-sample-badge strong { font-size: 0.82rem; letter-spacing: 0.04em; }
+.master-sample-badge small { font-size: 0.72rem; opacity: 0.9; }
+.toast-message { position: fixed; right: 1rem; bottom: 1rem; z-index: 20; background: #0f172a; color: white; border: 1px solid #38bdf8; border-radius: 12px; padding: 0.75rem 1rem; box-shadow: 0 12px 30px rgba(0,0,0,.25); }

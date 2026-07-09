@@ -48,9 +48,10 @@ export function LastResultPanel({ result, llControlAction = null }: { result: Lp
     {llControlAction?.visible && (
       <div className="last-result-ll-action">
         <button type="button" className="ll-control-button compact horizontal" title="Oznacz sztukę jako wymagającą kontroli lidera linii." onClick={llControlAction.onClick} disabled={llControlAction.loading}>
-          {llControlAction.loading ? 'Oznaczanie...' : 'Kontrola LL'}
+          <strong>{llControlAction.loading ? 'Oznaczanie...' : 'Kontrola LL'}</strong>
+          <small>Oznacz sztukę do kontroli lidera</small>
+          {llControlAction.message && <span className="ll-control-status">{llControlAction.message}</span>}
         </button>
-        {llControlAction.message && <span>{llControlAction.message}</span>}
       </div>
     )}
     </>

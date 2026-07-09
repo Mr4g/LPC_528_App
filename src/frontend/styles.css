@@ -2447,39 +2447,43 @@ body.theme-dark .login-info-message {
 .ll-full-list-button span { font-size: .88rem; }
 .ll-list-modal { max-width: 980px; background: var(--surface); }
 .last-result-ll-action {
-  margin-top: 0.5rem;
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  min-height: 42px;
-  padding: 0.34rem 0.45rem;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: linear-gradient(135deg, rgba(21, 44, 115, 0.26), rgba(11, 78, 162, 0.12));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  margin-top: 0.75rem;
 }
-.last-result-ll-action::after {
-  content: 'Oznacz sztukę do kontroli lidera';
-  color: var(--muted);
-  font-size: .72rem;
+.last-result-ll-action .ll-control-button.compact.horizontal {
+  width: 100%;
+  min-height: 76px;
+  border: 1px solid color-mix(in srgb, var(--status-warning) 70%, var(--border));
+  border-radius: 22px;
+  background: linear-gradient(135deg, #f59e0b, #ea580c);
+  color: #111827;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 5px;
+  padding: 16px 20px;
+  box-shadow: 0 18px 44px rgba(245, 158, 11, 0.22);
+  text-align: left;
+}
+.last-result-ll-action .ll-control-button.compact.horizontal strong {
+  font-size: clamp(20px, 1.4vw, 28px);
+  line-height: 1;
+}
+.last-result-ll-action .ll-control-button.compact.horizontal small,
+.last-result-ll-action .ll-control-status {
+  font-size: .96rem;
   font-weight: 800;
-  letter-spacing: .01em;
-}
-.last-result-ll-action span {
-  color: var(--status-warning);
-  font-size: .74rem;
-  font-weight: 900;
-  margin-left: auto;
+  opacity: .86;
   line-height: 1.15;
 }
-.ll-control-button.horizontal { flex: 0 0 auto; }
-.last-result-ll-action .ll-control-button.compact.horizontal {
-  min-height: 32px;
-  padding: .32rem .68rem;
-  font-size: .8rem;
-  border-radius: 10px;
-  box-shadow: none;
+.last-result-ll-action .ll-control-status {
+  margin-top: 2px;
+  color: #111827;
+  opacity: .95;
 }
+.last-result-ll-action .ll-control-button.compact.horizontal:disabled {
+  opacity: .78;
+}
+
 
 .live-panel--master-sample {
   border-color: rgba(245, 158, 11, 0.9);
@@ -2560,9 +2564,13 @@ body.theme-dark .login-info-message {
 }
 
 
-body.theme-dark .last-result-ll-action {
-  background: linear-gradient(135deg, rgba(21, 44, 115, 0.52), rgba(74, 184, 255, 0.08));
+body.theme-dark .last-result-ll-action .ll-control-button.compact.horizontal {
+  border-color: color-mix(in srgb, var(--status-warning) 78%, var(--accent));
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.96), rgba(234, 88, 12, 0.9));
+  color: #08111f;
 }
+
+body.theme-dark .last-result-ll-action .ll-control-status { color: #08111f; }
 
 body.theme-dark .ll-open-panel.compact {
   background: rgba(28, 35, 64, 0.72);
@@ -2586,6 +2594,4 @@ body.theme-dark .ll-block-modal {
 @media (max-width: 900px) {
   .ll-open-row,
   .ll-modal-row { grid-template-columns: 1fr; }
-  .last-result-ll-action { align-items: stretch; flex-direction: column; }
-  .last-result-ll-action span { margin-left: 0; }
 }

@@ -2428,3 +2428,7 @@ body.theme-dark .login-info-message {
 .master-sample-badge strong { font-size: 0.82rem; letter-spacing: 0.04em; }
 .master-sample-badge small { font-size: 0.72rem; opacity: 0.9; }
 .toast-message { position: fixed; right: 1rem; bottom: 1rem; z-index: 20; background: #0f172a; color: white; border: 1px solid #38bdf8; border-radius: 12px; padding: 0.75rem 1rem; box-shadow: 0 12px 30px rgba(0,0,0,.25); }
+.chart-hlr-limit line { stroke: #ef4444; stroke-width: 2.5; }
+.chart-hlr-limit text { fill: #ef4444; font-size: 14px; font-weight: 800; }
+.legend-hlr-line { display: inline-block; width: 28px; border-top: 3px dashed #ef4444; transform: translateY(-3px); }
+.limit-hlr-row strong { color: #ef4444; }

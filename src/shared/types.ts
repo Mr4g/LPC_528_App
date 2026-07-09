@@ -16,6 +16,66 @@ export interface MasterSampleMetadata {
 }
 
 
+
+export interface ProgramLimitCacheEntry {
+  id: string;
+  programText: string;
+  programNumber: number | null;
+  testType: string;
+  HLR: number | null;
+  HLR_unit: string | null;
+  LLR: number | null;
+  LLR_unit: string | null;
+  sourceUniqueId: string | null;
+  sourceResultMessageId: string | null;
+  sourceTesterDate: string | null;
+  sourceTesterTime: string | null;
+  sourceResultAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProgramLimitSnapshot {
+  source: 'cache' | 'result_frame';
+  programText: string;
+  programNumber: number | null;
+  testType: string;
+  HLR: number | null;
+  HLR_unit: string | null;
+  LLR: number | null;
+  LLR_unit: string | null;
+  sourceUniqueId?: string | null;
+  sourceResultMessageId?: string | null;
+  sourceTesterDate?: string | null;
+  sourceTesterTime?: string | null;
+  sourceResultAt?: string | null;
+  uniqueId?: string | null;
+  messageId?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface ProgramLimitsMetadata {
+  cachedAtStart: ProgramLimitSnapshot | null;
+  fromResult: ProgramLimitSnapshot | null;
+  changedDuringTest: boolean | null;
+}
+
+export interface LimitCheckMetadata {
+  measurement: 'RL';
+  value: number | null;
+  unit: string | null;
+  upperLimitName: 'HLR';
+  upperLimit: number | null;
+  upperLimitUnit: string | null;
+  lowerLimitName: 'LLR';
+  lowerLimit: number | null;
+  lowerLimitUnit: string | null;
+  source: 'result_frame' | 'cache' | null;
+  exceededUpper: boolean | null;
+  exceededLower: boolean | null;
+  exceeded: boolean | null;
+}
+
 export interface LpcMeasurementMap {
   [key: string]: {
     value: number;
@@ -71,6 +131,9 @@ export interface LpcResult {
   operatorRole?: string | null;
   labelPrintMode?: LabelPrintMode;
   masterSample?: MasterSampleMetadata;
+  cachedLimitsAtStart?: ProgramLimitSnapshot | null;
+  limits?: ProgramLimitsMetadata;
+  limitCheck?: LimitCheckMetadata;
   resultFrameFormat?: 1 | 2;
   resultRawStatus?: string | null;
   errorCode?: string | null;
@@ -133,6 +196,9 @@ export interface CurrentTest {
   operatorRole?: string;
   labelPrintMode?: LabelPrintMode;
   masterSample?: MasterSampleMetadata;
+  cachedLimitsAtStart?: ProgramLimitSnapshot | null;
+  limits?: ProgramLimitsMetadata;
+  limitCheck?: LimitCheckMetadata;
   llControl?: { requiredAtStart: boolean; flagId: string | null; testAllowedByRole: boolean; performedByRequiredRole: boolean; resolvedByThisTest: boolean };
 }
 
@@ -166,6 +232,9 @@ export interface ProgramStartRequest {
   operatorRole?: string;
   labelPrintMode?: LabelPrintMode;
   masterSample?: MasterSampleMetadata;
+  cachedLimitsAtStart?: ProgramLimitSnapshot | null;
+  limits?: ProgramLimitsMetadata;
+  limitCheck?: LimitCheckMetadata;
   llControl?: { requiredAtStart: boolean; flagId: string | null; testAllowedByRole: boolean; performedByRequiredRole: boolean; resolvedByThisTest: boolean };
 }
 

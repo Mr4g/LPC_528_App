@@ -19,6 +19,7 @@ import { emitLlResolved, hasLlRole, resolvesLlControl } from '../server/ll-contr
 import type { SplunkRuntimeConfig } from '../server/splunk/splunkTypes';
 import type { AppConfig } from '../config';
 import { MasterSampleService, MASTER_SAMPLE_LABEL_COPIES } from '../server/master-sample';
+import { buildLimitCheck, buildLimitsMetadata, resultToLimitSnapshot } from '../server/program-limit-cache';
 
 export type LpcParsedAs = 'stream' | 'result' | 'ignored' | 'error';
 
@@ -174,6 +175,7 @@ export class LpcLineProcessor {
         const activeSessionBeforeComplete = this.options.testSessionManager?.getStatus() ?? null;
         const completedCurve = this.options.curveBuffer.completeAndClear();
         const resolvedLlFlag = this.resolveLlControlIfNeeded(enrichedResult, activeSessionBeforeComplete);
+        this.updateLimitCache(enrichedResult);
         this.options.database?.insertTestResult(enrichedResult, this.options.testSessionManager?.getActiveTestId() ?? null);
         this.options.lastResultStore?.set(enrichedResult);
         this.options.resultHistoryStore?.add(enrichedResult);
@@ -264,12 +266,29 @@ export class LpcLineProcessor {
       operatorLogin: currentTest.operatorLogin ?? null,
       operatorRole: currentTest.operatorRole ?? null,
       masterSample: currentTest.masterSample ?? { enabled: false },
+      cachedLimitsAtStart: currentTest.cachedLimitsAtStart ?? null,
       llControl: currentTest.llControl,
       labelPrintMode: currentTest.labelPrintMode ?? 'ok_only',
       barcode: this.resolveBarcode(result, currentTest),
       program: currentTest.programText,
       programText: currentTest.programText,
     };
+  }
+
+  private updateLimitCache(result: EnrichedLpcResult): void {
+    const fromResult = resultToLimitSnapshot(result);
+    const cachedAtStart = result.cachedLimitsAtStart ?? null;
+    result.limits = buildLimitsMetadata(cachedAtStart, fromResult);
+    result.limitCheck = buildLimitCheck(result, cachedAtStart, fromResult);
+    if (!fromResult || !this.options.database) return;
+    const saved = this.options.database.upsertProgramLimitCache(fromResult);
+    if (!saved?.changed) return;
+    const key = `${fromResult.programText}:${fromResult.testType}`;
+    if (saved.created) {
+      console.log(`[LPC_LIMIT_CACHE] created key=${key} HLR=${fromResult.HLR ?? '-'} ${fromResult.HLR_unit ?? ''} LLR=${fromResult.LLR ?? '-'} ${fromResult.LLR_unit ?? ''}`);
+    } else {
+      console.log(`[LPC_LIMIT_CACHE] updated key=${key} HLR=${fromResult.HLR ?? '-'} ${fromResult.HLR_unit ?? ''} LLR=${fromResult.LLR ?? '-'} ${fromResult.LLR_unit ?? ''}`);
+    }
   }
 
   private resolveLlControlIfNeeded(result: EnrichedLpcResult, session: ReturnType<TestSessionManager['getStatus']> | null): unknown {

@@ -1,7 +1,7 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { getLatestEstimatedLeakTrend, normalizeEstimatedLeakWindowPoints } from '../shared/estimatedLeakTrend';
-import type { BarcodeScan, CurrentTest, LpcResult, LpcStreamPoint, ProgramStartRequest, ProgramStartResult } from '../shared/types';
+import type { BarcodeScan, CurrentTest, LpcResult, ProgramLimitSnapshot, LpcStreamPoint, ProgramStartRequest, ProgramStartResult } from '../shared/types';
 import { formatDateTime, formatMeasurement, formatNumber, formatResultLabel, getConnectionLabel, getResultClass } from './formatters';
 import { LastResultPanel } from './components/LastResultPanel';
 import carrierLogo from './assets/carrier-logo.svg';
@@ -125,6 +125,7 @@ interface EnrichedLpcResult extends LpcResult {
   currentTestProgram?: number;
   currentTestProgramText?: string;
   currentTestSelectedAt?: string;
+  cachedLimitsAtStart?: ProgramLimitSnapshot | null;
 }
 
 type SocketHandler<TPayload> = (payload: TPayload) => void;
@@ -1018,6 +1019,7 @@ function App() {
   const [llModal, setLlModal] = useState<string | null>(null);
   const [llFlagMessage, setLlFlagMessage] = useState<string | null>(null);
   const [llFlagging, setLlFlagging] = useState(false);
+  const [activeLimit, setActiveLimit] = useState<ProgramLimitSnapshot | null>(null);
   const [openLlFlags, setOpenLlFlags] = useState<LlControlFlag[]>([]);
   const [masterSampleStatus, setMasterSampleStatus] = useState<MasterSampleStatus>({ enabled: false });
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -1362,6 +1364,7 @@ function App() {
         setStatus(payload.programStart.success ? 'program-selected' : 'start-error');
         if (payload.activeTest) setTestSession(payload.activeTest);
         void loadInstructionForMapping(payload.currentTest.mappingId);
+        setActiveLimit(payload.currentTest.cachedLimitsAtStart ?? null);
         if (payload.programStart.success && (isNewTest || !hasLiveCurveRef.current)) resetChartForNewTest();
       });
 
@@ -1406,6 +1409,8 @@ function App() {
 
       socket.on('lpc:result', (payload) => {
         setEventCounters((counters) => ({ ...counters, resultEvents: counters.resultEvents + 1 }));
+        setActiveLimit(payload.limits?.fromResult ?? payload.cachedLimitsAtStart ?? null);
+        setActiveLimit(payload.limits?.fromResult ?? payload.cachedLimitsAtStart ?? null);
         setLastResult(payload);
         chartStatusRef.current = 'completed';
         setChartStatus('completed');
@@ -1579,6 +1584,7 @@ function App() {
     }
 
     resetChartForNewTest();
+    setActiveLimit(payload.currentTest.cachedLimitsAtStart ?? null);
     setLastAccepted(payload);
     setLastRejected(null);
     setBarcode('');
@@ -1964,7 +1970,7 @@ function App() {
             )}
           </div>
 
-          <PressureChart points={displayedCurvePoints} lastResult={finalMarkerResult?.result ?? chartFinalResult} />
+          <PressureChart points={displayedCurvePoints} lastResult={finalMarkerResult?.result ?? chartFinalResult} limit={activeLimit} />
         </section>
 
         <aside className="panel result-column">

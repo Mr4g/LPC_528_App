@@ -125,3 +125,16 @@ describe('PressureChart', () => {
     expect(lastRenderedRlPoint?.elapsedTimeSec).toBe(29);
   });
 });
+
+it('renders cached HLR limit on the RL axis and hides it when absent', () => {
+  const points = [
+    { elapsedTimeSec: 1, pressureMbar: 5900, pressureBar: 5.9, segment: 'STG' },
+    { elapsedTimeSec: 2, pressureMbar: 5990, pressureBar: 5.99, segment: 'DPT', liveLeakValue: 3.7, liveLeakUnit: 'Pa/s' },
+  ];
+  const withLimit = renderToStaticMarkup(React.createElement(PressureChart, { lastResult: null, points, limit: { source: 'cache', programText: 'P11', programNumber: 11, testType: 'DPT', HLR: 10.787688, HLR_unit: 'Pa/s', LLR: -7.191792, LLR_unit: 'Pa/s' } }));
+  const withoutLimit = renderToStaticMarkup(React.createElement(PressureChart, { lastResult: null, points }));
+
+  expect(withLimit).toContain('chart-hlr-limit');
+  expect(withLimit).toContain('HLR 10,788 Pa/s');
+  expect(withoutLimit).not.toContain('chart-hlr-limit');
+});

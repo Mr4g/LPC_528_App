@@ -38,7 +38,7 @@ const result: EnrichedLpcResult = {
   measurements: { RL: { value: 11.686662, unit: 'Pa/s' }, Pt: { value: 5.995510, unit: 'bar' }, EDC: { value: 0, unit: 'Pa/s' }, PL: { value: 140.368362, unit: 'dPa' }, LLR: { value: -7.191792, unit: 'Pa/s' }, HLR: { value: 10.787688, unit: 'Pa/s' }, FPR: { value: 6.000356, unit: 'bar' } },
   RL: 11.686662, RL_unit: 'Pa/s', Pt: 5.995510, Pt_unit: 'bar', EDC: 0, EDC_unit: 'Pa/s', PL: 140.368362, PL_unit: 'dPa', LLR: -7.191792, LLR_unit: 'Pa/s', HLR: 10.787688, HLR_unit: 'Pa/s', FPR: 6.000356, FPR_unit: 'bar',
   raw: 'raw', normalized: 'raw', currentTestValid: true, currentTestBarcode: '7096', currentTestProgram: 11, currentTestProgramText: 'P11', currentTestSelectedAt: '2026-06-30T10:00:00.000Z',
-  operatorLogin: 'ADM', operatorRole: 'operator', resultFrameFormat: 2, resultRawStatus: 'R', lpcProgram: 11, lpcProgramText: 'P11', lpcProgramEvaluation: 'R', lpcSpcFlag: '-', lpcUniqueId: '0000294244', lpcTesterTime: '11:04:36.780', lpcTesterDate: '07/06/26', lpcMessageId: '59DA0D2', lpcMessageType: 'R', lpcChannel: 'C01', lpcAllResultInformation: 'DPT F RL ...',
+  operatorLogin: 'ADM', operatorRole: 'operator', cachedLimitsAtStart: { source: 'cache', programText: 'P11', programNumber: 11, testType: 'DPT', HLR: 10, HLR_unit: 'Pa/s', LLR: -7.191792, LLR_unit: 'Pa/s', sourceUniqueId: 'UID0', updatedAt: '2026-06-30T09:00:00.000Z' }, limits: { cachedAtStart: { source: 'cache', programText: 'P11', programNumber: 11, testType: 'DPT', HLR: 10, HLR_unit: 'Pa/s', LLR: -7.191792, LLR_unit: 'Pa/s', sourceUniqueId: 'UID0', updatedAt: '2026-06-30T09:00:00.000Z' }, fromResult: { source: 'result_frame', programText: 'P11', programNumber: 11, testType: 'DPT', HLR: 10.787688, HLR_unit: 'Pa/s', LLR: -7.191792, LLR_unit: 'Pa/s', uniqueId: '0000294244', messageId: '59DA0D2' }, changedDuringTest: true }, limitCheck: { measurement: 'RL', value: 11.686662, unit: 'Pa/s', upperLimitName: 'HLR', upperLimit: 10.787688, upperLimitUnit: 'Pa/s', lowerLimitName: 'LLR', lowerLimit: -7.191792, lowerLimitUnit: 'Pa/s', source: 'result_frame', exceededUpper: true, exceededLower: false, exceeded: true }, resultFrameFormat: 2, resultRawStatus: 'R', lpcProgram: 11, lpcProgramText: 'P11', lpcProgramEvaluation: 'R', lpcSpcFlag: '-', lpcUniqueId: '0000294244', lpcTesterTime: '11:04:36.780', lpcTesterDate: '07/06/26', lpcMessageId: '59DA0D2', lpcMessageType: 'R', lpcChannel: 'C01', lpcAllResultInformation: 'DPT F RL ...',
 };
 
 const appConfig = { LPC_HOST: '192.0.2.10', LPC_PORT: 23, LPC_INTERFACE_SELECTION: '1', LPC_RESULT_FRAME_FORMAT: 2 as const, LPC_RESULT_OK_CODES: 'A,OK,PASS,ACCEPT,GOOD,GUT', LPC_RESULT_NOK_CODES: 'R,F,SB,NOK,FAIL,REJECT,BAD,FEHLER' };
@@ -74,6 +74,7 @@ describe('buildSplunkResultEnvelope', () => {
     });
     expect((envelope.event.curveSummary as { sampledPoints: unknown[] }).sampledPoints).toHaveLength(2);
     expect((envelope.event.curveSummary as { sampledPoints: Array<Record<string, unknown>> }).sampledPoints[0]).toMatchObject({ t: 20.1, segment: 'STG', pressureMbarAvg: 5850, pressureMbarMin: 5800, pressureMbarMax: 5900, rlAvg: null });
+    expect(envelope.event).toMatchObject({ limits: { changedDuringTest: true }, limitCheck: { exceededUpper: true, exceeded: true } });
     expect(envelope.event).not.toHaveProperty('curvePoints');
     expect(envelope.event).not.toHaveProperty('curve');
   });

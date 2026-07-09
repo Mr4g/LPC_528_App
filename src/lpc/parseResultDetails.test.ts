@@ -36,3 +36,13 @@ describe('parseResultDetails', () => {
     expect(result.leakUnit).toBeNull();
   });
 });
+
+it('normalizes RL, HLR and LLR units from LPC result details', () => {
+  const result = parseResultDetails('No_barcode DPT F RL 11.815086 pa/s Pt 5.997561 bar EDC 0.000000 pa/s PL 141.973679 dPa LLR -7.191792 pa/s HLR 10.787688 pa/s FPR 6.002622 bar');
+
+  expect(result.RL).toBe(11.815086);
+  expect(result.HLR).toBe(10.787688);
+  expect(result.HLR_unit).toBe('Pa/s');
+  expect(result.LLR).toBe(-7.191792);
+  expect(result.LLR_unit).toBe('Pa/s');
+});

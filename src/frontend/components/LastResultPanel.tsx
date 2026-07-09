@@ -13,6 +13,12 @@ function getMainMeasurement(result: LpcResult): string {
   return `${measurementName} ${formatMeasurement(value, unit, 3)}`.trim();
 }
 
+function getHlrText(result: LpcResult): string | null {
+  const value = result.HLR ?? result.limits?.fromResult?.HLR ?? result.limits?.cachedAtStart?.HLR ?? null;
+  const unit = result.HLR_unit ?? result.limits?.fromResult?.HLR_unit ?? result.limits?.cachedAtStart?.HLR_unit ?? null;
+  return value === null || value === undefined ? null : formatMeasurement(value, unit, 3);
+}
+
 function getTotalAbsId(result: LpcResult): string {
   if (result.totalAbs && result.uniqueId) return `${result.totalAbs} / ${result.uniqueId}`;
   return result.uniqueId ?? result.totalAbs ?? '-';
@@ -37,6 +43,7 @@ export function LastResultPanel({ result, currentUser = null, onLlControl, llCon
           <div><span>Program</span><strong>{result.programText ?? result.program ?? '-'}</strong></div>
           <div><span>TotalAbs / ID</span><strong>{getTotalAbsId(result)}</strong></div>
           <div><span>Data / czas</span><strong>{result.testerDate ?? '-'} {result.testerTime ?? ''}</strong></div>
+          {getHlrText(result) && <div className="limit-hlr-row"><span>Limit HLR</span><strong>{getHlrText(result)}</strong></div>}
           {canShowLlButton(result, currentUser) && (
             <div className="ll-control-actions">
               <button type="button" className="ll-control-button" title="Oznacz sztukę jako wymagającą kontroli lidera linii." onClick={onLlControl} disabled={llControlLoading}>

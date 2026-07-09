@@ -4,7 +4,7 @@ import path from 'node:path';
 import Database, { type Database as BetterSqliteDatabase } from 'better-sqlite3';
 import type { UserRecord } from '../auth/types';
 import type { ProgramMappingRecord } from '../../programs/programMappingStore';
-import type { LpcResult } from '../../shared/types';
+import type { LpcResult, ProgramLimitCacheEntry, ProgramLimitSnapshot } from '../../shared/types';
 import type { SplunkBufferStatus, SplunkEventBufferRecord } from '../splunk/splunkTypes';
 
 export interface TestResultQuery {
@@ -102,6 +102,12 @@ function rowToLlFlag(row: Record<string, unknown>): LlControlFlag {
   const str = (name: string) => row[name] === null || row[name] === undefined ? null : String(row[name]);
   const num = (name: string) => row[name] === null || row[name] === undefined ? null : Number(row[name]);
   return { id: String(row.id), barcode: String(row.barcode), status: String(row.status), createdAt: String(row.createdAt), updatedAt: String(row.updatedAt), createdByUserId: str('createdByUserId'), createdByLogin: str('createdByLogin'), createdByRole: str('createdByRole'), createdFromTestId: str('createdFromTestId'), createdFromProgramText: str('createdFromProgramText'), createdFromProgramNumber: num('createdFromProgramNumber'), createdFromResultStatus: str('createdFromResultStatus'), createdFromResultRawStatus: str('createdFromResultRawStatus'), createdFromLeakValue: num('createdFromLeakValue'), createdFromLeakUnit: str('createdFromLeakUnit'), createdFromUniqueId: str('createdFromUniqueId'), resolvedAt: str('resolvedAt'), resolvedByUserId: str('resolvedByUserId'), resolvedByLogin: str('resolvedByLogin'), resolvedByRole: str('resolvedByRole'), resolvedByTestId: str('resolvedByTestId'), resolvedByProgramText: str('resolvedByProgramText'), resolvedByProgramNumber: num('resolvedByProgramNumber'), resolvedByUniqueId: str('resolvedByUniqueId'), reason: str('reason') };
+}
+
+function rowToProgramLimit(row: Record<string, unknown>): ProgramLimitCacheEntry {
+  const str = (name: string) => row[name] === null || row[name] === undefined ? null : String(row[name]);
+  const num = (name: string) => row[name] === null || row[name] === undefined ? null : Number(row[name]);
+  return { id: String(row.id), programText: String(row.programText), programNumber: num('programNumber'), testType: String(row.testType), HLR: num('HLR'), HLR_unit: str('HLR_unit'), LLR: num('LLR'), LLR_unit: str('LLR_unit'), sourceUniqueId: str('sourceUniqueId'), sourceResultMessageId: str('sourceResultMessageId'), sourceTesterDate: str('sourceTesterDate'), sourceTesterTime: str('sourceTesterTime'), sourceResultAt: str('sourceResultAt'), createdAt: String(row.createdAt), updatedAt: String(row.updatedAt) };
 }
 
 function rowToSession(row: Record<string, unknown>): StoredTestSession {
@@ -256,6 +262,40 @@ export class AppDatabase {
     this.db.prepare(`UPDATE users SET login = ?, passwordHash = ?, role = ?, isActive = ?, createdAt = ?, updatedAt = ?, lastLoginAt = ?, createdBy = ?, card_uid_hash = ?, card_uid_last4 = ?, card_assigned_at = ?, last_test_at = ?, deleted_at = ? WHERE id = ?`)
       .run(next.login, next.passwordHash, next.role, next.isActive, next.createdAt, next.updatedAt, next.lastLoginAt, next.createdBy, next.cardUidHash, next.cardUidLast4, next.cardAssignedAt, next.lastTestAt, next.deletedAt, id);
     return next;
+  }
+
+  findProgramLimitCache(programText: string, testType: string): ProgramLimitCacheEntry | null {
+    const row = this.db.prepare('SELECT * FROM program_limit_cache WHERE programText = ? AND testType = ?').get(programText, testType) as Record<string, unknown> | undefined;
+    return row ? rowToProgramLimit(row) : null;
+  }
+
+  findProgramLimitCacheForStart(programText: string, testType?: string | null): ProgramLimitCacheEntry | null {
+    if (testType) return this.findProgramLimitCache(programText, testType);
+    const rows = this.db.prepare('SELECT * FROM program_limit_cache WHERE programText = ? ORDER BY updatedAt DESC').all(programText) as Record<string, unknown>[];
+    return rows.length === 1 ? rowToProgramLimit(rows[0]) : null;
+  }
+
+  listProgramLimitCache(): ProgramLimitCacheEntry[] {
+    return (this.db.prepare('SELECT * FROM program_limit_cache ORDER BY programText ASC, testType ASC').all() as Record<string, unknown>[]).map(rowToProgramLimit);
+  }
+
+  upsertProgramLimitCache(input: ProgramLimitSnapshot): { entry: ProgramLimitCacheEntry; changed: boolean; created: boolean } | null {
+    if (!input.programText || !input.testType || (input.HLR === null && input.LLR === null)) return null;
+    const existing = this.findProgramLimitCache(input.programText, input.testType);
+    const now = new Date().toISOString();
+    if (existing) {
+      const changed = existing.HLR !== input.HLR || existing.HLR_unit !== input.HLR_unit || existing.LLR !== input.LLR || existing.LLR_unit !== input.LLR_unit;
+      if (changed) {
+        this.db.prepare('UPDATE program_limit_cache SET programNumber = ?, HLR = ?, HLR_unit = ?, LLR = ?, LLR_unit = ?, sourceUniqueId = ?, sourceResultMessageId = ?, sourceTesterDate = ?, sourceTesterTime = ?, sourceResultAt = ?, updatedAt = ? WHERE id = ?')
+          .run(input.programNumber, input.HLR, input.HLR_unit, input.LLR, input.LLR_unit, input.sourceUniqueId ?? input.uniqueId ?? null, input.sourceResultMessageId ?? input.messageId ?? null, input.sourceTesterDate ?? null, input.sourceTesterTime ?? null, input.sourceResultAt ?? null, now, existing.id);
+      }
+      const entry = this.findProgramLimitCache(input.programText, input.testType)!;
+      return { entry, changed, created: false };
+    }
+    const id = crypto.randomUUID();
+    this.db.prepare('INSERT INTO program_limit_cache (id, programText, programNumber, testType, HLR, HLR_unit, LLR, LLR_unit, sourceUniqueId, sourceResultMessageId, sourceTesterDate, sourceTesterTime, sourceResultAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, input.programText, input.programNumber, input.testType, input.HLR, input.HLR_unit, input.LLR, input.LLR_unit, input.sourceUniqueId ?? input.uniqueId ?? null, input.sourceResultMessageId ?? input.messageId ?? null, input.sourceTesterDate ?? null, input.sourceTesterTime ?? null, input.sourceResultAt ?? null, now, now);
+    return { entry: this.findProgramLimitCache(input.programText, input.testType)!, changed: true, created: true };
   }
 
   countProgramMappings(): number { return this.count('SELECT COUNT(*) AS count FROM program_mappings'); }
@@ -430,6 +470,8 @@ export class AppDatabase {
       CREATE INDEX IF NOT EXISTS idx_test_results_operatorLogin ON test_results(operatorLogin);
       CREATE INDEX IF NOT EXISTS idx_test_results_result ON test_results(result);
       CREATE INDEX IF NOT EXISTS idx_test_results_programText ON test_results(programText);
+      CREATE TABLE IF NOT EXISTS program_limit_cache (id TEXT PRIMARY KEY, programText TEXT NOT NULL, programNumber INTEGER NULL, testType TEXT NOT NULL, HLR REAL NULL, HLR_unit TEXT NULL, LLR REAL NULL, LLR_unit TEXT NULL, sourceUniqueId TEXT NULL, sourceResultMessageId TEXT NULL, sourceTesterDate TEXT NULL, sourceTesterTime TEXT NULL, sourceResultAt TEXT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, UNIQUE(programText, testType));
+      CREATE INDEX IF NOT EXISTS idx_program_limit_cache_program ON program_limit_cache(programText);
       CREATE TABLE IF NOT EXISTS test_sessions (id TEXT PRIMARY KEY, status TEXT NOT NULL, barcode TEXT, programNumber INTEGER, programText TEXT, operatorUserId TEXT, operatorLogin TEXT, startedAt TEXT, completedAt TEXT, firstLpcDataAt TEXT, lastLpcDataAt TEXT, lastStreamAt TEXT, finalResultAt TEXT, timeoutAt TEXT, message TEXT);
       CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT NULL);
       CREATE TABLE IF NOT EXISTS ll_control_flags (id TEXT PRIMARY KEY, barcode TEXT NOT NULL, status TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, createdByUserId TEXT NULL, createdByLogin TEXT NULL, createdByRole TEXT NULL, createdFromTestId TEXT NULL, createdFromProgramText TEXT NULL, createdFromProgramNumber INTEGER NULL, createdFromResultStatus TEXT NULL, createdFromResultRawStatus TEXT NULL, createdFromLeakValue REAL NULL, createdFromLeakUnit TEXT NULL, createdFromUniqueId TEXT NULL, resolvedAt TEXT NULL, resolvedByUserId TEXT NULL, resolvedByLogin TEXT NULL, resolvedByRole TEXT NULL, resolvedByTestId TEXT NULL, resolvedByProgramText TEXT NULL, resolvedByProgramNumber INTEGER NULL, resolvedByUniqueId TEXT NULL, reason TEXT NULL);

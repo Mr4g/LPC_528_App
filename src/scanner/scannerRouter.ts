@@ -14,6 +14,7 @@ import type { SplunkBuffer } from '../server/splunk/splunkBuffer';
 import type { SplunkRuntimeConfig } from '../server/splunk/splunkTypes';
 import { emitLlBlocked, hasLlRole, LL_REQUIRED_MESSAGE } from '../server/ll-control';
 import type { MasterSampleService } from '../server/master-sample';
+import { cacheEntryToSnapshot } from '../server/program-limit-cache';
 
 export function createScannerRouter(options: {
   config: AppConfig;
@@ -80,8 +81,9 @@ export function createScannerRouter(options: {
       operatorRole: req.user?.role,
     };
     const masterSample = options.masterSampleService?.snapshot() ?? { enabled: false };
-    const currentTest = { ...mapping.currentTest, ...operatorContext, masterSample, llControl: { requiredAtStart: Boolean(openLlFlag), flagId: openLlFlag?.id ?? null, testAllowedByRole: true, performedByRequiredRole: openLlFlag ? hasLlRole(req.user?.role) : false, resolvedByThisTest: false } };
-    const programStartRequest = { ...mapping.programStartRequest, ...operatorContext, masterSample };
+    const cachedLimitsAtStart = cacheEntryToSnapshot(options.database?.findProgramLimitCacheForStart(mapping.currentTest.programText) ?? null);
+    const currentTest = { ...mapping.currentTest, ...operatorContext, masterSample, cachedLimitsAtStart, llControl: { requiredAtStart: Boolean(openLlFlag), flagId: openLlFlag?.id ?? null, testAllowedByRole: true, performedByRequiredRole: openLlFlag ? hasLlRole(req.user?.role) : false, resolvedByThisTest: false } };
+    const programStartRequest = { ...mapping.programStartRequest, ...operatorContext, masterSample, cachedLimitsAtStart };
 
     options.currentTestStore.set(currentTest);
     const activeTest = options.testSessionManager?.start(currentTest) ?? null;

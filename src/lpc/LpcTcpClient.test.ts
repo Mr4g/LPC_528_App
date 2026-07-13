@@ -154,6 +154,16 @@ describe('LpcTcpClient line splitting', () => {
     expect(lines).toEqual(['first', 'second']);
   });
 
+  it('filters LPC menu lines before emitting parser pipeline lines', () => {
+    const client = new LpcTcpClient(options(23));
+    const lines: string[] = [];
+    client.on('line', (line) => lines.push(line));
+
+    client.receiveTextForTest('* TCP/IP INTERFACE SELECTION *\r\n1 Interface Connection1\r\n* Interface Connection 1 has been established *\r\nTREE ROOT\r\n9369034 S C01,P01,PRF,ET 5.20 sec,T 19.80 sec,P -0.00011 bar\r\n');
+
+    expect(lines).toEqual(['9369034 S C01,P01,PRF,ET 5.20 sec,T 19.80 sec,P -0.00011 bar']);
+  });
+
   it('flushes a complete stream frame even when LPC does not send a line delimiter', () => {
     const client = new LpcTcpClient(options(23));
     const lines: string[] = [];

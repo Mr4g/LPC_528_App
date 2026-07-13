@@ -70,6 +70,34 @@ describe('LpcTcpClient', () => {
     expect(client.getState().connected).toBe(false);
   });
 
+  it('runs startup cleanup once per interface even when LPC repeats established text', async () => {
+    let connectionCount = 0;
+    const selectionWrites: string[] = [];
+    server = net.createServer((socket) => {
+      connectionCount += 1;
+      socket.write('TCP/IP INTERFACE SELECTION\r\n1 Interface Connection1\r\n');
+      socket.on('data', (chunk) => {
+        selectionWrites.push(chunk.toString());
+        socket.write('* Interface Connection 1 has been established *\r\n* Interface Connection 1 has been established *\r\n');
+      });
+    });
+    const port = await listen(server);
+    const client = new LpcTcpClient({
+      ...options(port),
+      startupCleanupEnabled: true,
+      startupCleanupInterfaces: [1],
+      startupCleanupWaitMs: 0,
+    });
+
+    await client.connect();
+    await new Promise<void>((resolve) => client.once('connected', () => resolve()));
+
+    expect(connectionCount).toBe(2);
+    expect(selectionWrites).toHaveLength(2);
+    expect(client.getState().lastStartupCleanupResult).toMatchObject({ 1: 'success' });
+    await client.disconnectGracefully('test_shutdown');
+  });
+
   it('schedules reconnect with nextReconnectAt after close', async () => {
     server = net.createServer((socket) => socket.destroy());
     const port = await listen(server);

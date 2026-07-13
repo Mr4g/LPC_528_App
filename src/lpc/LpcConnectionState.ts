@@ -54,6 +54,9 @@ export interface LpcConnectionStateSnapshot extends LpcConnectionStateOptions {
   isDisconnecting?: boolean;
   lastDisconnectReason?: string | null;
   lastReconnectAt?: string | null;
+  lastInterfaceError?: string | null;
+  lastInterfaceErrorAt?: string | null;
+  lastInterfaceAttempt?: number | null;
   lastStartupCleanupAt?: string | null;
   lastStartupCleanupResult?: Record<string, string>;
 }

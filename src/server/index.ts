@@ -92,9 +92,8 @@ const programStarter = createProgramStarter({
   command: config.PROGRAM_START_COMMAND,
   scriptPath: config.PROGRAM_START_SCRIPT_PATH,
 });
-const lpcPreferredInterface = 1;
+const lpcPreferredInterface = Number(config.LPC_INTERFACE_SELECTION) || 1;
 const lpcStartupCleanupInterfaces = config.LPC_STARTUP_CLEANUP_INTERFACES.split(',').map((value) => Number(value.trim())).filter((value) => value === 1 || value === 2);
-if (config.LPC_INTERFACE_SELECTION !== '1') console.warn('[LPC] LPC_INTERFACE_SELECTION overridden to preferred interface=1 for production safety');
 const lpcTcpClient = new LpcTcpClient({
   host: config.LPC_HOST,
   port: config.LPC_PORT,

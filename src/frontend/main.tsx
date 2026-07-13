@@ -812,8 +812,8 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
       setMessage('Barcode musi mieć od 3 do 100 znaków');
       return;
     }
-    if (!Number.isInteger(programNumber) || programNumber < 1 || programNumber > 31) {
-      setMessage('Program musi być w zakresie 1–31');
+    if (!Number.isInteger(programNumber) || programNumber < 1 || programNumber > 32) {
+      setMessage('Program musi być w zakresie 1–32');
       return;
     }
 
@@ -894,7 +894,7 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
           <option value="contains">Zawiera</option>
         </select>
         <select value={programNumber} onChange={(event) => setProgramNumber(Number(event.target.value))}>
-          {Array.from({ length: 31 }, (_, index) => index + 1).map((program) => <option key={program} value={program}>P{String(program).padStart(2, '0')}</option>)}
+          {Array.from({ length: 32 }, (_, index) => index + 1).map((program) => <option key={program} value={program}>P{String(program).padStart(2, '0')}</option>)}
         </select>
         <select value={labelPrintMode} onChange={(event) => setLabelPrintMode(event.target.value as 'ok_only' | 'ok_and_nok')}>
           <option value="ok_only">Tylko OK</option>

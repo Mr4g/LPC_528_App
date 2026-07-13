@@ -11,6 +11,16 @@ describe('ProgramMappingService', () => {
     expect(formatProgramText(1)).toBe('P01');
   });
 
+  it('accepts program mappings from 1 through 32 and rejects values outside that range', () => {
+    const service = new ProgramMappingService(createDatabase(':memory:'));
+
+    expect(service.create({ barcodePattern: 'PR1', programNumber: 1, matchType: 'exact' }, 'ADM').programText).toBe('P01');
+    expect(service.create({ barcodePattern: 'P31', programNumber: 31, matchType: 'exact' }, 'ADM').programText).toBe('P31');
+    expect(service.create({ barcodePattern: 'P32', programNumber: 32, matchType: 'exact' }, 'ADM').programText).toBe('P32');
+    expect(() => service.create({ barcodePattern: 'PR0', programNumber: 0, matchType: 'exact' }, 'ADM')).toThrow('1–32');
+    expect(() => service.create({ barcodePattern: 'P33', programNumber: 33, matchType: 'exact' }, 'ADM')).toThrow('1–32');
+  });
+
   it('prefers exact match over contains and ignores inactive mappings', () => {
     const service = new ProgramMappingService(createDatabase(':memory:'));
     service.create({ barcodePattern: '123', programNumber: 2, matchType: 'contains' }, 'ADM');

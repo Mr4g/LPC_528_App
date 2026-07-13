@@ -29,4 +29,14 @@ describe('parseEnvBool', () => {
     const config = loadConfig({ ...required, SPLUNK_VERIFY_TLS: 'true' });
     expect(config.SPLUNK_VERIFY_TLS).toBe(true);
   });
+
+  it('accepts BARCODE_PROGRAM_MAP program numbers from 1 through 32', () => {
+    const config = loadConfig({ ...required, BARCODE_PROGRAM_MAP: '{"P1":1,"P31":31,"P32":32}' });
+    expect(config.BARCODE_PROGRAM_MAP).toEqual({ P1: 1, P31: 31, P32: 32 });
+  });
+
+  it('rejects BARCODE_PROGRAM_MAP program numbers outside 1 through 32', () => {
+    expect(() => loadConfig({ ...required, BARCODE_PROGRAM_MAP: '{"P0":0}' })).toThrow();
+    expect(() => loadConfig({ ...required, BARCODE_PROGRAM_MAP: '{"P33":33}' })).toThrow();
+  });
 });

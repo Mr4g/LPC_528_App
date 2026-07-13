@@ -22,7 +22,7 @@ const barcodeProgramMapSchema = z.preprocess((value: unknown) => {
   } catch {
     return value;
   }
-}, z.record(z.string(), z.coerce.number().int().min(1).max(31))).default({});
+}, z.record(z.string(), z.coerce.number().int().min(1).max(32))).default({});
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),

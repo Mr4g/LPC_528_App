@@ -14,38 +14,27 @@ export interface LpcTcpClientOptions {
   heartbeatTimeoutMs: number;
   staleConnectionTimeoutMs: number;
   heartbeatPayload: string;
+  preferredInterface: number;
+  startupCleanupEnabled: boolean;
+  startupCleanupInterfaces: number[];
+  startupCleanupWaitMs: number;
+  gracefulCloseWaitMs: number;
+  streamWatchdogMs: number;
 }
 
-export interface LpcConnectResult {
-  ok: boolean;
-  state: LpcConnectionStateSnapshot;
-  message: string;
-}
-
-export interface LpcHeartbeatResult {
-  ok: boolean;
-  state: LpcConnectionStateSnapshot;
-  heartbeatAttempted: boolean;
-  writeAttempted: boolean;
-  writeSuccess: boolean;
-  error?: string;
-}
-
+export interface LpcConnectResult { ok: boolean; state: LpcConnectionStateSnapshot; message: string; }
+export interface LpcHeartbeatResult { ok: boolean; state: LpcConnectionStateSnapshot; heartbeatAttempted: boolean; writeAttempted: boolean; writeSuccess: boolean; error?: string; }
 export interface LpcTcpClientEvents {
-  connected: [LpcConnectionStateSnapshot];
-  disconnected: [LpcConnectionStateSnapshot];
-  reconnecting: [LpcConnectionStateSnapshot];
-  status: [LpcConnectionStateSnapshot];
-  error: [Error, LpcConnectionStateSnapshot];
-  rawData: [string];
-  line: [string];
+  connected: [LpcConnectionStateSnapshot]; disconnected: [LpcConnectionStateSnapshot]; reconnecting: [LpcConnectionStateSnapshot]; status: [LpcConnectionStateSnapshot]; error: [Error, LpcConnectionStateSnapshot]; rawData: [string]; line: [string];
 }
-
 export declare interface LpcTcpClient {
   on<TEvent extends keyof LpcTcpClientEvents>(event: TEvent, listener: (...args: LpcTcpClientEvents[TEvent]) => void): this;
   once<TEvent extends keyof LpcTcpClientEvents>(event: TEvent, listener: (...args: LpcTcpClientEvents[TEvent]) => void): this;
   emit<TEvent extends keyof LpcTcpClientEvents>(event: TEvent, ...args: LpcTcpClientEvents[TEvent]): boolean;
 }
+
+type CleanupResult = 'success' | 'failed' | 'skipped';
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class LpcTcpClient extends EventEmitter {
   private socket: net.Socket | null = null;
@@ -54,328 +43,95 @@ export class LpcTcpClient extends EventEmitter {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private residualLineTimer: NodeJS.Timeout | null = null;
+  private streamWatchdogTimer: NodeJS.Timeout | null = null;
   private manuallyDisconnected = false;
   private connecting = false;
+  private disconnecting = false;
+  private interfaceSelected = false;
+  private selectedInterface: number | null = null;
+  private streamingHealthy = false;
+  private lpcStatusCode: string | null = null;
+  private lastDisconnectReason: string | null = null;
+  private lastReconnectAt: string | null = null;
+  private lastLpcRxAt: string | null = null;
+  private lastStreamFrameAt: string | null = null;
+  private lastResultFrameAt: string | null = null;
+  private startupCleanupDone = false;
+  private lastStartupCleanupAt: string | null = null;
+  private lastStartupCleanupResult: Record<string, CleanupResult> = {};
 
-  constructor(private readonly options: LpcTcpClientOptions) {
-    super();
-    this.state = new LpcConnectionState(options);
-  }
+  constructor(private readonly options: LpcTcpClientOptions) { super(); this.state = new LpcConnectionState(options); }
 
-  connect(): LpcConnectResult {
+  async connect(): Promise<LpcConnectResult> {
     const snapshot = this.state.getSnapshot();
-    if (this.connecting || snapshot.status === 'connecting' || (snapshot.status === 'reconnecting' && this.reconnectTimer)) {
-      return { ok: false, state: snapshot, message: 'LPC connection is already connecting' };
-    }
-
+    if (this.connecting || this.disconnecting || snapshot.status === 'connecting' || (snapshot.status === 'reconnecting' && this.reconnectTimer)) return { ok: false, state: this.getState(), message: 'LPC connection is already connecting' };
     if (this.socket || snapshot.connected || snapshot.status === 'connected') {
       this.refreshSocketFlags();
-      const current = this.state.getSnapshot();
-      if (current.connected) return { ok: false, state: current, message: 'LPC is already connected' };
-      this.destroySocket();
+      if (this.state.getSnapshot().connected) return { ok: false, state: this.getState(), message: 'LPC is already connected' };
+      await this.disconnectGracefully('before_reconnect');
     }
+    if (this.options.startupCleanupEnabled && !this.startupCleanupDone) await this.runStartupCleanup();
 
-    this.clearReconnectTimer();
-    this.manuallyDisconnected = false;
-    this.connecting = true;
-    this.state.setConnecting();
-    this.emitStatus();
-
+    this.clearReconnectTimer(); this.manuallyDisconnected = false; this.connecting = true; this.interfaceSelected = false; this.selectedInterface = null; this.streamingHealthy = false; this.lpcStatusCode = null;
+    this.state.setConnecting(); this.emitStatus();
+    console.log(`[LPC] connecting preferred interface=${this.options.preferredInterface}`);
     const socket = net.createConnection({ host: this.options.host, port: this.options.port });
-    this.socket = socket;
-    socket.setEncoding('utf8');
-    socket.setTimeout(this.options.connectTimeoutMs);
-    socket.setKeepAlive(true, 5000);
-    socket.setNoDelay(true);
-
-    socket.on('connect', () => {
-      socket.setTimeout(0);
-      this.connecting = false;
-      this.state.resetReconnectAttempts();
-      this.state.setConnected();
-      this.startHeartbeat();
-      const state = this.state.getSnapshot();
-      this.emit('connected', state);
-      this.emit('status', state);
-    });
-
-    socket.on('timeout', () => {
-      const message = `connect ETIMEDOUT ${this.options.host}:${this.options.port}`;
-      this.connecting = false;
-      this.state.setError(message, socket.destroyed, socket.writable);
-      const error = new Error(message);
-      const state = this.state.getSnapshot();
-      this.emit('error', error, state);
-      this.emit('status', state);
-      socket.destroy(error);
-    });
-
-    socket.on('data', (chunk: string | Buffer) => {
-      this.state.recordDataReceived();
-      this.refreshSocketFlags();
-      const text = chunk.toString('utf8');
-      this.emit('rawData', text);
-      this.processIncomingText(text);
-    });
-
-    socket.on('end', () => {
-      this.connecting = false;
-      this.state.setDisconnected(socket.destroyed, socket.writable);
-      this.emitStatus();
-    });
-
-    socket.on('close', () => {
-      this.stopHeartbeat();
-      this.socket = null;
-      this.connecting = false;
-      const shouldReconnect = !this.manuallyDisconnected && this.options.reconnectEnabled;
-
-      if (shouldReconnect) {
-        this.scheduleReconnect();
-        return;
-      }
-
-      if (this.state.getStatus() === 'disconnected') return;
-      this.state.setDisconnected(true, false);
-      const state = this.state.getSnapshot();
-      this.emit('disconnected', state);
-      this.emit('status', state);
-    });
-
-    socket.on('error', (error) => {
-      this.connecting = false;
-      this.state.setError(error, socket.destroyed, socket.writable);
-      const state = this.state.getSnapshot();
-      this.emit('error', error, state);
-      this.emit('status', state);
-    });
-
-    return { ok: true, state: this.state.getSnapshot(), message: 'LPC connection started' };
+    this.socket = socket; socket.setEncoding('utf8'); socket.setTimeout(this.options.connectTimeoutMs); socket.setKeepAlive(true, 5000); socket.setNoDelay(true);
+    socket.on('connect', () => { this.state.resetReconnectAttempts(); console.log('[LPC] TCP connected'); });
+    socket.on('timeout', () => { const message = `connect ETIMEDOUT ${this.options.host}:${this.options.port}`; this.connecting = false; this.state.setError(message, socket.destroyed, socket.writable); this.emit('error', new Error(message), this.getState()); this.emitStatus(); socket.destroy(new Error(message)); });
+    socket.on('data', (chunk: string | Buffer) => { this.state.recordDataReceived(); this.lastLpcRxAt = new Date().toISOString(); this.refreshSocketFlags(); const text = chunk.toString('utf8'); this.emit('rawData', text); this.handleInterfaceSelection(text); this.processIncomingText(text); });
+    socket.on('end', () => { this.connecting = false; this.state.setDisconnected(socket.destroyed, socket.writable); this.emitStatus(); });
+    socket.on('close', () => { this.stopHeartbeat(); this.socket = null; this.connecting = false; this.interfaceSelected = false; this.selectedInterface = null; if (!this.manuallyDisconnected && this.options.reconnectEnabled) { this.scheduleReconnect(); return; } if (this.state.getStatus() === 'disconnected') return; this.state.setDisconnected(true, false); this.emit('disconnected', this.getState()); this.emitStatus(); });
+    socket.on('error', (error) => { this.connecting = false; this.state.setError(error, socket.destroyed, socket.writable); this.emit('error', error, this.getState()); this.emitStatus(); });
+    return { ok: true, state: this.getState(), message: 'LPC connection started' };
   }
 
-  disconnect(): LpcConnectResult {
-    this.manuallyDisconnected = true;
-    this.clearReconnectTimer();
-    this.stopHeartbeat();
-    this.clearResidualLineTimer();
-    this.state.setDisconnecting();
-    this.emitStatus();
-    this.destroySocket();
-    this.connecting = false;
-    this.state.setDisconnected(true, false);
-    const state = this.state.getSnapshot();
-    this.emit('disconnected', state);
-    this.emit('status', state);
-    return { ok: true, state, message: 'LPC disconnected' };
+  async reconnect(): Promise<LpcConnectResult> { console.log('[LPC] reconnect requested'); if (this.socket || this.connecting) { console.log('[LPC] cleanup old socket before reconnect'); await this.disconnectGracefully('before_reconnect'); } this.lastReconnectAt = new Date().toISOString(); return this.connect(); }
+  disconnect(): LpcConnectResult { void this.disconnectGracefully('manual_disconnect'); return { ok: true, state: this.getState(), message: 'LPC disconnect started' }; }
+
+  async disconnectGracefully(reason: string): Promise<LpcConnectResult> {
+    if (this.disconnecting) return { ok: false, state: this.getState(), message: 'LPC disconnect is already running' };
+    console.log(`[LPC] disconnectGracefully reason=${reason}`); this.disconnecting = true; this.lastDisconnectReason = reason; this.manuallyDisconnected = true; this.clearReconnectTimer(); this.stopHeartbeat(); this.clearResidualLineTimer(); this.clearStreamWatchdog(); this.state.setDisconnecting(); this.emitStatus();
+    const socket = this.socket; this.socket = null;
+    if (socket) { socket.removeAllListeners('data'); socket.removeAllListeners('timeout'); socket.removeAllListeners('error'); try { if (!socket.destroyed) { socket.end(); console.log('[LPC] socket.end sent'); await sleep(this.options.gracefulCloseWaitMs); } if (!socket.destroyed) { socket.destroy(); console.log('[LPC] socket.destroy after timeout'); } } catch { if (!socket.destroyed) socket.destroy(); } finally { socket.removeAllListeners(); console.log('[LPC] socket closed'); } }
+    this.connecting = false; this.interfaceSelected = false; this.selectedInterface = null; this.streamingHealthy = false; this.lastLpcRxAt = null; this.lastStreamFrameAt = null; this.lastResultFrameAt = null; this.state.setDisconnected(true, false); const state = this.getState(); this.emit('disconnected', state); this.emit('status', state); this.disconnecting = false; return { ok: true, state, message: 'LPC disconnected' };
   }
 
-  send(data: string | Buffer): void {
-    if (!this.socket || !this.state.isConnected() || this.socket.destroyed || !this.socket.writable) {
-      this.markStaleConnection('LPC TCP client is not connected or writable');
-      throw new Error('LPC TCP client is not connected');
-    }
+  send(data: string | Buffer): void { if (!this.socket || !this.state.isConnected() || !this.interfaceSelected || this.socket.destroyed || !this.socket.writable) { this.markStaleConnection('LPC TCP client is not connected or interface is not selected'); throw new Error('LPC TCP client is not connected'); } this.socket.write(data, (error) => { if (error) { this.markStaleConnection(error.message); return; } this.state.recordSuccessfulWrite(); this.emitStatus(); }); }
+  isConnected(): boolean { this.refreshSocketFlags(); return this.state.isConnected() && this.interfaceSelected; }
+  getState(): LpcConnectionStateSnapshot { this.refreshSocketFlags(); return { ...this.state.getSnapshot(), tcpConnected: this.state.isConnected(), interfaceSelected: this.interfaceSelected, selectedInterface: this.selectedInterface, streamingHealthy: this.streamingHealthy, lpcStatusCode: this.lpcStatusCode, lastLpcRxAt: this.lastLpcRxAt, lastStreamFrameAt: this.lastStreamFrameAt, lastResultFrameAt: this.lastResultFrameAt, isConnecting: this.connecting, isDisconnecting: this.disconnecting, lastDisconnectReason: this.lastDisconnectReason, lastReconnectAt: this.lastReconnectAt, startupCleanupEnabled: this.options.startupCleanupEnabled, startupCleanupInterfaces: this.options.startupCleanupInterfaces, preferredInterface: this.options.preferredInterface, lastStartupCleanupAt: this.lastStartupCleanupAt, lastStartupCleanupResult: this.lastStartupCleanupResult } as LpcConnectionStateSnapshot; }
+  receiveTextForTest(text: string): void { this.processIncomingText(text); }
+  flushBufferedLineForTest(): void { this.flushResidualLineIfComplete(); }
+  forceRefreshStatus(): LpcConnectionStateSnapshot { if (this.state.getStatus() === 'connected' && (!this.socket || this.socket.destroyed || !this.socket.writable)) this.markStaleConnection('Stale LPC connection detected'); else { this.refreshSocketFlags(); this.emitStatus(); } return this.getState(); }
 
-    this.socket.write(data, (error) => {
-      if (error) {
-        this.markStaleConnection(error.message);
-        return;
-      }
-      this.state.recordSuccessfulWrite();
-      this.emitStatus();
-    });
-  }
-
-  isConnected(): boolean {
-    this.refreshSocketFlags();
-    return this.state.isConnected();
-  }
-
-  getState(): LpcConnectionStateSnapshot {
-    this.refreshSocketFlags();
-    return this.state.getSnapshot();
-  }
-
-  receiveTextForTest(text: string): void {
-    this.processIncomingText(text);
-  }
-
-  flushBufferedLineForTest(): void {
-    this.flushResidualLineIfComplete();
-  }
-
-  forceRefreshStatus(): LpcConnectionStateSnapshot {
-    if (this.state.getStatus() === 'connected' && (!this.socket || this.socket.destroyed || !this.socket.writable)) {
-      this.markStaleConnection('Stale LPC connection detected');
-    } else {
-      this.refreshSocketFlags();
-      this.emitStatus();
-    }
-    return this.state.getSnapshot();
-  }
+  markTestStartCommand(): void { this.clearStreamWatchdog(); this.streamWatchdogTimer = setTimeout(() => { if (this.lastStreamFrameAt || this.lastResultFrameAt) return; this.streamingHealthy = false; this.lpcStatusCode = 'LPC_STREAM_STALLED'; console.warn(`[LPC] streaming stalled after test start watchdogMs=${this.options.streamWatchdogMs}`); this.emitStatus(); }, this.options.streamWatchdogMs); }
+  recordStreamFrame(kind: 'stream' | 'result', receivedAt = new Date().toISOString()): void { this.lastLpcRxAt = receivedAt; this.streamingHealthy = true; this.lpcStatusCode = null; if (kind === 'stream') { this.lastStreamFrameAt = receivedAt; console.log('[LPC] streaming frame received'); } else { this.lastResultFrameAt = receivedAt; console.log('[LPC] result frame received'); } this.clearStreamWatchdog(); this.emitStatus(); }
+  canStartTest(): { ok: true } | { ok: false; code: string; message: string } { if (this.lpcStatusCode === 'LPC_STREAM_STALLED') return { ok: false, code: 'LPC_STREAM_STALLED', message: 'Połączenie TCP z LPC jest aktywne, ale nie przychodzą dane pomiarowe po starcie testu.' }; if (!this.state.isConnected() || !this.interfaceSelected) return { ok: false, code: 'LPC_NOT_READY', message: 'LPC nie jest gotowy: TCP lub Interface 1 nie zostały poprawnie zestawione.' }; return { ok: true }; }
 
   async performHeartbeatCheck(): Promise<LpcHeartbeatResult> {
-    const heartbeatAttempted = true;
-    this.state.recordHeartbeat();
-
-    if (!this.socket || !this.state.isConnected()) {
-      const state = this.state.getSnapshot();
-      return { ok: false, state, heartbeatAttempted, writeAttempted: false, writeSuccess: false, error: 'LPC is not connected' };
-    }
-
-    if (this.socket.destroyed || !this.socket.writable) {
-      this.markStaleConnection('Stale LPC connection detected');
-      const state = this.state.getSnapshot();
-      return { ok: false, state, heartbeatAttempted, writeAttempted: false, writeSuccess: false, error: 'Socket is destroyed or not writable' };
-    }
-
-    const payload = this.options.heartbeatPayload;
-    if (!payload) {
-      this.refreshSocketFlags();
-      this.emitStatus();
-      return { ok: true, state: this.state.getSnapshot(), heartbeatAttempted, writeAttempted: false, writeSuccess: false };
-    }
-
-    return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        this.markStaleConnection('LPC heartbeat write timed out');
-        resolve({ ok: false, state: this.state.getSnapshot(), heartbeatAttempted, writeAttempted: true, writeSuccess: false, error: 'LPC heartbeat write timed out' });
-      }, this.options.heartbeatTimeoutMs);
-
-      try {
-        this.socket?.write(payload, (error) => {
-          clearTimeout(timeout);
-          if (error) {
-            this.markStaleConnection(error.message);
-            resolve({ ok: false, state: this.state.getSnapshot(), heartbeatAttempted, writeAttempted: true, writeSuccess: false, error: error.message });
-            return;
-          }
-          this.state.recordSuccessfulWrite();
-          this.refreshSocketFlags();
-          this.emitStatus();
-          resolve({ ok: true, state: this.state.getSnapshot(), heartbeatAttempted, writeAttempted: true, writeSuccess: true });
-        });
-      } catch (error) {
-        clearTimeout(timeout);
-        const message = error instanceof Error ? error.message : 'Heartbeat write failed';
-        this.markStaleConnection(message);
-        resolve({ ok: false, state: this.state.getSnapshot(), heartbeatAttempted, writeAttempted: true, writeSuccess: false, error: message });
-      }
-    });
+    const heartbeatAttempted = true; this.state.recordHeartbeat();
+    if (!this.socket || !this.state.isConnected()) return { ok: false, state: this.getState(), heartbeatAttempted, writeAttempted: false, writeSuccess: false, error: 'LPC is not connected' };
+    if (this.socket.destroyed || !this.socket.writable) { this.markStaleConnection('Stale LPC connection detected'); return { ok: false, state: this.getState(), heartbeatAttempted, writeAttempted: false, writeSuccess: false, error: 'Socket is destroyed or not writable' }; }
+    const payload = this.options.heartbeatPayload; if (!payload) { this.refreshSocketFlags(); this.emitStatus(); return { ok: true, state: this.getState(), heartbeatAttempted, writeAttempted: false, writeSuccess: false }; }
+    return new Promise((resolve) => { const timeout = setTimeout(() => { this.markStaleConnection('LPC heartbeat write timed out'); resolve({ ok: false, state: this.getState(), heartbeatAttempted, writeAttempted: true, writeSuccess: false, error: 'LPC heartbeat write timed out' }); }, this.options.heartbeatTimeoutMs); try { this.socket?.write(payload, (error) => { clearTimeout(timeout); if (error) { this.markStaleConnection(error.message); resolve({ ok: false, state: this.getState(), heartbeatAttempted, writeAttempted: true, writeSuccess: false, error: error.message }); return; } this.state.recordSuccessfulWrite(); this.refreshSocketFlags(); this.emitStatus(); resolve({ ok: true, state: this.getState(), heartbeatAttempted, writeAttempted: true, writeSuccess: true }); }); } catch (error) { clearTimeout(timeout); const message = error instanceof Error ? error.message : 'Heartbeat write failed'; this.markStaleConnection(message); resolve({ ok: false, state: this.getState(), heartbeatAttempted, writeAttempted: true, writeSuccess: false, error: message }); } });
   }
 
-  private processIncomingText(text: string): void {
-    this.receiveBuffer += text;
-    this.clearResidualLineTimer();
+  private handleInterfaceSelection(text: string): void { if (!this.socket || this.interfaceSelected) return; if (text.includes('TCP/IP INTERFACE SELECTION') || /Interface Connection1/.test(text)) { console.log('[LPC] interface selection menu detected'); this.socket.write(`${this.options.preferredInterface}\r\n`); return; } if (text.includes(`Interface Connection ${this.options.preferredInterface} has been established`) || text.includes('TREE ROOT')) { this.socket.setTimeout(0); this.connecting = false; this.interfaceSelected = true; this.selectedInterface = this.options.preferredInterface; this.state.setConnected(); this.startHeartbeat(); console.log(`[LPC] interface ${this.options.preferredInterface} selected`); const state = this.getState(); this.emit('connected', state); this.emit('status', state); } }
+  private async runStartupCleanup(): Promise<void> { this.startupCleanupDone = true; this.lastStartupCleanupAt = new Date().toISOString(); console.log(`[LPC] startup cleanup started interfaces=${this.options.startupCleanupInterfaces.join(',')}`); for (const iface of this.options.startupCleanupInterfaces) { if (![1, 2].includes(iface)) { this.lastStartupCleanupResult[String(iface)] = 'skipped'; continue; } console.log(`[LPC] cleanup try interface=${iface}`); try { await this.cleanupInterface(iface); this.lastStartupCleanupResult[String(iface)] = 'success'; console.log(`[LPC] cleanup interface=${iface} closed`); } catch (error) { this.lastStartupCleanupResult[String(iface)] = 'failed'; console.warn(`[LPC] cleanup interface=${iface} failed`, error instanceof Error ? error.message : error); } } console.log(`[LPC] startup cleanup finished waitMs=${this.options.startupCleanupWaitMs}`); await sleep(this.options.startupCleanupWaitMs); }
+  private cleanupInterface(iface: number): Promise<void> { return new Promise((resolve, reject) => { const socket = net.createConnection({ host: this.options.host, port: this.options.port }); let buffer = ''; let established = false; const timeout = setTimeout(() => { graceful().then(() => established ? resolve() : reject(new Error('cleanup interface selection timeout'))); }, this.options.connectTimeoutMs); const graceful = async () => { clearTimeout(timeout); console.log(`[LPC] cleanup interface=${iface} closing gracefully`); if (!socket.destroyed) { socket.end(); await sleep(this.options.gracefulCloseWaitMs); } if (!socket.destroyed) socket.destroy(); socket.removeAllListeners(); }; socket.setEncoding('utf8'); socket.on('data', (chunk) => { buffer += chunk.toString(); if (buffer.includes('TCP/IP INTERFACE SELECTION') || /Interface Connection1/.test(buffer)) socket.write(`${iface}\r\n`); if (buffer.includes(`Interface Connection ${iface} has been established`) || buffer.includes('TREE ROOT')) { established = true; console.log(`[LPC] cleanup interface=${iface} established`); graceful().then(resolve, reject); } }); socket.on('error', (error) => { graceful().then(() => reject(error)); }); }); }
 
-    let delimiter = this.findLineDelimiterIndex();
-    while (delimiter >= 0) {
-      const line = this.receiveBuffer.slice(0, delimiter);
-      const delimiterLength = this.receiveBuffer[delimiter] === '\r' && this.receiveBuffer[delimiter + 1] === '\n' ? 2 : 1;
-      this.receiveBuffer = this.receiveBuffer.slice(delimiter + delimiterLength);
-      if (line || delimiter !== 0) {
-        this.emit('line', line);
-      }
-      delimiter = this.findLineDelimiterIndex();
-    }
-
-    if (this.receiveBuffer && this.looksLikeCompleteLpcFrame(this.receiveBuffer)) {
-      this.residualLineTimer = setTimeout(() => this.flushResidualLineIfComplete(), 25);
-    }
-  }
-
-  private findLineDelimiterIndex(): number {
-    const newlineIndex = this.receiveBuffer.indexOf('\n');
-    const carriageReturnIndex = this.receiveBuffer.indexOf('\r');
-    if (newlineIndex < 0) return carriageReturnIndex;
-    if (carriageReturnIndex < 0) return newlineIndex;
-    return Math.min(newlineIndex, carriageReturnIndex);
-  }
-
-  private looksLikeCompleteLpcFrame(text: string): boolean {
-    const normalized = text.replace(/\t/g, ' ').replace(/→/g, ' ').replace(/ +/g, ' ').trim();
-    const streamFrame = /^\S+\s+S\s+C\d{2},P\d{2},[^,]+,ET\s+[-+]?\d+(?:[.,]\d+)?\s+sec,T\s+[-+]?\d+(?:[.,]\d+)?\s+sec,P\s+[-+]?\d+(?:[.,]\d+)?\s+\S+$/;
-    const resultFrame = /^(?:(\S+)\s+([A-Z])\s+)?C\d{2}\s+N\d+\s+P\d{2}\s+\S+\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+\d{2}\/\d{2}\/\d{2}\s+\d+/;
-    return streamFrame.test(normalized) || resultFrame.test(normalized);
-  }
-
-  private flushResidualLineIfComplete(): void {
-    this.clearResidualLineTimer();
-    if (!this.receiveBuffer || !this.looksLikeCompleteLpcFrame(this.receiveBuffer)) return;
-
-    const line = this.receiveBuffer;
-    this.receiveBuffer = '';
-    this.emit('line', line);
-  }
-
-  private clearResidualLineTimer(): void {
-    if (!this.residualLineTimer) return;
-    clearTimeout(this.residualLineTimer);
-    this.residualLineTimer = null;
-  }
-
-  private startHeartbeat(): void {
-    this.stopHeartbeat();
-    if (!this.options.heartbeatEnabled) return;
-
-    this.heartbeatTimer = setInterval(() => {
-      void this.performHeartbeatCheck();
-    }, this.options.heartbeatIntervalMs);
-  }
-
-  private stopHeartbeat(): void {
-    if (!this.heartbeatTimer) return;
-    clearInterval(this.heartbeatTimer);
-    this.heartbeatTimer = null;
-  }
-
-  private markStaleConnection(message: string): void {
-    this.state.setStaleConnectionDetected(message || 'Stale LPC connection detected');
-    const error = new Error(message || 'Stale LPC connection detected');
-    const state = this.state.getSnapshot();
-    this.emit('error', error, state);
-    this.emit('status', state);
-    this.destroySocket();
-  }
-
-  private destroySocket(): void {
-    this.clearResidualLineTimer();
-    if (!this.socket) return;
-    this.socket.destroy();
-    this.socket = null;
-  }
-
-  private scheduleReconnect(): void {
-    if (this.reconnectTimer || this.socket || this.connecting) return;
-
-    const nextReconnectAt = new Date(Date.now() + this.options.reconnectDelayMs).toISOString();
-    this.state.setReconnecting(nextReconnectAt);
-    const state = this.state.getSnapshot();
-    this.emit('reconnecting', state);
-    this.emit('status', state);
-
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.socket = null;
-      this.connecting = false;
-      this.connect();
-    }, this.options.reconnectDelayMs);
-  }
-
-  private clearReconnectTimer(): void {
-    if (!this.reconnectTimer) return;
-    clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = null;
-  }
-
-  private refreshSocketFlags(): void {
-    if (!this.socket) {
-      this.state.updateSocketFlags(true, false);
-      return;
-    }
-    this.state.updateSocketFlags(this.socket.destroyed, this.socket.writable);
-  }
-
-  private emitStatus(): void {
-    this.emit('status', this.state.getSnapshot());
-  }
+  private processIncomingText(text: string): void { this.receiveBuffer += text; this.clearResidualLineTimer(); let delimiter = this.findLineDelimiterIndex(); while (delimiter >= 0) { const line = this.receiveBuffer.slice(0, delimiter); const delimiterLength = this.receiveBuffer[delimiter] === '\r' && this.receiveBuffer[delimiter + 1] === '\n' ? 2 : 1; this.receiveBuffer = this.receiveBuffer.slice(delimiter + delimiterLength); if (line || delimiter !== 0) this.emit('line', line); delimiter = this.findLineDelimiterIndex(); } if (this.receiveBuffer && this.looksLikeCompleteLpcFrame(this.receiveBuffer)) this.residualLineTimer = setTimeout(() => this.flushResidualLineIfComplete(), 25); }
+  private findLineDelimiterIndex(): number { const newlineIndex = this.receiveBuffer.indexOf('\n'); const carriageReturnIndex = this.receiveBuffer.indexOf('\r'); if (newlineIndex < 0) return carriageReturnIndex; if (carriageReturnIndex < 0) return newlineIndex; return Math.min(newlineIndex, carriageReturnIndex); }
+  private looksLikeCompleteLpcFrame(text: string): boolean { const normalized = text.replace(/\t/g, ' ').replace(/→/g, ' ').replace(/ +/g, ' ').trim(); const streamFrame = /^\S+\s+S\s+C\d{2},P\d{2},[^,]+,ET\s+[-+]?\d+(?:[.,]\d+)?\s+sec,T\s+[-+]?\d+(?:[.,]\d+)?\s+sec,P\s+[-+]?\d+(?:[.,]\d+)?\s+\S+$/; const resultFrame = /^(?:(\S+)\s+([A-Z])\s+)?C\d{2}\s+N\d+\s+P\d{2}\s+\S+\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+\d{2}\/\d{2}\/\d{2}\s+\d+/; return streamFrame.test(normalized) || resultFrame.test(normalized); }
+  private flushResidualLineIfComplete(): void { this.clearResidualLineTimer(); if (!this.receiveBuffer || !this.looksLikeCompleteLpcFrame(this.receiveBuffer)) return; const line = this.receiveBuffer; this.receiveBuffer = ''; this.emit('line', line); }
+  private clearResidualLineTimer(): void { if (!this.residualLineTimer) return; clearTimeout(this.residualLineTimer); this.residualLineTimer = null; }
+  private clearStreamWatchdog(): void { if (!this.streamWatchdogTimer) return; clearTimeout(this.streamWatchdogTimer); this.streamWatchdogTimer = null; }
+  private startHeartbeat(): void { this.stopHeartbeat(); if (!this.options.heartbeatEnabled) return; this.heartbeatTimer = setInterval(() => { void this.performHeartbeatCheck(); }, this.options.heartbeatIntervalMs); }
+  private stopHeartbeat(): void { if (!this.heartbeatTimer) return; clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
+  private markStaleConnection(message: string): void { this.state.setStaleConnectionDetected(message || 'Stale LPC connection detected'); this.emit('error', new Error(message || 'Stale LPC connection detected'), this.getState()); this.emitStatus(); this.destroySocket(); }
+  private destroySocket(): void { this.clearResidualLineTimer(); this.clearStreamWatchdog(); if (!this.socket) return; this.socket.destroy(); this.socket = null; }
+  private scheduleReconnect(): void { if (this.reconnectTimer || this.socket || this.connecting) return; const nextReconnectAt = new Date(Date.now() + this.options.reconnectDelayMs).toISOString(); this.state.setReconnecting(nextReconnectAt); this.emit('reconnecting', this.getState()); this.emitStatus(); this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this.socket = null; this.connecting = false; void this.connect(); }, this.options.reconnectDelayMs); }
+  private clearReconnectTimer(): void { if (!this.reconnectTimer) return; clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+  private refreshSocketFlags(): void { if (!this.socket) { this.state.updateSocketFlags(true, false); return; } this.state.updateSocketFlags(this.socket.destroyed, this.socket.writable); }
+  private emitStatus(): void { this.emit('status', this.getState()); }
 }

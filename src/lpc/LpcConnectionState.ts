@@ -19,6 +19,12 @@ export interface LpcConnectionStateOptions {
   heartbeatTimeoutMs: number;
   staleConnectionTimeoutMs: number;
   heartbeatPayload: string;
+  preferredInterface?: number;
+  startupCleanupEnabled?: boolean;
+  startupCleanupInterfaces?: number[];
+  startupCleanupWaitMs?: number;
+  gracefulCloseWaitMs?: number;
+  streamWatchdogMs?: number;
 }
 
 export interface LpcConnectionStateSnapshot extends LpcConnectionStateOptions {
@@ -36,6 +42,20 @@ export interface LpcConnectionStateSnapshot extends LpcConnectionStateOptions {
   lastSuccessfulWriteAt: string | null;
   lastHeartbeatAt: string | null;
   staleConnectionDetectedAt: string | null;
+  tcpConnected?: boolean;
+  interfaceSelected?: boolean;
+  selectedInterface?: number | null;
+  streamingHealthy?: boolean;
+  lpcStatusCode?: string | null;
+  lastLpcRxAt?: string | null;
+  lastStreamFrameAt?: string | null;
+  lastResultFrameAt?: string | null;
+  isConnecting?: boolean;
+  isDisconnecting?: boolean;
+  lastDisconnectReason?: string | null;
+  lastReconnectAt?: string | null;
+  lastStartupCleanupAt?: string | null;
+  lastStartupCleanupResult?: Record<string, string>;
 }
 
 export class LpcConnectionState {

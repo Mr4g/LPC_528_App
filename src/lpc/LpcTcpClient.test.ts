@@ -15,6 +15,12 @@ function options(port: number): LpcTcpClientOptions {
     heartbeatTimeoutMs: 12000,
     staleConnectionTimeoutMs: 15000,
     heartbeatPayload: '',
+    preferredInterface: 1,
+    startupCleanupEnabled: false,
+    startupCleanupInterfaces: [1, 2],
+    startupCleanupWaitMs: 2500,
+    gracefulCloseWaitMs: 10,
+    streamWatchdogMs: 5000,
   };
 }
 
@@ -33,8 +39,11 @@ describe('LpcTcpClient', () => {
     server = null;
   });
 
-  it('sets connected=true only after the socket connect event', async () => {
-    server = net.createServer();
+  it('sets connected=true only after Interface 1 selection is confirmed', async () => {
+    server = net.createServer((socket) => {
+      socket.write('TCP/IP INTERFACE SELECTION\r\n1 Interface Connection1\r\n');
+      socket.on('data', () => socket.write('* Interface Connection 1 has been established *\r\n'));
+    });
     const port = await listen(server);
     const client = new LpcTcpClient(options(port));
 
@@ -47,7 +56,10 @@ describe('LpcTcpClient', () => {
   });
 
   it('marks stale connection when connected socket is not writable', async () => {
-    server = net.createServer();
+    server = net.createServer((socket) => {
+      socket.write('TCP/IP INTERFACE SELECTION\r\n1 Interface Connection1\r\n');
+      socket.on('data', () => socket.write('* Interface Connection 1 has been established *\r\n'));
+    });
     const port = await listen(server);
     const client = new LpcTcpClient(options(port));
 

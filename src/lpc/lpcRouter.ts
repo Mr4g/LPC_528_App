@@ -25,6 +25,23 @@ export function createLpcRouter(options: {
     res.json({
       ok: true,
       connected: state.connected,
+      tcpConnected: state.tcpConnected,
+      interfaceSelected: state.interfaceSelected,
+      selectedInterface: state.selectedInterface,
+      streamingHealthy: state.streamingHealthy,
+      lpcStatusCode: state.lpcStatusCode,
+      lastLpcRxAt: state.lastLpcRxAt,
+      lastStreamFrameAt: state.lastStreamFrameAt,
+      lastResultFrameAt: state.lastResultFrameAt,
+      isConnecting: state.isConnecting,
+      isDisconnecting: state.isDisconnecting,
+      lastDisconnectReason: state.lastDisconnectReason,
+      lastReconnectAt: state.lastReconnectAt,
+      startupCleanupEnabled: state.startupCleanupEnabled,
+      startupCleanupInterfaces: state.startupCleanupInterfaces,
+      preferredInterface: state.preferredInterface,
+      lastStartupCleanupAt: state.lastStartupCleanupAt,
+      lastStartupCleanupResult: state.lastStartupCleanupResult,
       status: state.status,
       host: state.host,
       port: state.port,
@@ -53,13 +70,13 @@ export function createLpcRouter(options: {
     });
   });
 
-  router.post('/connect', (_req, res) => {
-    const result = options.tcpClient.connect();
+  router.post('/connect', async (_req, res) => {
+    const result = await options.tcpClient.connect();
     res.status(result.ok ? 200 : 409).json(result);
   });
 
-  router.post('/disconnect', (_req, res) => {
-    const result = options.tcpClient.disconnect();
+  router.post('/disconnect', async (_req, res) => {
+    const result = await options.tcpClient.disconnectGracefully('manual_disconnect');
     res.json(result);
   });
 

@@ -197,7 +197,32 @@ export class LpcTcpClient extends EventEmitter {
   private findLineDelimiterIndex(): number { const newlineIndex = this.receiveBuffer.indexOf('\n'); const carriageReturnIndex = this.receiveBuffer.indexOf('\r'); if (newlineIndex < 0) return carriageReturnIndex; if (carriageReturnIndex < 0) return newlineIndex; return Math.min(newlineIndex, carriageReturnIndex); }
   private looksLikeCompleteLpcFrame(text: string): boolean { const normalized = text.replace(/\t/g, ' ').replace(/→/g, ' ').replace(/ +/g, ' ').trim(); const streamFrame = /^\S+\s+S\s+C\d{2},P\d{2},[^,]+,ET\s+[-+]?\d+(?:[.,]\d+)?\s+sec,T\s+[-+]?\d+(?:[.,]\d+)?\s+sec,P\s+[-+]?\d+(?:[.,]\d+)?\s+\S+$/; const resultFrame = /^(?:(\S+)\s+([A-Z])\s+)?C\d{2}\s+N\d+\s+P\d{2}\s+\S+\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+\d{2}\/\d{2}\/\d{2}\s+\d+/; return streamFrame.test(normalized) || resultFrame.test(normalized); }
   private flushResidualLineIfComplete(): void { this.clearResidualLineTimer(); if (!this.receiveBuffer || !this.looksLikeCompleteLpcFrame(this.receiveBuffer)) return; const line = this.receiveBuffer; this.receiveBuffer = ''; if (!this.isLpcMenuNoise(line)) this.emit('line', line); }
-  private isLpcMenuNoise(line: string): boolean { const normalized = line.replace(/\*/g, '').replace(/\s+/g, ' ').trim(); if (!normalized) return false; return normalized.includes('TCP/IP INTERFACE SELECTION') || /^Interface Connection \d+ has been established$/i.test(normalized) || /^TREE ROOT$/i.test(normalized) || /^[1-4] Interface Connection[1-4]$/i.test(normalized); }
+  private isLpcMenuNoise(line: string): boolean {
+    const withoutControl = line.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, '');
+    const normalized = withoutControl.replace(/\*/g, '').replace(/\s+/g, ' ').trim();
+    if (!normalized) return true;
+    if (this.looksLikePossibleLpcDataFrame(normalized)) return false;
+    return /^[?*.\-\s]+$/.test(withoutControl)
+      || /^[1-4]$/.test(normalized)
+      || normalized.includes('TCP/IP INTERFACE SELECTION')
+      || normalized.includes('Select from the following available connections')
+      || normalized.includes('Interface Connection')
+      || normalized.includes('TREE ROOT')
+      || normalized.includes('CONTROLLER')
+      || /^<I\\?>: Global config$/i.test(normalized)
+      || /^<C\\?>: Channel config$/i.test(normalized)
+      || /^<P#\\?>: Part config menu$/i.test(normalized)
+      || /^<T#\\?>: Result data$/i.test(normalized)
+      || /^<A#\\?>: Autosetup$/i.test(normalized)
+      || /^<M\\?>: Module menu$/i.test(normalized)
+      || /^<U\\?>: Update Firmware$/i.test(normalized)
+      || normalized.startsWith('VAR>:')
+      || normalized.startsWith('VAR?:')
+      || normalized.includes('VER: Display Version Number')
+      || normalized.includes('Dir: Display Current Branch')
+      || normalized === 'Help: Help';
+  }
+  private looksLikePossibleLpcDataFrame(line: string): boolean { return /\b[SR]\s+C\d{2}[,\s]/.test(line) || /\bC\d{2}\s+N?\d*\s*P\d{2}\b/.test(line); }
   private clearResidualLineTimer(): void { if (!this.residualLineTimer) return; clearTimeout(this.residualLineTimer); this.residualLineTimer = null; }
   private clearStreamWatchdog(): void { if (!this.streamWatchdogTimer) return; clearTimeout(this.streamWatchdogTimer); this.streamWatchdogTimer = null; }
   private startHeartbeat(): void { this.stopHeartbeat(); if (!this.options.heartbeatEnabled) return; this.heartbeatTimer = setInterval(() => { void this.performHeartbeatCheck(); }, this.options.heartbeatIntervalMs); }

@@ -161,11 +161,6 @@ lpcTcpClient.on('error', (error, state) => {
   if (testSessionManager.getStatus().locked) testSessionManager.fail(error.message, 'LPC_CONNECTION_ERROR');
   io.emit('lpc:error', { message: error.message, state });
 });
-lpcTcpClient.on('rawData', (data) => {
-  if (data.includes('TCP/IP INTERFACE SELECTION') || data.includes('* 1 Interface Connection1 *')) {
-    lpcLineProcessor.processLine(data);
-  }
-});
 lpcTcpClient.on('line', (line) => {
   lpcLineProcessor.processLine(line);
 });

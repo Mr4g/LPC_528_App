@@ -154,14 +154,17 @@ describe('LpcTcpClient line splitting', () => {
     expect(lines).toEqual(['first', 'second']);
   });
 
-  it('filters LPC menu lines before emitting parser pipeline lines', () => {
+  it('filters multi-line LPC menu chunks before emitting parser pipeline lines', () => {
     const client = new LpcTcpClient(options(23));
     const lines: string[] = [];
     client.on('line', (line) => lines.push(line));
 
-    client.receiveTextForTest('* TCP/IP INTERFACE SELECTION *\r\n1 Interface Connection1\r\n* Interface Connection 1 has been established *\r\nTREE ROOT\r\n9369034 S C01,P01,PRF,ET 5.20 sec,T 19.80 sec,P -0.00011 bar\r\n');
+    client.receiveTextForTest('??????\r\n*************************************************************************\r\n* TCP/IP INTERFACE SELECTION *\r\n*************************************************************************\r\n*\r\n*Select from the following available connections..enter connection number\r\n* 1 Interface Connection1 *\r\n* 2 Interface Connection2 *\r\n1\r\n* Interface Connection 1 has been established *\r\n*************************************************************************\r\n* TREE ROOT CONTROLLER *\r\n*************************************************************************\r\n* <I\\>: Global config *\r\nB89C045 S C01,P17,DPT,ET 54.65 sec,T 1.35 sec,P 5.990978 bar,RL 3.788533 pa/s\r\nBD2A0D2 R C01 P17 15:58:45.620 07/03/26 0000294001 A - DPT P RL 2.664816 pa/s Pt 5.989275 bar\r\n');
 
-    expect(lines).toEqual(['9369034 S C01,P01,PRF,ET 5.20 sec,T 19.80 sec,P -0.00011 bar']);
+    expect(lines).toEqual([
+      'B89C045 S C01,P17,DPT,ET 54.65 sec,T 1.35 sec,P 5.990978 bar,RL 3.788533 pa/s',
+      'BD2A0D2 R C01 P17 15:58:45.620 07/03/26 0000294001 A - DPT P RL 2.664816 pa/s Pt 5.989275 bar',
+    ]);
   });
 
   it('flushes a complete stream frame even when LPC does not send a line delimiter', () => {

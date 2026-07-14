@@ -15,6 +15,7 @@ import type { SplunkRuntimeConfig } from '../server/splunk/splunkTypes';
 import { emitLlBlocked, hasLlRole, LL_REQUIRED_MESSAGE } from '../server/ll-control';
 import type { MasterSampleService } from '../server/master-sample';
 import { cacheEntryToSnapshot } from '../server/program-limit-cache';
+import type { LpcTcpClient } from '../lpc/LpcTcpClient';
 
 export function createScannerRouter(options: {
   config: AppConfig;
@@ -28,6 +29,7 @@ export function createScannerRouter(options: {
   splunkBuffer?: SplunkBuffer;
   splunkConfig?: SplunkRuntimeConfig;
   masterSampleService?: MasterSampleService;
+  lpcTcpClient?: LpcTcpClient;
 }): Router {
   const router = Router();
 
@@ -49,6 +51,10 @@ export function createScannerRouter(options: {
     if (lock && !lock.ok) {
       console.log(`[ACTIVE_TEST] scan rejected reason=TEST_IN_PROGRESS barcode=${rawBarcode}`);
       return res.status(409).json({ ...(lock.response as object), barcode: rawBarcode, error: 'TEST_IN_PROGRESS' });
+    }
+    const lpcStartGate = options.lpcTcpClient?.canStartTest();
+    if (lpcStartGate && !lpcStartGate.ok) {
+      return res.status(409).json({ ok: false, error: lpcStartGate.code, code: lpcStartGate.code, message: lpcStartGate.message });
     }
 
     const scan = parseBarcodeScan(rawBarcode);
@@ -91,6 +97,7 @@ export function createScannerRouter(options: {
     const activeTest = options.testSessionManager?.start(currentTest) ?? null;
     options.authService?.markTestActivity(req.user?.id);
     const programStart = await options.programStarter.startProgram(programStartRequest);
+    if (programStart.success) options.lpcTcpClient?.markTestStartCommand();
     if (!programStart.success) {
       options.testSessionManager?.fail(programStart.message, 'PROGRAM_START_FAILED');
     }

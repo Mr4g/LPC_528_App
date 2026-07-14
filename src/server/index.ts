@@ -92,6 +92,9 @@ const programStarter = createProgramStarter({
   command: config.PROGRAM_START_COMMAND,
   scriptPath: config.PROGRAM_START_SCRIPT_PATH,
 });
+const lpcPreferredInterface = Number(config.LPC_INTERFACE_SELECTION) || 1;
+const lpcInterfaceFallbackInterfaces = config.LPC_INTERFACE_FALLBACK_INTERFACES.split(',').map((value) => Number(value.trim())).filter((value) => value >= 1 && value <= 4);
+const lpcStartupCleanupInterfaces = config.LPC_STARTUP_CLEANUP_INTERFACES.split(',').map((value) => Number(value.trim())).filter((value) => value === 1 || value === 2);
 const lpcTcpClient = new LpcTcpClient({
   host: config.LPC_HOST,
   port: config.LPC_PORT,
@@ -104,6 +107,14 @@ const lpcTcpClient = new LpcTcpClient({
   heartbeatTimeoutMs: config.LPC_HEARTBEAT_TIMEOUT_MS,
   staleConnectionTimeoutMs: config.LPC_STALE_CONNECTION_TIMEOUT_MS,
   heartbeatPayload: config.LPC_HEARTBEAT_PAYLOAD,
+  preferredInterface: lpcPreferredInterface,
+  fallbackEnabled: config.LPC_INTERFACE_FALLBACK_ENABLED,
+  fallbackInterfaces: lpcInterfaceFallbackInterfaces.length ? lpcInterfaceFallbackInterfaces : [1, 2, 3, 4],
+  startupCleanupEnabled: config.LPC_STARTUP_CLEANUP_ENABLED,
+  startupCleanupInterfaces: lpcStartupCleanupInterfaces.length ? lpcStartupCleanupInterfaces : [1, 2],
+  startupCleanupWaitMs: config.LPC_STARTUP_CLEANUP_WAIT_MS,
+  gracefulCloseWaitMs: config.LPC_GRACEFUL_CLOSE_WAIT_MS,
+  streamWatchdogMs: config.LPC_STREAM_WATCHDOG_MS,
 });
 const zebraPrinter = new ZebraPrinter(config);
 const lastResultStore = new LastResultStore();
@@ -119,7 +130,7 @@ const lpcLineProcessor = new LpcLineProcessor({
   curveBuffer: lpcCurveBuffer,
   lastResultStore,
   resultHistoryStore,
-  autoSelectInterface: config.LPC_AUTO_SELECT_INTERFACE,
+  autoSelectInterface: false,
   interfaceSelection: config.LPC_INTERFACE_SELECTION,
   currentTestMaxAgeMs: config.CURRENT_TEST_MAX_AGE_MS,
   debugLines: config.LPC_DEBUG_LINES,
@@ -151,11 +162,6 @@ lpcTcpClient.on('reconnecting', (state) => {
 lpcTcpClient.on('error', (error, state) => {
   if (testSessionManager.getStatus().locked) testSessionManager.fail(error.message, 'LPC_CONNECTION_ERROR');
   io.emit('lpc:error', { message: error.message, state });
-});
-lpcTcpClient.on('rawData', (data) => {
-  if (data.includes('TCP/IP INTERFACE SELECTION') || data.includes('* 1 Interface Connection1 *')) {
-    lpcLineProcessor.processLine(data);
-  }
 });
 lpcTcpClient.on('line', (line) => {
   lpcLineProcessor.processLine(line);
@@ -199,7 +205,7 @@ app.use('/api/lpc', createLpcRouter({
   database,
   getSocketClientsCount: () => io.engine.clientsCount,
 }));
-app.use('/api', createScannerRouter({ config, io, programStarter, currentTestStore, programMappingService, testSessionManager, authService, database, splunkBuffer, splunkConfig, masterSampleService }));
+app.use('/api', createScannerRouter({ config, io, programStarter, currentTestStore, programMappingService, testSessionManager, authService, database, splunkBuffer, splunkConfig, masterSampleService, lpcTcpClient }));
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'lpc-528-app' });
@@ -217,6 +223,19 @@ httpServer.listen(config.APP_PORT, () => {
   console.log(`LPC-528 backend listening on port ${config.APP_PORT}`);
   splunkBuffer.start();
   if (config.LPC_AUTO_CONNECT) {
-    lpcTcpClient.connect();
+    void lpcTcpClient.connect();
   }
 });
+
+let shuttingDown = false;
+const shutdown = (signal: NodeJS.Signals) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[LPC] process shutdown signal=${signal}`);
+  void lpcTcpClient.disconnectGracefully('process_shutdown').finally(() => {
+    httpServer.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 1500).unref();
+  });
+};
+process.once('SIGINT', shutdown);
+process.once('SIGTERM', shutdown);

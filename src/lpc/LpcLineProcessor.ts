@@ -143,6 +143,7 @@ export class LpcLineProcessor {
         }
         const curvePoint = this.options.curveBuffer.addStreamPoint(streamPoint);
         this.lastStreamAt = receivedAt;
+        this.options.tcpClient.recordStreamFrame?.('stream', receivedAt);
         this.options.testSessionManager?.markLpcData(receivedAt);
         this.streamCount += 1;
         diagnostic.parsedAs = 'stream';
@@ -190,6 +191,7 @@ export class LpcLineProcessor {
         // Splunk is sent after print metadata is finalized in autoPrint().
         // this.sendSplunkResult(enrichedResult, activeSessionBeforeComplete, completedCurve.points);
         this.lastResultAt = receivedAt;
+        this.options.tcpClient.recordStreamFrame?.('result', receivedAt);
         this.resultCount += 1;
         diagnostic.parsedAs = 'result';
         this.storeRawLine(diagnostic);

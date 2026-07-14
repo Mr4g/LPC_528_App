@@ -80,7 +80,7 @@ function validateProgramMappingInput(input: ProgramMappingInput, partial = false
 
   if (!partial || input.programNumber !== undefined) {
     const programNumber = Number(input.programNumber);
-    if (!Number.isInteger(programNumber) || programNumber < 1 || programNumber > 31) throw new Error('Program musi być w zakresie 1–31.');
+    if (!Number.isInteger(programNumber) || programNumber < 1 || programNumber > 32) throw new Error('Program musi być w zakresie 1–32.');
     output.programNumber = programNumber;
   }
 

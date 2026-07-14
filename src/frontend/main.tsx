@@ -8,6 +8,7 @@ import carrierLogo from './assets/carrier-logo.svg';
 import { buildChartRenderPoints, PressureChart } from './components/PressureChart';
 import { UserMenu } from './components/UserMenu';
 import { getProgramStartOperatorMessage } from './programStartMessages';
+import { LPC_PROGRAM_OPTIONS } from './programOptions';
 import { mergeResultIntoHistory, replaceHistoryFromResultsUpdated } from './resultHistoryState';
 import { persistTheme, readStoredTheme, type ThemeMode } from './theme';
 import './styles.css';
@@ -60,6 +61,10 @@ interface LpcStatusPayload {
   staleConnectionDetectedAt?: string | null;
   socketDestroyed?: boolean;
   socketWritable?: boolean;
+  lpcStatusCode?: string | null;
+  operatorMessage?: string | null;
+  selectedInterface?: number | null;
+  usingFallbackInterface?: boolean;
 }
 
 interface MasterSampleStatus { ok?: true; enabled: boolean; requestedByUserId?: string | null; requestedByLogin?: string | null; requestedByRole?: string | null; requestedAt?: string | null; labelCopiesOnOk?: number; }
@@ -355,6 +360,9 @@ function getSafeLpcConnectionLabel(status: LpcStatusPayload | null): string {
 type CompactLpcStatus = 'online' | 'stale' | 'offline';
 
 function getCompactLpcStatus(status: LpcStatusPayload | null): { label: string; state: CompactLpcStatus } {
+  if (status?.lpcStatusCode === 'LPC_NO_AVAILABLE_INTERFACE') return { label: 'Zresetuj LPC, następnie IPC', state: 'offline' };
+  if (status?.lpcStatusCode === 'LPC_STREAM_STALLED') return { label: 'Zresetuj LPC, następnie IPC', state: 'offline' };
+  if (status?.lpcStatusCode === 'LPC_CONNECTED_FALLBACK_INTERFACE') return { label: `LPC awaryjnie IF${status.selectedInterface ?? '?'}`, state: 'stale' };
   if (!status || !status.connected || status.status === 'disconnected' || status.socketDestroyed === true || status.socketWritable === false) {
     return { label: 'LPC offline', state: 'offline' };
   }
@@ -812,8 +820,8 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
       setMessage('Barcode musi mieć od 3 do 100 znaków');
       return;
     }
-    if (!Number.isInteger(programNumber) || programNumber < 1 || programNumber > 31) {
-      setMessage('Program musi być w zakresie 1–31');
+    if (!Number.isInteger(programNumber) || programNumber < 1 || programNumber > 32) {
+      setMessage('Program musi być w zakresie 1–32');
       return;
     }
 
@@ -894,7 +902,7 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
           <option value="contains">Zawiera</option>
         </select>
         <select value={programNumber} onChange={(event) => setProgramNumber(Number(event.target.value))}>
-          {Array.from({ length: 31 }, (_, index) => index + 1).map((program) => <option key={program} value={program}>P{String(program).padStart(2, '0')}</option>)}
+          {LPC_PROGRAM_OPTIONS.map((program) => <option key={program} value={program}>P{String(program).padStart(2, '0')}</option>)}
         </select>
         <select value={labelPrintMode} onChange={(event) => setLabelPrintMode(event.target.value as 'ok_only' | 'ok_and_nok')}>
           <option value="ok_only">Tylko OK</option>
@@ -1853,6 +1861,9 @@ function App() {
             <div>
               <strong>{compactLpcStatus.label}</strong>
               <small>{splunkCompactLabel}</small>
+              {lpcStatus?.lpcStatusCode === 'LPC_NO_AVAILABLE_INTERFACE' && <small className="connection-error-text">Brak dostępnego połączenia z LPC. Wszystkie połączenia LPC są zajęte lub niedostępne. Zresetuj tester LPC, poczekaj aż się uruchomi, a następnie zresetuj IPC.</small>}
+              {lpcStatus?.lpcStatusCode === 'LPC_STREAM_STALLED' && <small className="connection-error-text">Brak pełnej komunikacji z LPC. Program został uruchomiony, ale tester nie przesyła danych pomiarowych. Zresetuj tester LPC, poczekaj aż się uruchomi, a następnie zresetuj IPC.</small>}
+              {lpcStatus?.lpcStatusCode === 'LPC_CONNECTED_FALLBACK_INTERFACE' && <small className="connection-error-text">LPC połączony awaryjnie przez Interface {lpcStatus.selectedInterface ?? '?' }.</small>}
               {lpcStatus?.nextReconnectAt && <small>Ponowna próba: {formatDateTime(lpcStatus.nextReconnectAt)}</small>}
               {lpcStatus?.lastError && <small className="connection-error-text">{lpcStatus.lastError}</small>}
             </div>

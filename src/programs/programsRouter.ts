@@ -87,8 +87,8 @@ export function createProgramsRouter(options: { config: AppConfig; programStarte
 
   router.post('/start', async (req: AuthenticatedRequest, res) => {
     const program = Number(req.body?.program);
-    if (!Number.isInteger(program) || program < 1 || program > 31) {
-      return res.status(400).json({ ok: false, error: 'INVALID_PROGRAM', message: 'Program must be an integer from 1 to 31' });
+    if (!Number.isInteger(program) || program < 1 || program > 32) {
+      return res.status(400).json({ ok: false, error: 'INVALID_PROGRAM', message: 'Program must be an integer from 1 to 32' });
     }
 
     const barcode = typeof req.body?.barcode === 'string' && req.body.barcode.trim() ? req.body.barcode.trim() : 'manual_program_start';

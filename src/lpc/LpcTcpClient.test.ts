@@ -15,6 +15,14 @@ function options(port: number): LpcTcpClientOptions {
     heartbeatTimeoutMs: 12000,
     staleConnectionTimeoutMs: 15000,
     heartbeatPayload: '',
+    preferredInterface: 1,
+    fallbackEnabled: false,
+    fallbackInterfaces: [1, 2, 3, 4],
+    startupCleanupEnabled: false,
+    startupCleanupInterfaces: [1, 2],
+    startupCleanupWaitMs: 2500,
+    gracefulCloseWaitMs: 10,
+    streamWatchdogMs: 5000,
   };
 }
 
@@ -33,8 +41,11 @@ describe('LpcTcpClient', () => {
     server = null;
   });
 
-  it('sets connected=true only after the socket connect event', async () => {
-    server = net.createServer();
+  it('sets connected=true only after Interface 1 selection is confirmed', async () => {
+    server = net.createServer((socket) => {
+      socket.write('TCP/IP INTERFACE SELECTION\r\n1 Interface Connection1\r\n');
+      socket.on('data', () => socket.write('* Interface Connection 1 has been established *\r\n'));
+    });
     const port = await listen(server);
     const client = new LpcTcpClient(options(port));
 
@@ -47,7 +58,10 @@ describe('LpcTcpClient', () => {
   });
 
   it('marks stale connection when connected socket is not writable', async () => {
-    server = net.createServer();
+    server = net.createServer((socket) => {
+      socket.write('TCP/IP INTERFACE SELECTION\r\n1 Interface Connection1\r\n');
+      socket.on('data', () => socket.write('* Interface Connection 1 has been established *\r\n'));
+    });
     const port = await listen(server);
     const client = new LpcTcpClient(options(port));
 
@@ -56,6 +70,234 @@ describe('LpcTcpClient', () => {
     server.close();
     client.disconnect();
     expect(client.getState().connected).toBe(false);
+  });
+
+  it('runs startup cleanup once per interface even when LPC repeats established text', async () => {
+    let connectionCount = 0;
+    const selectionWrites: string[] = [];
+    server = net.createServer((socket) => {
+      connectionCount += 1;
+      socket.write('TCP/IP INTERFACE SELECTION\r\n1 Interface Connection1\r\n');
+      socket.on('data', (chunk) => {
+        selectionWrites.push(chunk.toString());
+        socket.write('* Interface Connection 1 has been established *\r\n* Interface Connection 1 has been established *\r\n');
+      });
+    });
+    const port = await listen(server);
+    const client = new LpcTcpClient({
+      ...options(port),
+      startupCleanupEnabled: true,
+      startupCleanupInterfaces: [1],
+      startupCleanupWaitMs: 0,
+    });
+
+    await client.connect();
+    await new Promise<void>((resolve) => client.once('connected', () => resolve()));
+
+    expect(connectionCount).toBe(2);
+    expect(selectionWrites).toHaveLength(2);
+    expect(client.getState().lastStartupCleanupResult).toMatchObject({ 1: 'success' });
+    await client.disconnectGracefully('test_shutdown');
+  });
+
+  it('sends the preferred interface only once when the selection menu repeats in one connection attempt', async () => {
+    const selectionWrites: string[] = [];
+    server = net.createServer((socket) => {
+      socket.write('TCP/IP INTERFACE SELECTION\r\n');
+      socket.write('TCP/IP INTERFACE SELECTION\r\n');
+      socket.on('data', (chunk) => {
+        selectionWrites.push(chunk.toString());
+      });
+    });
+    const port = await listen(server);
+    const client = new LpcTcpClient({ ...options(port), reconnectEnabled: false });
+
+    await client.connect();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(selectionWrites).toEqual(['1\r\n']);
+    await client.disconnectGracefully('test_shutdown');
+  });
+
+  it('marks the interface unavailable and closes without another interface write', async () => {
+    const selectionWrites: string[] = [];
+    server = net.createServer((socket) => {
+      socket.write('TCP/IP INTERFACE SELECTION\r\n');
+      socket.on('data', (chunk) => {
+        selectionWrites.push(chunk.toString());
+        socket.write('* You have selected an unavailable Interface connection *\r\nTCP/IP INTERFACE SELECTION\r\n');
+      });
+    });
+    const port = await listen(server);
+    const client = new LpcTcpClient({ ...options(port), reconnectEnabled: false });
+    const disconnected = new Promise<void>((resolve) => client.once('disconnected', () => resolve()));
+
+    await client.connect();
+    await disconnected;
+
+    expect(selectionWrites).toEqual(['1\r\n']);
+    expect(client.getState()).toMatchObject({
+      lpcStatusCode: 'LPC_NO_AVAILABLE_INTERFACE',
+      interfaceSelected: false,
+      selectedInterface: null,
+      lastInterfaceError: 'unavailable',
+      lastInterfaceAttempt: 1,
+    });
+  });
+
+  it('falls back to Interface 2 when Interface 1 is unavailable', async () => {
+    const selectionWrites: string[] = [];
+    server = net.createServer((socket) => {
+      socket.write('TCP/IP INTERFACE SELECTION\r\n');
+      socket.on('data', (chunk) => {
+        const selected = chunk.toString();
+        selectionWrites.push(selected);
+        if (selected === '1\r\n') socket.write('* You have selected an unavailable Interface connection *\r\n');
+        if (selected === '2\r\n') socket.write('* Interface Connection 2 has been established *\r\n');
+      });
+    });
+    const port = await listen(server);
+    const client = new LpcTcpClient({ ...options(port), fallbackEnabled: true, fallbackInterfaces: [1, 2, 3, 4] });
+
+    await client.connect();
+    await new Promise<void>((resolve) => client.once('connected', () => resolve()));
+
+    expect(selectionWrites).toEqual(['1\r\n', '2\r\n']);
+    expect(client.getState()).toMatchObject({
+      selectedInterface: 2,
+      usingFallbackInterface: true,
+      lpcStatusCode: 'LPC_CONNECTED_FALLBACK_INTERFACE',
+    });
+    await client.disconnectGracefully('test_shutdown');
+  });
+
+  it('sets LPC_NO_AVAILABLE_INTERFACE when every fallback interface is unavailable', async () => {
+    const selectionWrites: string[] = [];
+    server = net.createServer((socket) => {
+      socket.write('TCP/IP INTERFACE SELECTION\r\n');
+      socket.on('data', (chunk) => {
+        selectionWrites.push(chunk.toString());
+        socket.write('* You have selected an unavailable Interface connection *\r\n');
+      });
+    });
+    const port = await listen(server);
+    const client = new LpcTcpClient({ ...options(port), fallbackEnabled: true, fallbackInterfaces: [1, 2, 3, 4] });
+    const disconnected = new Promise<void>((resolve) => client.once('disconnected', () => resolve()));
+
+    await client.connect();
+    await disconnected;
+
+    expect(selectionWrites).toEqual(['1\r\n', '2\r\n', '3\r\n', '4\r\n']);
+    expect(client.getState()).toMatchObject({
+      selectedInterface: null,
+      interfaceSelected: false,
+      lpcStatusCode: 'LPC_NO_AVAILABLE_INTERFACE',
+      operatorMessage: 'Zresetuj LPC, następnie IPC.',
+    });
+    const startGate = client.canStartTest();
+    expect(startGate.ok).toBe(false);
+    if (!startGate.ok) expect(startGate.message).toContain('Zresetuj LPC, następnie IPC');
+  });
+
+  it('marks streaming healthy when a stream frame arrives before the watchdog expires', async () => {
+    const client = new LpcTcpClient({ ...options(23), streamWatchdogMs: 50 });
+
+    client.markTestStartCommand();
+    client.recordStreamFrame('stream', '2026-07-14T00:00:00.000Z');
+    await new Promise((resolve) => setTimeout(resolve, 70));
+
+    expect(client.getState()).toMatchObject({
+      streamingHealthy: true,
+      lpcStatusCode: null,
+      operatorMessage: null,
+      lastStreamFrameAt: '2026-07-14T00:00:00.000Z',
+    });
+  });
+
+  it('marks streaming healthy when a result frame arrives before any stream frame', async () => {
+    const client = new LpcTcpClient({ ...options(23), streamWatchdogMs: 50 });
+
+    client.markTestStartCommand();
+    client.recordStreamFrame('result', '2026-07-14T00:00:01.000Z');
+    await new Promise((resolve) => setTimeout(resolve, 70));
+
+    expect(client.getState()).toMatchObject({
+      streamingHealthy: true,
+      lpcStatusCode: null,
+      operatorMessage: null,
+      lastResultFrameAt: '2026-07-14T00:00:01.000Z',
+    });
+  });
+
+  it('sets LPC_STREAM_STALLED and blocks another start when no S/R frame arrives', async () => {
+    const client = new LpcTcpClient({ ...options(23), streamWatchdogMs: 10 });
+
+    client.markTestStartCommand();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(client.getState()).toMatchObject({
+      streamingHealthy: false,
+      lpcStatusCode: 'LPC_STREAM_STALLED',
+      operatorMessage: 'Zresetuj LPC, następnie IPC.',
+    });
+    const startGate = client.canStartTest();
+    expect(startGate.ok).toBe(false);
+    if (!startGate.ok) expect(startGate.message).toContain('Zresetuj LPC, następnie IPC');
+  });
+
+  it('sets LPC_STREAM_STALLED on fallback Interface 2 when no S/R frame arrives', async () => {
+    const selectionWrites: string[] = [];
+    server = net.createServer((socket) => {
+      socket.write('TCP/IP INTERFACE SELECTION\r\n');
+      socket.on('data', (chunk) => {
+        const selected = chunk.toString();
+        selectionWrites.push(selected);
+        if (selected === '1\r\n') socket.write('* You have selected an unavailable Interface connection *\r\n');
+        if (selected === '2\r\n') socket.write('* Interface Connection 2 has been established *\r\n');
+      });
+    });
+    const port = await listen(server);
+    const client = new LpcTcpClient({ ...options(port), fallbackEnabled: true, fallbackInterfaces: [1, 2], streamWatchdogMs: 10 });
+
+    await client.connect();
+    await new Promise<void>((resolve) => client.once('connected', () => resolve()));
+    client.markTestStartCommand();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(selectionWrites).toEqual(['1\r\n', '2\r\n']);
+    expect(client.getState()).toMatchObject({
+      selectedInterface: 2,
+      usingFallbackInterface: true,
+      streamingHealthy: false,
+      lpcStatusCode: 'LPC_STREAM_STALLED',
+      operatorMessage: 'Zresetuj LPC, następnie IPC.',
+    });
+    await client.disconnectGracefully('test_shutdown');
+  });
+
+  it('continues startup cleanup with the next interface when one cleanup interface is unavailable', async () => {
+    let connectionCount = 0;
+    server = net.createServer((socket) => {
+      connectionCount += 1;
+      socket.write('TCP/IP INTERFACE SELECTION\r\n');
+      socket.on('data', () => {
+        if (connectionCount === 1) socket.write('* You have selected an unavailable Interface connection *\r\n');
+        else socket.write(`* Interface Connection ${connectionCount === 2 ? 2 : 1} has been established *\r\n`);
+      });
+    });
+    const port = await listen(server);
+    const client = new LpcTcpClient({
+      ...options(port),
+      startupCleanupEnabled: true,
+      startupCleanupInterfaces: [1, 2],
+      startupCleanupWaitMs: 0,
+    });
+
+    await client.connect();
+    await new Promise<void>((resolve) => client.once('connected', () => resolve()));
+
+    expect(client.getState().lastStartupCleanupResult).toMatchObject({ 1: 'unavailable', 2: 'success' });
+    await client.disconnectGracefully('test_shutdown');
   });
 
   it('schedules reconnect with nextReconnectAt after close', async () => {
@@ -112,6 +354,19 @@ describe('LpcTcpClient line splitting', () => {
     client.receiveTextForTest('first\rsecond\r');
 
     expect(lines).toEqual(['first', 'second']);
+  });
+
+  it('filters multi-line LPC menu chunks before emitting parser pipeline lines', () => {
+    const client = new LpcTcpClient(options(23));
+    const lines: string[] = [];
+    client.on('line', (line) => lines.push(line));
+
+    client.receiveTextForTest('??????\r\n*************************************************************************\r\n* TCP/IP INTERFACE SELECTION *\r\n*************************************************************************\r\n*\r\n*Select from the following available connections..enter connection number\r\n* 1 Interface Connection1 *\r\n* 2 Interface Connection2 *\r\n1\r\n* Interface Connection 1 has been established *\r\n*************************************************************************\r\n* TREE ROOT CONTROLLER *\r\n*************************************************************************\r\n* <I\\>: Global config *\r\nB89C045 S C01,P17,DPT,ET 54.65 sec,T 1.35 sec,P 5.990978 bar,RL 3.788533 pa/s\r\nBD2A0D2 R C01 P17 15:58:45.620 07/03/26 0000294001 A - DPT P RL 2.664816 pa/s Pt 5.989275 bar\r\n');
+
+    expect(lines).toEqual([
+      'B89C045 S C01,P17,DPT,ET 54.65 sec,T 1.35 sec,P 5.990978 bar,RL 3.788533 pa/s',
+      'BD2A0D2 R C01 P17 15:58:45.620 07/03/26 0000294001 A - DPT P RL 2.664816 pa/s Pt 5.989275 bar',
+    ]);
   });
 
   it('flushes a complete stream frame even when LPC does not send a line delimiter', () => {

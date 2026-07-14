@@ -44,6 +44,8 @@ const envSchema = z.object({
   LPC_HOST: z.string().min(1),
   LPC_PORT: z.coerce.number().int().positive().default(23),
   LPC_INTERFACE_SELECTION: z.string().min(1).default('1'),
+  LPC_INTERFACE_FALLBACK_ENABLED: z.coerce.boolean().default(true),
+  LPC_INTERFACE_FALLBACK_INTERFACES: z.string().min(1).default('1,2,3,4'),
   LPC_STARTUP_CLEANUP_ENABLED: z.coerce.boolean().default(true),
   LPC_STARTUP_CLEANUP_INTERFACES: z.string().min(1).default('1,2'),
   LPC_STARTUP_CLEANUP_WAIT_MS: z.coerce.number().int().nonnegative().default(2500),

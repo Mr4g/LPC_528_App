@@ -60,6 +60,10 @@ interface LpcStatusPayload {
   staleConnectionDetectedAt?: string | null;
   socketDestroyed?: boolean;
   socketWritable?: boolean;
+  lpcStatusCode?: string | null;
+  operatorMessage?: string | null;
+  selectedInterface?: number | null;
+  usingFallbackInterface?: boolean;
 }
 
 interface MasterSampleStatus { ok?: true; enabled: boolean; requestedByUserId?: string | null; requestedByLogin?: string | null; requestedByRole?: string | null; requestedAt?: string | null; labelCopiesOnOk?: number; }
@@ -355,6 +359,8 @@ function getSafeLpcConnectionLabel(status: LpcStatusPayload | null): string {
 type CompactLpcStatus = 'online' | 'stale' | 'offline';
 
 function getCompactLpcStatus(status: LpcStatusPayload | null): { label: string; state: CompactLpcStatus } {
+  if (status?.lpcStatusCode === 'LPC_NO_AVAILABLE_INTERFACE') return { label: 'Zresetuj LPC, następnie IPC', state: 'offline' };
+  if (status?.lpcStatusCode === 'LPC_CONNECTED_FALLBACK_INTERFACE') return { label: `LPC awaryjnie IF${status.selectedInterface ?? '?'}`, state: 'stale' };
   if (!status || !status.connected || status.status === 'disconnected' || status.socketDestroyed === true || status.socketWritable === false) {
     return { label: 'LPC offline', state: 'offline' };
   }
@@ -1853,6 +1859,8 @@ function App() {
             <div>
               <strong>{compactLpcStatus.label}</strong>
               <small>{splunkCompactLabel}</small>
+              {lpcStatus?.lpcStatusCode === 'LPC_NO_AVAILABLE_INTERFACE' && <small className="connection-error-text">Brak dostępnego połączenia z LPC. Wszystkie połączenia LPC są zajęte lub niedostępne. Zresetuj tester LPC, poczekaj aż się uruchomi, a następnie zresetuj IPC.</small>}
+              {lpcStatus?.lpcStatusCode === 'LPC_CONNECTED_FALLBACK_INTERFACE' && <small className="connection-error-text">LPC połączony awaryjnie przez Interface {lpcStatus.selectedInterface ?? '?' }.</small>}
               {lpcStatus?.nextReconnectAt && <small>Ponowna próba: {formatDateTime(lpcStatus.nextReconnectAt)}</small>}
               {lpcStatus?.lastError && <small className="connection-error-text">{lpcStatus.lastError}</small>}
             </div>

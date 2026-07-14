@@ -15,6 +15,8 @@ export interface LpcTcpClientOptions {
   staleConnectionTimeoutMs: number;
   heartbeatPayload: string;
   preferredInterface: number;
+  fallbackEnabled: boolean;
+  fallbackInterfaces: number[];
   startupCleanupEnabled: boolean;
   startupCleanupInterfaces: number[];
   startupCleanupWaitMs: number;
@@ -57,6 +59,11 @@ export class LpcTcpClient extends EventEmitter {
   private lastStreamFrameAt: string | null = null;
   private lastResultFrameAt: string | null = null;
   private interfaceSelectionSent = false;
+  private currentInterfaceAttempt: number | null = null;
+  private fallbackInterfacesForRound: number[] = [];
+  private usingFallbackInterface = false;
+  private lastInterfaceAttempts: Array<{ interface: number; result: 'success' | 'unavailable' | 'timeout' | 'failed'; at: string }> = [];
+  private operatorMessage: string | null = null;
   private lastInterfaceError: string | null = null;
   private lastInterfaceErrorAt: string | null = null;
   private lastInterfaceAttempt: number | null = null;
@@ -76,18 +83,29 @@ export class LpcTcpClient extends EventEmitter {
     }
     if (this.options.startupCleanupEnabled && !this.startupCleanupDone) await this.runStartupCleanup();
 
-    this.clearReconnectTimer(); this.manuallyDisconnected = false; this.connecting = true; this.interfaceSelected = false; this.interfaceSelectionSent = false; this.selectedInterface = null; this.streamingHealthy = false; this.lpcStatusCode = null;
+    this.clearReconnectTimer(); this.manuallyDisconnected = false; this.connecting = true; this.interfaceSelected = false; this.interfaceSelectionSent = false; this.selectedInterface = null; this.usingFallbackInterface = false; this.streamingHealthy = false; this.lpcStatusCode = null; this.operatorMessage = null; this.lastInterfaceAttempts = [];
+    this.fallbackInterfacesForRound = this.getFallbackInterfacesForRound();
     this.state.setConnecting(); this.emitStatus();
     console.log(`[LPC] connecting preferred interface=${this.options.preferredInterface}`);
+    this.startSocketForInterface(this.fallbackInterfacesForRound[0] ?? this.options.preferredInterface);
+    return { ok: true, state: this.getState(), message: 'LPC connection started' };
+  }
+
+  private startSocketForInterface(iface: number): void {
+    this.currentInterfaceAttempt = iface;
+    this.interfaceSelectionSent = false;
+    this.connecting = true;
+    this.state.setConnecting();
+    this.emitStatus();
+    if (iface !== this.options.preferredInterface) console.log(`[LPC] trying fallback interface=${iface}`);
     const socket = net.createConnection({ host: this.options.host, port: this.options.port });
     this.socket = socket; socket.setEncoding('utf8'); socket.setTimeout(this.options.connectTimeoutMs); socket.setKeepAlive(true, 5000); socket.setNoDelay(true);
     socket.on('connect', () => { this.state.resetReconnectAttempts(); console.log('[LPC] TCP connected'); });
-    socket.on('timeout', () => { const message = `connect ETIMEDOUT ${this.options.host}:${this.options.port}`; this.connecting = false; this.state.setError(message, socket.destroyed, socket.writable); this.emit('error', new Error(message), this.getState()); this.emitStatus(); socket.destroy(new Error(message)); });
+    socket.on('timeout', () => { void this.handleInterfaceAttemptFailed('timeout'); });
     socket.on('data', (chunk: string | Buffer) => { this.state.recordDataReceived(); this.lastLpcRxAt = new Date().toISOString(); this.refreshSocketFlags(); const text = chunk.toString('utf8'); this.emit('rawData', text); this.handleInterfaceSelection(text); this.processIncomingText(text); });
     socket.on('end', () => { this.connecting = false; this.state.setDisconnected(socket.destroyed, socket.writable); this.emitStatus(); });
-    socket.on('close', () => { this.stopHeartbeat(); this.socket = null; this.connecting = false; this.interfaceSelected = false; this.selectedInterface = null; if (!this.manuallyDisconnected && this.options.reconnectEnabled) { this.scheduleReconnect(); return; } if (this.state.getStatus() === 'disconnected') return; this.state.setDisconnected(true, false); this.emit('disconnected', this.getState()); this.emitStatus(); });
+    socket.on('close', () => { this.stopHeartbeat(); this.socket = null; this.connecting = false; if (!this.interfaceSelected) this.selectedInterface = null; if (!this.manuallyDisconnected && this.options.reconnectEnabled) { this.scheduleReconnect(); return; } if (this.state.getStatus() === 'disconnected') return; this.state.setDisconnected(true, false); this.emit('disconnected', this.getState()); this.emitStatus(); });
     socket.on('error', (error: NodeJS.ErrnoException) => { console.warn(`[LPC] socket error code=${error.code ?? 'unknown'} message=${error.message}`); this.connecting = false; this.streamingHealthy = false; this.state.setError(error, socket.destroyed, socket.writable); this.emit('error', error, this.getState()); this.emitStatus(); });
-    return { ok: true, state: this.getState(), message: 'LPC connection started' };
   }
 
   async reconnect(): Promise<LpcConnectResult> { console.log('[LPC] reconnect requested'); if (this.socket || this.connecting) { console.log('[LPC] cleanup old socket before reconnect'); await this.disconnectGracefully('before_reconnect'); } this.lastReconnectAt = new Date().toISOString(); return this.connect(); }
@@ -103,14 +121,14 @@ export class LpcTcpClient extends EventEmitter {
 
   send(data: string | Buffer): void { if (!this.socket || !this.state.isConnected() || !this.interfaceSelected) { this.markStaleConnection('LPC TCP client is not connected or interface is not selected'); throw new Error('LPC TCP client is not connected'); } const written = this.safeWrite(this.socket, data, 'send', (error) => { if (error) { this.markStaleConnection(error.message); return; } this.state.recordSuccessfulWrite(); this.emitStatus(); }); if (!written) { this.markStaleConnection('LPC TCP client is not connected or writable'); throw new Error('LPC TCP client is not connected'); } }
   isConnected(): boolean { this.refreshSocketFlags(); return this.state.isConnected() && this.interfaceSelected; }
-  getState(): LpcConnectionStateSnapshot { this.refreshSocketFlags(); return { ...this.state.getSnapshot(), tcpConnected: this.state.isConnected(), interfaceSelected: this.interfaceSelected, selectedInterface: this.selectedInterface, streamingHealthy: this.streamingHealthy, lpcStatusCode: this.lpcStatusCode, lastLpcRxAt: this.lastLpcRxAt, lastStreamFrameAt: this.lastStreamFrameAt, lastResultFrameAt: this.lastResultFrameAt, isConnecting: this.connecting, isDisconnecting: this.disconnecting, lastDisconnectReason: this.lastDisconnectReason, lastReconnectAt: this.lastReconnectAt, lastInterfaceError: this.lastInterfaceError, lastInterfaceErrorAt: this.lastInterfaceErrorAt, lastInterfaceAttempt: this.lastInterfaceAttempt, startupCleanupEnabled: this.options.startupCleanupEnabled, startupCleanupInterfaces: this.options.startupCleanupInterfaces, preferredInterface: this.options.preferredInterface, lastStartupCleanupAt: this.lastStartupCleanupAt, lastStartupCleanupResult: this.lastStartupCleanupResult } as LpcConnectionStateSnapshot; }
+  getState(): LpcConnectionStateSnapshot { this.refreshSocketFlags(); return { ...this.state.getSnapshot(), tcpConnected: this.state.isConnected(), interfaceSelected: this.interfaceSelected, selectedInterface: this.selectedInterface, streamingHealthy: this.streamingHealthy, lpcStatusCode: this.lpcStatusCode, operatorMessage: this.operatorMessage, lastLpcRxAt: this.lastLpcRxAt, lastStreamFrameAt: this.lastStreamFrameAt, lastResultFrameAt: this.lastResultFrameAt, isConnecting: this.connecting, isDisconnecting: this.disconnecting, lastDisconnectReason: this.lastDisconnectReason, lastReconnectAt: this.lastReconnectAt, lastInterfaceError: this.lastInterfaceError, lastInterfaceErrorAt: this.lastInterfaceErrorAt, lastInterfaceAttempt: this.lastInterfaceAttempt, usingFallbackInterface: this.usingFallbackInterface, fallbackEnabled: this.options.fallbackEnabled, fallbackInterfaces: this.options.fallbackInterfaces, lastInterfaceAttempts: this.lastInterfaceAttempts, startupCleanupEnabled: this.options.startupCleanupEnabled, startupCleanupInterfaces: this.options.startupCleanupInterfaces, preferredInterface: this.options.preferredInterface, lastStartupCleanupAt: this.lastStartupCleanupAt, lastStartupCleanupResult: this.lastStartupCleanupResult } as LpcConnectionStateSnapshot; }
   receiveTextForTest(text: string): void { this.processIncomingText(text); }
   flushBufferedLineForTest(): void { this.flushResidualLineIfComplete(); }
   forceRefreshStatus(): LpcConnectionStateSnapshot { if (this.state.getStatus() === 'connected' && (!this.socket || this.socket.destroyed || !this.socket.writable)) this.markStaleConnection('Stale LPC connection detected'); else { this.refreshSocketFlags(); this.emitStatus(); } return this.getState(); }
 
   markTestStartCommand(): void { this.clearStreamWatchdog(); this.streamWatchdogTimer = setTimeout(() => { if (this.lastStreamFrameAt || this.lastResultFrameAt) return; this.streamingHealthy = false; this.lpcStatusCode = 'LPC_STREAM_STALLED'; console.warn(`[LPC] streaming stalled after test start watchdogMs=${this.options.streamWatchdogMs}`); this.emitStatus(); }, this.options.streamWatchdogMs); }
-  recordStreamFrame(kind: 'stream' | 'result', receivedAt = new Date().toISOString()): void { this.lastLpcRxAt = receivedAt; this.streamingHealthy = true; this.lpcStatusCode = null; if (kind === 'stream') { this.lastStreamFrameAt = receivedAt; console.log('[LPC] streaming frame received'); } else { this.lastResultFrameAt = receivedAt; console.log('[LPC] result frame received'); } this.clearStreamWatchdog(); this.emitStatus(); }
-  canStartTest(): { ok: true } | { ok: false; code: string; message: string } { if (this.lpcStatusCode === 'LPC_INTERFACE_UNAVAILABLE') return { ok: false, code: 'LPC_INTERFACE_UNAVAILABLE', message: `Interface LPC ${this.lastInterfaceAttempt ?? this.options.preferredInterface} jest niedostępny. Prawdopodobnie jest zajęty przez inną sesję lub poprzednie połączenie nie zostało zwolnione.` }; if (this.lpcStatusCode === 'LPC_STREAM_STALLED') return { ok: false, code: 'LPC_STREAM_STALLED', message: 'Połączenie TCP z LPC jest aktywne, ale nie przychodzą dane pomiarowe po starcie testu.' }; if (!this.state.isConnected() || !this.interfaceSelected) return { ok: false, code: 'LPC_NOT_READY', message: `LPC nie jest gotowy: TCP lub Interface ${this.options.preferredInterface} nie zostały poprawnie zestawione.` }; return { ok: true }; }
+  recordStreamFrame(kind: 'stream' | 'result', receivedAt = new Date().toISOString()): void { this.lastLpcRxAt = receivedAt; this.streamingHealthy = true; if (this.lpcStatusCode === 'LPC_STREAM_STALLED') this.lpcStatusCode = this.usingFallbackInterface ? 'LPC_CONNECTED_FALLBACK_INTERFACE' : null; if (kind === 'stream') { this.lastStreamFrameAt = receivedAt; console.log('[LPC] streaming frame received'); } else { this.lastResultFrameAt = receivedAt; console.log('[LPC] result frame received'); } this.clearStreamWatchdog(); this.emitStatus(); }
+  canStartTest(): { ok: true } | { ok: false; code: string; message: string } { if (this.lpcStatusCode === 'LPC_NO_AVAILABLE_INTERFACE') return { ok: false, code: 'LPC_NO_AVAILABLE_INTERFACE', message: this.operatorMessage ?? 'Zresetuj LPC, następnie IPC.' }; if (this.lpcStatusCode === 'LPC_INTERFACE_UNAVAILABLE') return { ok: false, code: 'LPC_INTERFACE_UNAVAILABLE', message: `Interface LPC ${this.lastInterfaceAttempt ?? this.options.preferredInterface} jest niedostępny. Prawdopodobnie jest zajęty przez inną sesję lub poprzednie połączenie nie zostało zwolnione.` }; if (this.lpcStatusCode === 'LPC_STREAM_STALLED') return { ok: false, code: 'LPC_STREAM_STALLED', message: 'Połączenie TCP z LPC jest aktywne, ale nie przychodzą dane pomiarowe po starcie testu.' }; if (!this.state.isConnected() || !this.interfaceSelected) return { ok: false, code: 'LPC_NOT_READY', message: `LPC nie jest gotowy: TCP lub Interface ${this.options.preferredInterface} nie zostały poprawnie zestawione.` }; return { ok: true }; }
 
   async performHeartbeatCheck(): Promise<LpcHeartbeatResult> {
     const heartbeatAttempted = true; this.state.recordHeartbeat();
@@ -120,8 +138,8 @@ export class LpcTcpClient extends EventEmitter {
     return new Promise((resolve) => { const timeout = setTimeout(() => { this.markStaleConnection('LPC heartbeat write timed out'); resolve({ ok: false, state: this.getState(), heartbeatAttempted, writeAttempted: true, writeSuccess: false, error: 'LPC heartbeat write timed out' }); }, this.options.heartbeatTimeoutMs); try { const written = this.safeWrite(this.socket, payload, 'heartbeat', (error) => { clearTimeout(timeout); if (error) { this.markStaleConnection(error.message); resolve({ ok: false, state: this.getState(), heartbeatAttempted, writeAttempted: true, writeSuccess: false, error: error.message }); return; } this.state.recordSuccessfulWrite(); this.refreshSocketFlags(); this.emitStatus(); resolve({ ok: true, state: this.getState(), heartbeatAttempted, writeAttempted: true, writeSuccess: true }); }); if (!written) { clearTimeout(timeout); resolve({ ok: false, state: this.getState(), heartbeatAttempted, writeAttempted: true, writeSuccess: false, error: 'Socket is not writable' }); } } catch (error) { clearTimeout(timeout); const message = error instanceof Error ? error.message : 'Heartbeat write failed'; this.markStaleConnection(message); resolve({ ok: false, state: this.getState(), heartbeatAttempted, writeAttempted: true, writeSuccess: false, error: message }); } });
   }
 
-  private handleInterfaceSelection(text: string): void { if (!this.socket || this.interfaceSelected) return; if (this.isUnavailableInterfaceText(text)) { void this.handleUnavailableInterface(); return; } if (text.includes('TCP/IP INTERFACE SELECTION') || /Interface Connection\d+/.test(text)) { if (!this.interfaceSelectionSent) { console.log('[LPC] interface selection menu detected'); this.interfaceSelectionSent = this.safeWrite(this.socket, `${this.options.preferredInterface}\r\n`, 'interface_selection'); if (this.interfaceSelectionSent) { this.lastInterfaceAttempt = this.options.preferredInterface; console.log(`[LPC] interface selection sent interface=${this.options.preferredInterface}`); } } return; } if (text.includes(`Interface Connection ${this.options.preferredInterface} has been established`) || text.includes('TREE ROOT')) { this.socket.setTimeout(0); this.connecting = false; this.interfaceSelected = true; this.selectedInterface = this.options.preferredInterface; this.state.setConnected(); this.startHeartbeat(); console.log(`[LPC] interface ${this.options.preferredInterface} selected`); const state = this.getState(); this.emit('connected', state); this.emit('status', state); } }
-  private async handleUnavailableInterface(): Promise<void> { const iface = this.options.preferredInterface; this.lpcStatusCode = 'LPC_INTERFACE_UNAVAILABLE'; this.lastInterfaceError = 'unavailable'; this.lastInterfaceErrorAt = new Date().toISOString(); this.lastInterfaceAttempt = iface; this.interfaceSelected = false; this.selectedInterface = null; this.streamingHealthy = false; console.warn(`[LPC] interface ${iface} unavailable`); console.warn('[LPC] closing socket after unavailable interface'); await this.disconnectGracefully('interface_unavailable'); if (this.options.reconnectEnabled) { console.warn(`[LPC] reconnect delayed reason=interface_unavailable delayMs=${this.options.reconnectDelayMs}`); this.manuallyDisconnected = false; this.scheduleReconnect(); } }
+  private handleInterfaceSelection(text: string): void { if (!this.socket || this.interfaceSelected) return; const iface = this.currentInterfaceAttempt ?? this.options.preferredInterface; if (this.isUnavailableInterfaceText(text)) { void this.handleInterfaceAttemptFailed('unavailable'); return; } if (text.includes('TCP/IP INTERFACE SELECTION') || /Interface Connection\d+/.test(text)) { if (!this.interfaceSelectionSent) { console.log('[LPC] interface selection menu detected'); this.interfaceSelectionSent = this.safeWrite(this.socket, `${iface}\r\n`, 'interface_selection'); if (this.interfaceSelectionSent) { this.lastInterfaceAttempt = iface; console.log(`[LPC] interface selection sent interface=${iface}`); } } return; } if (text.includes(`Interface Connection ${iface} has been established`) || text.includes('TREE ROOT')) { this.socket.setTimeout(0); this.connecting = false; this.interfaceSelected = true; this.selectedInterface = iface; this.usingFallbackInterface = iface !== this.options.preferredInterface; this.lastInterfaceAttempts.push({ interface: iface, result: 'success', at: new Date().toISOString() }); this.lpcStatusCode = this.usingFallbackInterface ? 'LPC_CONNECTED_FALLBACK_INTERFACE' : null; this.operatorMessage = this.usingFallbackInterface ? `LPC połączony awaryjnie przez Interface ${iface}. Preferowany Interface ${this.options.preferredInterface} był niedostępny.` : null; this.state.setConnected(); this.startHeartbeat(); console.log(`[LPC] interface ${iface} selected`); if (this.usingFallbackInterface) console.warn(`[LPC] connected using fallback interface=${iface} preferred=${this.options.preferredInterface}`); const state = this.getState(); this.emit('connected', state); this.emit('status', state); } }
+  private async handleInterfaceAttemptFailed(result: 'unavailable' | 'timeout' | 'failed'): Promise<void> { const iface = this.currentInterfaceAttempt ?? this.options.preferredInterface; this.lastInterfaceAttempts.push({ interface: iface, result, at: new Date().toISOString() }); this.lastInterfaceError = result; this.lastInterfaceErrorAt = new Date().toISOString(); this.lastInterfaceAttempt = iface; this.interfaceSelected = false; this.selectedInterface = null; this.streamingHealthy = false; if (result === 'unavailable') console.warn(`[LPC] interface ${iface} unavailable`); else console.warn(`[LPC] interface ${iface} selection ${result}`); console.warn(`[LPC] closing socket after ${result} interface=${iface}`); await this.closeCurrentAttemptSocket(); const next = this.getNextFallbackInterface(iface); if (next != null) { this.startSocketForInterface(next); return; } this.lpcStatusCode = 'LPC_NO_AVAILABLE_INTERFACE'; this.operatorMessage = 'Zresetuj LPC, następnie IPC.'; this.connecting = false; this.state.setDisconnected(true, false); console.error('[LPC] no available LPC interface'); console.error('[LPC] operator action required: reset LPC then IPC'); this.emit('disconnected', this.getState()); this.emitStatus(); }
   private async runStartupCleanup(): Promise<void> { this.startupCleanupDone = true; this.lastStartupCleanupAt = new Date().toISOString(); console.log(`[LPC] startup cleanup started interfaces=${this.options.startupCleanupInterfaces.join(',')}`); for (const iface of this.options.startupCleanupInterfaces) { if (![1, 2].includes(iface)) { this.lastStartupCleanupResult[String(iface)] = 'skipped'; continue; } console.log(`[LPC] cleanup try interface=${iface}`); try { const result = await this.cleanupInterface(iface); this.lastStartupCleanupResult[String(iface)] = result; } catch (error) { this.lastStartupCleanupResult[String(iface)] = 'failed'; console.warn(`[LPC] cleanup interface=${iface} failed`, error instanceof Error ? error.message : error); } } console.log(`[LPC] startup cleanup finished waitMs=${this.options.startupCleanupWaitMs}`); await sleep(this.options.startupCleanupWaitMs); }
   private cleanupInterface(iface: number): Promise<'success' | 'unavailable'> {
     return new Promise((resolve, reject) => {
@@ -201,6 +219,36 @@ export class LpcTcpClient extends EventEmitter {
       console.warn(`[LPC] skip write context=${context} reason=${error instanceof Error ? error.message : 'write_failed'}`);
       return false;
     }
+  }
+
+  private async closeCurrentAttemptSocket(): Promise<void> {
+    const socket = this.socket;
+    this.socket = null;
+    if (!socket) return;
+    socket.removeAllListeners('data');
+    socket.removeAllListeners('timeout');
+    socket.removeAllListeners('error');
+    socket.removeAllListeners('close');
+    try {
+      if (!socket.destroyed && !socket.writableEnded) socket.end();
+      await sleep(this.options.gracefulCloseWaitMs);
+      if (!socket.destroyed) socket.destroy();
+    } catch {
+      if (!socket.destroyed) socket.destroy();
+    } finally {
+      socket.removeAllListeners();
+    }
+  }
+
+  private getFallbackInterfacesForRound(): number[] {
+    const configured = this.options.fallbackEnabled ? this.options.fallbackInterfaces : [this.options.preferredInterface];
+    const ordered = [this.options.preferredInterface, ...configured].filter((iface) => Number.isInteger(iface) && iface >= 1 && iface <= 4);
+    return [...new Set(ordered)];
+  }
+
+  private getNextFallbackInterface(current: number): number | null {
+    const currentIndex = this.fallbackInterfacesForRound.indexOf(current);
+    return currentIndex >= 0 ? this.fallbackInterfacesForRound[currentIndex + 1] ?? null : null;
   }
 
   private isUnavailableInterfaceText(text: string): boolean {

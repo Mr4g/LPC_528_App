@@ -16,6 +16,8 @@ function options(port: number): LpcTcpClientOptions {
     staleConnectionTimeoutMs: 15000,
     heartbeatPayload: '',
     preferredInterface: 1,
+    fallbackEnabled: false,
+    fallbackInterfaces: [1, 2, 3, 4],
     startupCleanupEnabled: false,
     startupCleanupInterfaces: [1, 2],
     startupCleanupWaitMs: 2500,
@@ -135,12 +137,66 @@ describe('LpcTcpClient', () => {
 
     expect(selectionWrites).toEqual(['1\r\n']);
     expect(client.getState()).toMatchObject({
-      lpcStatusCode: 'LPC_INTERFACE_UNAVAILABLE',
+      lpcStatusCode: 'LPC_NO_AVAILABLE_INTERFACE',
       interfaceSelected: false,
       selectedInterface: null,
       lastInterfaceError: 'unavailable',
       lastInterfaceAttempt: 1,
     });
+  });
+
+  it('falls back to Interface 2 when Interface 1 is unavailable', async () => {
+    const selectionWrites: string[] = [];
+    server = net.createServer((socket) => {
+      socket.write('TCP/IP INTERFACE SELECTION\r\n');
+      socket.on('data', (chunk) => {
+        const selected = chunk.toString();
+        selectionWrites.push(selected);
+        if (selected === '1\r\n') socket.write('* You have selected an unavailable Interface connection *\r\n');
+        if (selected === '2\r\n') socket.write('* Interface Connection 2 has been established *\r\n');
+      });
+    });
+    const port = await listen(server);
+    const client = new LpcTcpClient({ ...options(port), fallbackEnabled: true, fallbackInterfaces: [1, 2, 3, 4] });
+
+    await client.connect();
+    await new Promise<void>((resolve) => client.once('connected', () => resolve()));
+
+    expect(selectionWrites).toEqual(['1\r\n', '2\r\n']);
+    expect(client.getState()).toMatchObject({
+      selectedInterface: 2,
+      usingFallbackInterface: true,
+      lpcStatusCode: 'LPC_CONNECTED_FALLBACK_INTERFACE',
+    });
+    await client.disconnectGracefully('test_shutdown');
+  });
+
+  it('sets LPC_NO_AVAILABLE_INTERFACE when every fallback interface is unavailable', async () => {
+    const selectionWrites: string[] = [];
+    server = net.createServer((socket) => {
+      socket.write('TCP/IP INTERFACE SELECTION\r\n');
+      socket.on('data', (chunk) => {
+        selectionWrites.push(chunk.toString());
+        socket.write('* You have selected an unavailable Interface connection *\r\n');
+      });
+    });
+    const port = await listen(server);
+    const client = new LpcTcpClient({ ...options(port), fallbackEnabled: true, fallbackInterfaces: [1, 2, 3, 4] });
+    const disconnected = new Promise<void>((resolve) => client.once('disconnected', () => resolve()));
+
+    await client.connect();
+    await disconnected;
+
+    expect(selectionWrites).toEqual(['1\r\n', '2\r\n', '3\r\n', '4\r\n']);
+    expect(client.getState()).toMatchObject({
+      selectedInterface: null,
+      interfaceSelected: false,
+      lpcStatusCode: 'LPC_NO_AVAILABLE_INTERFACE',
+      operatorMessage: 'Zresetuj LPC, następnie IPC.',
+    });
+    const startGate = client.canStartTest();
+    expect(startGate.ok).toBe(false);
+    if (!startGate.ok) expect(startGate.message).toContain('Zresetuj LPC, następnie IPC');
   });
 
   it('continues startup cleanup with the next interface when one cleanup interface is unavailable', async () => {

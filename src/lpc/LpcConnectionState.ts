@@ -20,6 +20,8 @@ export interface LpcConnectionStateOptions {
   staleConnectionTimeoutMs: number;
   heartbeatPayload: string;
   preferredInterface?: number;
+  fallbackEnabled?: boolean;
+  fallbackInterfaces?: number[];
   startupCleanupEnabled?: boolean;
   startupCleanupInterfaces?: number[];
   startupCleanupWaitMs?: number;
@@ -57,6 +59,9 @@ export interface LpcConnectionStateSnapshot extends LpcConnectionStateOptions {
   lastInterfaceError?: string | null;
   lastInterfaceErrorAt?: string | null;
   lastInterfaceAttempt?: number | null;
+  usingFallbackInterface?: boolean;
+  lastInterfaceAttempts?: Array<{ interface: number; result: string; at: string }>;
+  operatorMessage?: string | null;
   lastStartupCleanupAt?: string | null;
   lastStartupCleanupResult?: Record<string, string>;
 }

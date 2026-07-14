@@ -93,6 +93,7 @@ const programStarter = createProgramStarter({
   scriptPath: config.PROGRAM_START_SCRIPT_PATH,
 });
 const lpcPreferredInterface = Number(config.LPC_INTERFACE_SELECTION) || 1;
+const lpcInterfaceFallbackInterfaces = config.LPC_INTERFACE_FALLBACK_INTERFACES.split(',').map((value) => Number(value.trim())).filter((value) => value >= 1 && value <= 4);
 const lpcStartupCleanupInterfaces = config.LPC_STARTUP_CLEANUP_INTERFACES.split(',').map((value) => Number(value.trim())).filter((value) => value === 1 || value === 2);
 const lpcTcpClient = new LpcTcpClient({
   host: config.LPC_HOST,
@@ -107,6 +108,8 @@ const lpcTcpClient = new LpcTcpClient({
   staleConnectionTimeoutMs: config.LPC_STALE_CONNECTION_TIMEOUT_MS,
   heartbeatPayload: config.LPC_HEARTBEAT_PAYLOAD,
   preferredInterface: lpcPreferredInterface,
+  fallbackEnabled: config.LPC_INTERFACE_FALLBACK_ENABLED,
+  fallbackInterfaces: lpcInterfaceFallbackInterfaces.length ? lpcInterfaceFallbackInterfaces : [1, 2, 3, 4],
   startupCleanupEnabled: config.LPC_STARTUP_CLEANUP_ENABLED,
   startupCleanupInterfaces: lpcStartupCleanupInterfaces.length ? lpcStartupCleanupInterfaces : [1, 2],
   startupCleanupWaitMs: config.LPC_STARTUP_CLEANUP_WAIT_MS,

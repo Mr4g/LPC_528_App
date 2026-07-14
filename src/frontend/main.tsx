@@ -8,6 +8,7 @@ import carrierLogo from './assets/carrier-logo.svg';
 import { buildChartRenderPoints, PressureChart } from './components/PressureChart';
 import { UserMenu } from './components/UserMenu';
 import { getProgramStartOperatorMessage } from './programStartMessages';
+import { LPC_PROGRAM_OPTIONS } from './programOptions';
 import { mergeResultIntoHistory, replaceHistoryFromResultsUpdated } from './resultHistoryState';
 import { persistTheme, readStoredTheme, type ThemeMode } from './theme';
 import './styles.css';
@@ -900,7 +901,7 @@ function ProgramsPage(props: { user: AuthUser; onBack: () => void }) {
           <option value="contains">Zawiera</option>
         </select>
         <select value={programNumber} onChange={(event) => setProgramNumber(Number(event.target.value))}>
-          {Array.from({ length: 32 }, (_, index) => index + 1).map((program) => <option key={program} value={program}>P{String(program).padStart(2, '0')}</option>)}
+          {LPC_PROGRAM_OPTIONS.map((program) => <option key={program} value={program}>P{String(program).padStart(2, '0')}</option>)}
         </select>
         <select value={labelPrintMode} onChange={(event) => setLabelPrintMode(event.target.value as 'ok_only' | 'ok_and_nok')}>
           <option value="ok_only">Tylko OK</option>

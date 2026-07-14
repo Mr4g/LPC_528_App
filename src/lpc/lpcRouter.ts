@@ -31,6 +31,7 @@ export function createLpcRouter(options: {
       streamingHealthy: state.streamingHealthy,
       lpcStatusCode: state.lpcStatusCode,
       operatorMessage: state.operatorMessage,
+      testStartCommandAt: state.testStartCommandAt,
       lastLpcRxAt: state.lastLpcRxAt,
       lastStreamFrameAt: state.lastStreamFrameAt,
       lastResultFrameAt: state.lastResultFrameAt,

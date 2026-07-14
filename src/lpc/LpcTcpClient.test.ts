@@ -199,6 +199,82 @@ describe('LpcTcpClient', () => {
     if (!startGate.ok) expect(startGate.message).toContain('Zresetuj LPC, następnie IPC');
   });
 
+  it('marks streaming healthy when a stream frame arrives before the watchdog expires', async () => {
+    const client = new LpcTcpClient({ ...options(23), streamWatchdogMs: 50 });
+
+    client.markTestStartCommand();
+    client.recordStreamFrame('stream', '2026-07-14T00:00:00.000Z');
+    await new Promise((resolve) => setTimeout(resolve, 70));
+
+    expect(client.getState()).toMatchObject({
+      streamingHealthy: true,
+      lpcStatusCode: null,
+      operatorMessage: null,
+      lastStreamFrameAt: '2026-07-14T00:00:00.000Z',
+    });
+  });
+
+  it('marks streaming healthy when a result frame arrives before any stream frame', async () => {
+    const client = new LpcTcpClient({ ...options(23), streamWatchdogMs: 50 });
+
+    client.markTestStartCommand();
+    client.recordStreamFrame('result', '2026-07-14T00:00:01.000Z');
+    await new Promise((resolve) => setTimeout(resolve, 70));
+
+    expect(client.getState()).toMatchObject({
+      streamingHealthy: true,
+      lpcStatusCode: null,
+      operatorMessage: null,
+      lastResultFrameAt: '2026-07-14T00:00:01.000Z',
+    });
+  });
+
+  it('sets LPC_STREAM_STALLED and blocks another start when no S/R frame arrives', async () => {
+    const client = new LpcTcpClient({ ...options(23), streamWatchdogMs: 10 });
+
+    client.markTestStartCommand();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(client.getState()).toMatchObject({
+      streamingHealthy: false,
+      lpcStatusCode: 'LPC_STREAM_STALLED',
+      operatorMessage: 'Zresetuj LPC, następnie IPC.',
+    });
+    const startGate = client.canStartTest();
+    expect(startGate.ok).toBe(false);
+    if (!startGate.ok) expect(startGate.message).toContain('Zresetuj LPC, następnie IPC');
+  });
+
+  it('sets LPC_STREAM_STALLED on fallback Interface 2 when no S/R frame arrives', async () => {
+    const selectionWrites: string[] = [];
+    server = net.createServer((socket) => {
+      socket.write('TCP/IP INTERFACE SELECTION\r\n');
+      socket.on('data', (chunk) => {
+        const selected = chunk.toString();
+        selectionWrites.push(selected);
+        if (selected === '1\r\n') socket.write('* You have selected an unavailable Interface connection *\r\n');
+        if (selected === '2\r\n') socket.write('* Interface Connection 2 has been established *\r\n');
+      });
+    });
+    const port = await listen(server);
+    const client = new LpcTcpClient({ ...options(port), fallbackEnabled: true, fallbackInterfaces: [1, 2], streamWatchdogMs: 10 });
+
+    await client.connect();
+    await new Promise<void>((resolve) => client.once('connected', () => resolve()));
+    client.markTestStartCommand();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(selectionWrites).toEqual(['1\r\n', '2\r\n']);
+    expect(client.getState()).toMatchObject({
+      selectedInterface: 2,
+      usingFallbackInterface: true,
+      streamingHealthy: false,
+      lpcStatusCode: 'LPC_STREAM_STALLED',
+      operatorMessage: 'Zresetuj LPC, następnie IPC.',
+    });
+    await client.disconnectGracefully('test_shutdown');
+  });
+
   it('continues startup cleanup with the next interface when one cleanup interface is unavailable', async () => {
     let connectionCount = 0;
     server = net.createServer((socket) => {

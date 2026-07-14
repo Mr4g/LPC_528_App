@@ -49,6 +49,7 @@ export interface LpcConnectionStateSnapshot extends LpcConnectionStateOptions {
   selectedInterface?: number | null;
   streamingHealthy?: boolean;
   lpcStatusCode?: string | null;
+  testStartCommandAt?: string | null;
   lastLpcRxAt?: string | null;
   lastStreamFrameAt?: string | null;
   lastResultFrameAt?: string | null;

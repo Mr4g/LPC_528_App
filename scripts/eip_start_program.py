@@ -185,12 +185,15 @@ def build_program_bits(program):
     if value & 16:
         out[0] |= 1 << 5
 
+    if value & 32:
+        out[0] |= 1 << 6
+
     return out
 
 
 def main():
-    if PROGRAM < 1 or PROGRAM > 31:
-        print("ERROR: Program musi byc w zakresie 1..31", file=sys.stderr)
+    if PROGRAM < 1 or PROGRAM > 32:
+        print("ERROR: Program musi byc w zakresie 1..32", file=sys.stderr)
         return 1
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

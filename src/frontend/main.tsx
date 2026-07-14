@@ -292,6 +292,10 @@ function canOpenDiagnostics(user: AuthUser | null): boolean {
   return user?.role === 'admin' && showDiagnostics;
 }
 
+function canLogoutWindows(user: AuthUser | null): boolean {
+  return user?.role === 'admin';
+}
+
 function loadSocketIoClient(): Promise<SocketLike | null> {
   if (window.io) return Promise.resolve(window.io());
 
@@ -1032,6 +1036,9 @@ function App() {
   const [openLlFlags, setOpenLlFlags] = useState<LlControlFlag[]>([]);
   const [llListModalOpen, setLlListModalOpen] = useState(false);
   const [masterSampleStatus, setMasterSampleStatus] = useState<MasterSampleStatus>({ enabled: false });
+  const [windowsLogoutConfirmOpen, setWindowsLogoutConfirmOpen] = useState(false);
+  const [windowsLogoutInProgress, setWindowsLogoutInProgress] = useState(false);
+  const [windowsLogoutMessage, setWindowsLogoutMessage] = useState<string | null>(null);
   const [eventCounters, setEventCounters] = useState({
     streamEvents: 0,
     resultEvents: 0,
@@ -1713,6 +1720,23 @@ function App() {
     setProgramStartTestResponse(JSON.stringify(await response.json(), null, 2));
   }
 
+
+  async function confirmWindowsLogout() {
+    if (!canLogoutWindows(authUser) || windowsLogoutInProgress) return;
+    setWindowsLogoutInProgress(true);
+    setWindowsLogoutMessage('Trwa wylogowywanie...');
+    try {
+      const response = await fetch('/api/admin/windows/logout', { method: 'POST', credentials: 'include' });
+      const payload = await response.json().catch(() => null) as { message?: string } | null;
+      if (!response.ok) throw new Error(payload?.message ?? 'Backend nie może uruchomić polecenia wylogowania Windows.');
+      setWindowsLogoutMessage('Trwa wylogowywanie...');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Backend nie może uruchomić polecenia wylogowania Windows.';
+      setWindowsLogoutMessage(message);
+      setWindowsLogoutInProgress(false);
+    }
+  }
+
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
     setAuthUser(null);
@@ -1876,6 +1900,7 @@ function App() {
             canManagePrograms={canManagePrograms(authUser)}
             canOpenDiagnostics={canOpenDiagnostics(authUser)}
             canUseMasterSample={isManager(authUser)}
+            canLogoutWindows={canLogoutWindows(authUser)}
             masterSampleEnabled={masterSampleStatus.enabled}
             onMasterSampleToggle={() => void toggleMasterSample()}
             open={userMenuOpen}
@@ -1906,6 +1931,11 @@ function App() {
               setDiagnosticsOpen(true);
             }}
             onThemeChange={(nextTheme) => setTheme(nextTheme)}
+            onWindowsLogout={() => {
+              setUserMenuOpen(false);
+              setWindowsLogoutMessage(null);
+              setWindowsLogoutConfirmOpen(true);
+            }}
             onLogout={() => {
               setUserMenuOpen(false);
               void logout();
@@ -2038,6 +2068,23 @@ function App() {
         </aside>
       </section>
 
+
+
+      {windowsLogoutConfirmOpen && canLogoutWindows(authUser) && (
+        <div className="app-modal-backdrop" role="presentation">
+          <section className="app-modal windows-logout-modal" role="dialog" aria-modal="true" aria-labelledby="windows-logout-title">
+            <header className="modal-header"><div><span className="eyebrow">Administracja</span><h2 id="windows-logout-title">Wyloguj z Windows</h2></div></header>
+            <div className="windows-logout-content">
+              <p>Czy na pewno chcesz wylogować użytkownika Windows? Aplikacja kioskowa zostanie zamknięta.</p>
+              {windowsLogoutMessage && <strong className={windowsLogoutInProgress ? 'windows-logout-progress' : 'windows-logout-error'}>{windowsLogoutMessage}</strong>}
+              <div className="windows-logout-actions">
+                <button type="button" onClick={() => { setWindowsLogoutConfirmOpen(false); setWindowsLogoutMessage(null); }} disabled={windowsLogoutInProgress}>Anuluj</button>
+                <button type="button" className="scan-submit" onClick={() => void confirmWindowsLogout()} disabled={windowsLogoutInProgress}>Wyloguj</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
 
       {llListModalOpen && (
         <div className="app-modal-backdrop" role="presentation" onMouseDown={(event) => {

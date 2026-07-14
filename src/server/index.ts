@@ -33,6 +33,7 @@ import { createSplunkRouter } from './splunk/splunkRouter';
 import { createLlControlRouter } from './ll-control';
 import { createMasterSampleRouter, MasterSampleService } from './master-sample';
 import { createProgramLimitCacheRouter } from './program-limit-cache';
+import { createAdminWindowsRouter } from './adminWindowsRouter';
 
 const config = loadConfig();
 const app = express();
@@ -193,6 +194,7 @@ app.use('/api/splunk', createSplunkRouter(splunkClient, splunkBuffer));
 app.use('/api/ll-control', createLlControlRouter({ database, splunkBuffer, splunkConfig }));
 app.use('/api/master-sample', createMasterSampleRouter(masterSampleService));
 app.use('/api/program-limits-cache', createProgramLimitCacheRouter(database));
+app.use('/api/admin/windows', createAdminWindowsRouter());
 app.use('/api/programs', requireAuth, createProgramsRouter({ config, programStarter, programMappingService }));
 app.use('/api/program-mappings', createProgramMappingsRouter(programMappingService));
 app.use('/api/lpc', createLpcRouter({

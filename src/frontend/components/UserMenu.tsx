@@ -18,6 +18,8 @@ interface UserMenuProps {
   onDiagnostics: () => void;
   onThemeChange: (theme: 'light' | 'dark') => void;
   onLogout: () => void;
+  canLogoutWindows: boolean;
+  onWindowsLogout: () => void;
   onClose: () => void;
 }
 
@@ -58,6 +60,7 @@ export function UserMenu(props: UserMenuProps) {
           {props.canManageUsers && <button type="button" onClick={props.onUsers}>Użytkownicy</button>}
           {props.canManagePrograms && <button type="button" onClick={props.onPrograms}>Programy</button>}
           {props.canOpenDiagnostics && <button type="button" onClick={props.onDiagnostics}>Diagnostyka</button>}
+          {props.canLogoutWindows && <button type="button" onClick={props.onWindowsLogout}>Wyloguj z Windows</button>}
           {props.canUseMasterSample && <button type="button" title="Następny test OK wydrukuje 2 etykiety z loginem LL." onClick={props.onMasterSampleToggle}>{props.masterSampleEnabled ? 'Wyłącz test wzorcowy' : 'Test wzorcowy'}</button>}
           <div className="theme-switch" role="group" aria-label="Motyw">
             <button type="button" className={props.theme === 'light' ? 'active' : ''} onClick={() => props.onThemeChange('light')}>Light</button>

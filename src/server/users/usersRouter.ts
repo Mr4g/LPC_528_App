@@ -44,6 +44,12 @@ export function canManageTarget(actorRole: UserRole, targetRole: UserRole): bool
   return false;
 }
 
+export function canChangeUserRole(actorRole: UserRole, currentTargetRole: UserRole, nextTargetRole: UserRole): boolean {
+  if (actorRole === 'admin') return currentTargetRole !== 'admin';
+  if (actorRole === 'line_leader') return currentTargetRole === 'operator' && nextTargetRole !== 'admin';
+  return false;
+}
+
 export function createUsersRouter(authService: AuthService): Router {
   const router = Router();
   router.use(requireRole(MANAGER_ROLES));
@@ -92,14 +98,15 @@ export function createUsersRouter(authService: AuthService): Router {
   });
 
   router.patch('/:id', (req: AuthenticatedRequest, res) => {
-    if (req.user?.role !== 'admin') return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Tylko admin może zmieniać rolę.' });
     const role = req.body?.role;
-    const cardUid = typeof req.body?.cardUid === 'string' && req.body.cardUid.trim() ? req.body.cardUid : null;
     if (!isUserRole(role)) return res.status(400).json({ ok: false, error: 'INVALID_ROLE', message: 'Nieprawidłowa rola.' });
-    if (!canManageTarget('admin', role)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Nie można ustawić tej roli.' });
     const target = authService.getUserById(String(req.params.id));
-    if (!target || !canManageTarget('admin', target.role)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Brak uprawnień.' });
+    if (!target) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
+    if (!canChangeUserRole(req.user?.role ?? 'operator', target.role, role)) {
+      return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Brak uprawnień do zmiany tej roli.' });
+    }
     const user = authService.setRole(String(req.params.id), role);
+    if (user) console.info(`[USERS] role changed userId=${target.id} ${target.role}->${role} by=${req.user?.login ?? 'unknown'}`);
     return user ? res.json({ ok: true, user }) : res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
   });
 

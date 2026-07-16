@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canCreateUser, canDeleteUser } from './usersRouter';
+import { canChangeUserRole, canCreateUser, canDeleteUser } from './usersRouter';
 
 describe('users permissions', () => {
   it('admin can create every role', () => {
@@ -42,5 +42,24 @@ describe('users permissions', () => {
 
   it('operator cannot delete users', () => {
     expect(canDeleteUser('operator', 'operator', 'op-1', 'op-2', { activeAdminCount: 1 })).toMatchObject({ ok: false, code: 'INSUFFICIENT_ROLE' });
+  });
+});
+
+
+describe('user role change permissions', () => {
+  it('allows line leaders to promote operators to line leaders only', () => {
+    expect(canChangeUserRole('line_leader', 'operator', 'line_leader')).toBe(true);
+    expect(canChangeUserRole('line_leader', 'operator', 'admin')).toBe(false);
+    expect(canChangeUserRole('line_leader', 'admin', 'line_leader')).toBe(false);
+  });
+
+  it('allows admins to change non-admin roles including LL to admin', () => {
+    expect(canChangeUserRole('admin', 'operator', 'line_leader')).toBe(true);
+    expect(canChangeUserRole('admin', 'line_leader', 'admin')).toBe(true);
+    expect(canChangeUserRole('admin', 'admin', 'line_leader')).toBe(false);
+  });
+
+  it('denies operators role changes', () => {
+    expect(canChangeUserRole('operator', 'operator', 'line_leader')).toBe(false);
   });
 });

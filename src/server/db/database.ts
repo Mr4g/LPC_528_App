@@ -247,6 +247,7 @@ export class AppDatabase {
   countActiveAdminUsers(): number { return this.count("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND isActive = 1 AND deleted_at IS NULL"); }
   listUsers(): UserRecord[] { return (this.db.prepare('SELECT * FROM users WHERE deleted_at IS NULL AND isActive != 0 ORDER BY login ASC').all() as Record<string, unknown>[]).map(rowToUser); }
   findByLogin(login: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE login = ? AND deleted_at IS NULL').get(login) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
+  findByLoginIncludingDeleted(login: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE login = ?').get(login) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
   findById(id: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').get(id) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
   findByCardUidHash(hash: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE card_uid_hash = ? AND isActive = 1 AND deleted_at IS NULL').get(hash) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
 
@@ -256,12 +257,25 @@ export class AppDatabase {
   }
 
   updateUser(id: string, patch: Partial<UserRecord>): UserRecord | null {
-    const existing = this.findById(id);
+    return this.updateUserRecord(id, patch, false);
+  }
+
+  updateUserIncludingDeleted(id: string, patch: Partial<UserRecord>): UserRecord | null {
+    return this.updateUserRecord(id, patch, true);
+  }
+
+  private updateUserRecord(id: string, patch: Partial<UserRecord>, includeDeleted: boolean): UserRecord | null {
+    const existing = includeDeleted ? this.findByIdIncludingDeleted(id) : this.findById(id);
     if (!existing) return null;
     const next = { ...existing, ...patch };
     this.db.prepare(`UPDATE users SET login = ?, passwordHash = ?, role = ?, isActive = ?, createdAt = ?, updatedAt = ?, lastLoginAt = ?, createdBy = ?, card_uid_hash = ?, card_uid_last4 = ?, card_assigned_at = ?, last_test_at = ?, deleted_at = ? WHERE id = ?`)
       .run(next.login, next.passwordHash, next.role, next.isActive, next.createdAt, next.updatedAt, next.lastLoginAt, next.createdBy, next.cardUidHash, next.cardUidLast4, next.cardAssignedAt, next.lastTestAt, next.deletedAt, id);
     return next;
+  }
+
+  private findByIdIncludingDeleted(id: string): UserRecord | null {
+    const row = this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    return row ? rowToUser(row) : null;
   }
 
   findProgramLimitCache(programText: string, testType: string): ProgramLimitCacheEntry | null {

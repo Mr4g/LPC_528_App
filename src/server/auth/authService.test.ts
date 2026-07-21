@@ -64,6 +64,19 @@ describe('AuthService', () => {
     expect(auth.listUsers().filter((item) => item.login === 'OPR')).toHaveLength(1);
   });
 
+  it('reactivates hidden users whose stored login casing or whitespace differs', () => {
+    const db = createDatabase(':memory:');
+    const auth = new AuthService(db, 'test-secret-with-at-least-16-chars');
+    const user = auth.createUser({ login: 'WSAD', password: 'oldpass', role: 'operator', createdBy: null });
+    db.updateUser(user.id, { login: ' wsad ' });
+    auth.softDeleteUser(user.id);
+
+    const recreated = auth.createUser({ login: 'WSAD', password: 'newpass', role: 'line_leader', createdBy: 'ADM' });
+
+    expect(recreated).toMatchObject({ id: user.id, login: 'WSAD', role: 'line_leader', isActive: true, deletedAt: null });
+    expect(auth.login('WSAD', 'newpass')).toMatchObject({ id: user.id, role: 'line_leader' });
+  });
+
   it('rejects creating a second active user with a readable duplicate-login message', () => {
     const auth = service();
     auth.createUser({ login: 'OPR', password: 'test123', role: 'operator', createdBy: null });

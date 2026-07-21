@@ -134,13 +134,14 @@ export class AuthService {
     this.assertValidPassword(input.password);
     this.assertValidRole(input.role);
 
-    const existing = this.db.findByLoginIncludingDeleted(login);
+    const existing = this.db.findByLoginIncludingDeleted(login) ?? this.db.findByNormalizedLoginIncludingDeleted(login);
     if (existing?.deletedAt === null && existing.isActive) throw new Error('Użytkownik z takim loginem już istnieje.');
 
     const now = new Date().toISOString();
     if (existing) {
       const reactivated = this.db.updateUserIncludingDeleted(existing.id, {
         passwordHash: hashPassword(input.password),
+        login,
         role: input.role,
         isActive: 1,
         updatedAt: now,

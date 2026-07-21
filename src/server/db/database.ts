@@ -248,6 +248,10 @@ export class AppDatabase {
   listUsers(): UserRecord[] { return (this.db.prepare('SELECT * FROM users WHERE deleted_at IS NULL AND isActive != 0 ORDER BY login ASC').all() as Record<string, unknown>[]).map(rowToUser); }
   findByLogin(login: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE login = ? AND deleted_at IS NULL').get(login) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
   findByLoginIncludingDeleted(login: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE login = ?').get(login) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
+  findByNormalizedLoginIncludingDeleted(login: string): UserRecord | null {
+    const row = this.db.prepare('SELECT * FROM users WHERE UPPER(TRIM(login)) = ? ORDER BY deleted_at IS NULL DESC, isActive DESC, updatedAt DESC LIMIT 1').get(login) as Record<string, unknown> | undefined;
+    return row ? rowToUser(row) : null;
+  }
   findById(id: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').get(id) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
   findByCardUidHash(hash: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE card_uid_hash = ? AND isActive = 1 AND deleted_at IS NULL').get(hash) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
 

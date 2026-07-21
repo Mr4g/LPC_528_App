@@ -593,6 +593,12 @@ function userRoleLabel(role: UserRole): string {
   return 'Operator';
 }
 
+function assignableRoleOptions(actor: AuthUser, target: PublicUser): UserRole[] {
+  if (actor.role === 'admin' && target.role !== 'admin') return ['operator', 'line_leader', 'admin'];
+  if (actor.role === 'line_leader' && target.role === 'operator') return ['operator', 'line_leader'];
+  return [];
+}
+
 function canDeleteUserInUi(actor: AuthUser, target: PublicUser, activeAdminCount: number): boolean {
   if (actor.id === target.id) return false;
   if (actor.role === 'admin') return !(target.role === 'admin' && target.isActive && activeAdminCount <= 1);
@@ -676,6 +682,33 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
     await loadUsers();
   }
 
+  async function changeRole(user: PublicUser) {
+    const options = assignableRoleOptions(props.user, user);
+    const choices = options.map((option, index) => `${index + 1}. ${userRoleLabel(option)}`).join('\n');
+    const selected = window.prompt(`Wybierz nową rolę dla ${user.login}:\n${choices}`);
+    if (!selected) return;
+    const selectedIndex = Number(selected.trim()) - 1;
+    const nextRole = options[selectedIndex];
+    if (!nextRole) {
+      setMessage('Nieprawidłowy wybór roli.');
+      return;
+    }
+    if (nextRole === user.role) {
+      setMessage('Wybrana rola jest już przypisana do użytkownika.');
+      return;
+    }
+    if (!window.confirm(`Zmienić uprawnienia użytkownika ${user.login} na ${userRoleLabel(nextRole)}?`)) return;
+    const response = await fetch(`/api/users/${user.id}`, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: nextRole }),
+    });
+    const payload = (await response.json()) as { ok: boolean; message?: string };
+    setMessage(response.ok ? 'Uprawnienia użytkownika zostały zmienione.' : payload.message ?? 'Nie udało się zmienić uprawnień.');
+    await loadUsers();
+  }
+
   async function resetPassword(id: string) {
     const newPassword = window.prompt('Nowe hasło (min. 4 znaki)');
     if (!newPassword) return;
@@ -717,6 +750,7 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
             {users.map((item) => {
               const activeAdminCount = users.filter((user) => user.role === 'admin' && user.isActive).length;
               const deleteAllowed = canDeleteUserInUi(props.user, item, activeAdminCount);
+              const roleOptions = assignableRoleOptions(props.user, item);
               return (
               <tr key={item.id}>
                 <td>{item.login}</td>
@@ -728,6 +762,7 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
                 <td>
                   <button type="button" onClick={() => void resetPassword(item.id)}>Resetuj hasło</button>
                   <button type="button" onClick={() => void changeCard(item.id)}>Zmień kartę</button>
+                  <button type="button" onClick={() => void changeRole(item)} disabled={roleOptions.length === 0}>Zmień uprawnienia</button>
                   {item.cardMask && <button type="button" onClick={() => void removeCard(item.id)}>Usuń kartę</button>}
                   <button type="button" onClick={() => void userAction(item.id, item.isActive ? 'disable' : 'enable')}>{item.isActive ? 'Dezaktywuj' : 'Aktywuj'}</button>
                   {deleteAllowed ? (

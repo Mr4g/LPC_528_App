@@ -51,6 +51,26 @@ describe('AuthService', () => {
     expect(auth.login('ABC', 'test123')).toBeNull();
   });
 
+  it('reactivates a soft-deleted user when the same login is created again', () => {
+    const auth = service();
+    const user = auth.createUser({ login: 'OPR', password: 'oldpass', role: 'operator', createdBy: null });
+    auth.softDeleteUser(user.id);
+
+    const recreated = auth.createUser({ login: 'opr', password: 'newpass', role: 'line_leader', createdBy: 'ADM' });
+
+    expect(recreated).toMatchObject({ id: user.id, login: 'OPR', role: 'line_leader', isActive: true, deletedAt: null });
+    expect(auth.login('OPR', 'oldpass')).toBeNull();
+    expect(auth.login('OPR', 'newpass')).toMatchObject({ id: user.id, role: 'line_leader' });
+    expect(auth.listUsers().filter((item) => item.login === 'OPR')).toHaveLength(1);
+  });
+
+  it('rejects creating a second active user with a readable duplicate-login message', () => {
+    const auth = service();
+    auth.createUser({ login: 'OPR', password: 'test123', role: 'operator', createdBy: null });
+
+    expect(() => auth.createUser({ login: 'opr', password: 'test123', role: 'operator', createdBy: null })).toThrow('Użytkownik z takim loginem już istnieje.');
+  });
+
   it('soft deletes users and hides them from user lists and login/card lookup', () => {
     const auth = service();
     const user = auth.createUser({ login: 'OPR', password: 'test123', role: 'operator', createdBy: null });

@@ -307,6 +307,10 @@ export class AuthService {
     return user ? this.toPublicUser(user) : null;
   }
 
+  hardDeleteUser(id: string): boolean {
+    return this.db.hardDeleteUser(id);
+  }
+
   resetPassword(id: string, password: string): PublicUser | null {
     this.assertValidPassword(password);
     const passwordHash = hashPassword(password);

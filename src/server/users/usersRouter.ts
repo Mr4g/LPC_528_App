@@ -97,6 +97,20 @@ export function createUsersRouter(authService: AuthService): Router {
     return res.json({ ok: true, deletedUserId: target.id });
   });
 
+  router.delete('/:id/permanent', (req: AuthenticatedRequest, res) => {
+    const target = authService.getUserById(String(req.params.id));
+    if (!target) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
+    if (req.user?.role !== 'admin') return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Tylko admin może trwale usunąć użytkownika.' });
+    const permission = canDeleteUser(req.user.role, target.role, req.user.id, target.id, {
+      targetIsActive: target.isActive,
+      activeAdminCount: authService.countActiveAdmins(),
+    });
+    if (!permission.ok) return res.status(403).json({ ok: false, code: permission.code, error: permission.code, message: permission.message });
+    if (!authService.hardDeleteUser(target.id)) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
+    console.info(`[USERS] permanently deleted userId=${target.id} login=${target.login} by=${req.user.login}`);
+    return res.json({ ok: true, deletedUserId: target.id, permanent: true });
+  });
+
   router.patch('/:id', (req: AuthenticatedRequest, res) => {
     const role = req.body?.role;
     if (!isUserRole(role)) return res.status(400).json({ ok: false, error: 'INVALID_ROLE', message: 'Nieprawidłowa rola.' });

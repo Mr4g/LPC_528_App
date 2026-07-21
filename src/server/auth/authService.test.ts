@@ -109,4 +109,17 @@ describe('AuthService', () => {
     expect(restored).toMatchObject({ id: user.id, isActive: true, deletedAt: null });
     expect(auth.login('OPR', 'test123')).toMatchObject({ id: user.id });
   });
+
+  it('hard deletes users so the same login can be created from scratch', () => {
+    const auth = service();
+    const user = auth.createUser({ login: 'WSAD', password: 'oldpass', role: 'operator', createdBy: null });
+    auth.softDeleteUser(user.id);
+
+    expect(auth.hardDeleteUser(user.id)).toBe(true);
+    expect(auth.listUsers().some((item) => item.id === user.id)).toBe(false);
+
+    const recreated = auth.createUser({ login: 'WSAD', password: 'newpass', role: 'line_leader', createdBy: 'ADM' });
+    expect(recreated).toMatchObject({ login: 'WSAD', role: 'line_leader', isActive: true, deletedAt: null });
+    expect(recreated.id).not.toBe(user.id);
+  });
 });

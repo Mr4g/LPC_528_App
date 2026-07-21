@@ -268,6 +268,11 @@ export class AppDatabase {
     return this.updateUserRecord(id, patch, true);
   }
 
+  hardDeleteUser(id: string): boolean {
+    const result = this.db.prepare('DELETE FROM users WHERE id = ?').run(id);
+    return result.changes > 0;
+  }
+
   private updateUserRecord(id: string, patch: Partial<UserRecord>, includeDeleted: boolean): UserRecord | null {
     const existing = includeDeleted ? this.findByIdIncludingDeleted(id) : this.findById(id);
     if (!existing) return null;

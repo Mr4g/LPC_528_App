@@ -656,8 +656,16 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
   async function deleteUser(id: string) {
     if (!window.confirm('Usunąć użytkownika?')) return;
     const response = await fetch(`/api/users/${id}`, { method: 'DELETE', credentials: 'include' });
-    const payload = (await response.json()) as { ok: boolean; deletedUserId?: string; message?: string };
+    const payload = (await response.json()) as { ok: boolean; message?: string };
     setMessage(response.ok ? 'Użytkownik został usunięty.' : payload.message ?? 'Brak uprawnień do tej operacji.');
+    await loadUsers();
+  }
+
+  async function permanentlyDeleteUser(id: string) {
+    if (!window.confirm('Trwale usunąć użytkownika z bazy? Tej operacji nie można cofnąć.')) return;
+    const response = await fetch(`/api/users/${id}/permanent`, { method: 'DELETE', credentials: 'include' });
+    const payload = (await response.json()) as { ok: boolean; deletedUserId?: string; message?: string };
+    setMessage(response.ok ? 'Użytkownik został trwale usunięty.' : payload.message ?? 'Nie udało się trwale usunąć użytkownika.');
     if (response.ok) setUsers((current) => current.filter((user) => user.id !== (payload.deletedUserId ?? id)));
     else await loadUsers();
   }
@@ -769,6 +777,9 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
                     <button type="button" onClick={() => void deleteUser(item.id)}>Usuń</button>
                   ) : (
                     <button type="button" disabled title={props.user.id === item.id ? 'Nie możesz usunąć własnego konta.' : 'Brak uprawnień'}>Usuń</button>
+                  )}
+                  {props.user.role === 'admin' && item.deletedAt && props.user.id !== item.id && (
+                    <button type="button" onClick={() => void permanentlyDeleteUser(item.id)}>Usuń trwale</button>
                   )}
                 </td>
               </tr>

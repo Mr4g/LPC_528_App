@@ -51,6 +51,15 @@ describe('AuthService', () => {
     expect(auth.login('ABC', 'test123')).toBeNull();
   });
 
+  it('keeps deactivated users visible so managers can edit or remove them', () => {
+    const auth = service();
+    const user = auth.createUser({ login: 'WSAD', password: 'test123', role: 'operator', createdBy: null });
+
+    auth.setActive(user.id, false);
+
+    expect(auth.listUsers()).toContainEqual(expect.objectContaining({ id: user.id, login: 'WSAD', isActive: false }));
+  });
+
   it('reactivates a soft-deleted user when the same login is created again', () => {
     const auth = service();
     const user = auth.createUser({ login: 'OPR', password: 'oldpass', role: 'operator', createdBy: null });

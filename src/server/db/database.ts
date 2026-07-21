@@ -245,7 +245,7 @@ export class AppDatabase {
   countAdmins(): number { return this.countAdminUsers(); }
   countAdminUsers(): number { return this.count("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND deleted_at IS NULL"); }
   countActiveAdminUsers(): number { return this.count("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND isActive = 1 AND deleted_at IS NULL"); }
-  listUsers(): UserRecord[] { return (this.db.prepare('SELECT * FROM users WHERE deleted_at IS NULL AND isActive != 0 ORDER BY login ASC').all() as Record<string, unknown>[]).map(rowToUser); }
+  listUsers(): UserRecord[] { return (this.db.prepare('SELECT * FROM users WHERE deleted_at IS NULL ORDER BY login ASC').all() as Record<string, unknown>[]).map(rowToUser); }
   findByLogin(login: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE login = ? AND deleted_at IS NULL').get(login) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
   findByLoginIncludingDeleted(login: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE login = ?').get(login) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
   findByNormalizedLoginIncludingDeleted(login: string): UserRecord | null {

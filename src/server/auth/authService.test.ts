@@ -93,7 +93,7 @@ describe('AuthService', () => {
     expect(() => auth.createUser({ login: 'opr', password: 'test123', role: 'operator', createdBy: null })).toThrow('Użytkownik z takim loginem już istnieje.');
   });
 
-  it('soft deletes users and hides them from user lists and login/card lookup', () => {
+  it('soft deletes users, keeps them manageable, and blocks login/card lookup', () => {
     const auth = service();
     const user = auth.createUser({ login: 'OPR', password: 'test123', role: 'operator', createdBy: null });
 
@@ -101,8 +101,12 @@ describe('AuthService', () => {
 
     expect(deleted).toMatchObject({ id: user.id, isActive: false });
     expect(deleted?.deletedAt).toEqual(expect.any(String));
-    expect(auth.listUsers().some((item) => item.id === user.id)).toBe(false);
-    expect(auth.getUserById(user.id)).toBeNull();
+    expect(auth.listUsers()).toContainEqual(expect.objectContaining({ id: user.id, login: 'OPR', isActive: false, deletedAt: expect.any(String) }));
+    expect(auth.getUserById(user.id)).toMatchObject({ id: user.id, deletedAt: expect.any(String) });
     expect(auth.login('OPR', 'test123')).toBeNull();
+
+    const restored = auth.setActive(user.id, true);
+    expect(restored).toMatchObject({ id: user.id, isActive: true, deletedAt: null });
+    expect(auth.login('OPR', 'test123')).toMatchObject({ id: user.id });
   });
 });

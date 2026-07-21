@@ -755,7 +755,7 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
               <tr key={item.id}>
                 <td>{item.login}</td>
                 <td>{userRoleLabel(item.role)}</td>
-                <td>{item.isActive ? 'aktywny' : 'nieaktywny'}</td>
+                <td>{item.deletedAt ? 'usunięty' : item.isActive ? 'aktywny' : 'nieaktywny'}</td>
                 <td>{item.cardMask ?? '-'}</td>
                 <td>{formatDateTime(item.createdAt)}</td>
                 <td>{formatDateTime(item.lastLoginAt)}</td>

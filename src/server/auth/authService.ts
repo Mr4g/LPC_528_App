@@ -278,7 +278,7 @@ export class AuthService {
   }
 
   getUserById(id: string): PublicUser | null {
-    const user = this.db.findById(id);
+    const user = this.db.findByIdIncludingDeleted(id);
     return user ? this.toPublicUser(user) : null;
   }
 
@@ -289,19 +289,21 @@ export class AuthService {
   setRole(id: string, role: UserRole): PublicUser | null {
     this.assertValidRole(role);
     const updatedAt = new Date().toISOString();
-    const user = this.db.updateUser(id, { role, updatedAt });
+    const user = this.db.updateUserIncludingDeleted(id, { role, updatedAt });
     return user ? this.toPublicUser(user) : null;
   }
 
   setActive(id: string, active: boolean): PublicUser | null {
     const updatedAt = new Date().toISOString();
-    const user = this.db.updateUser(id, { isActive: active ? 1 : 0, updatedAt });
+    const patch: Partial<UserRecord> = { isActive: active ? 1 : 0, updatedAt };
+    if (active) patch.deletedAt = null;
+    const user = this.db.updateUserIncludingDeleted(id, patch);
     return user ? this.toPublicUser(user) : null;
   }
 
   softDeleteUser(id: string): PublicUser | null {
     const deletedAt = new Date().toISOString();
-    const user = this.db.updateUser(id, { isActive: 0, deletedAt, updatedAt: deletedAt, cardUidHash: null, cardUidLast4: null, cardAssignedAt: null });
+    const user = this.db.updateUserIncludingDeleted(id, { isActive: 0, deletedAt, updatedAt: deletedAt, cardUidHash: null, cardUidLast4: null, cardAssignedAt: null });
     return user ? this.toPublicUser(user) : null;
   }
 
@@ -309,7 +311,7 @@ export class AuthService {
     this.assertValidPassword(password);
     const passwordHash = hashPassword(password);
     const updatedAt = new Date().toISOString();
-    const user = this.db.updateUser(id, { passwordHash, updatedAt });
+    const user = this.db.updateUserIncludingDeleted(id, { passwordHash, updatedAt });
     return user ? this.toPublicUser(user) : null;
   }
 

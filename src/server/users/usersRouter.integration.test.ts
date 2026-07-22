@@ -70,6 +70,30 @@ describe('users router hard delete', () => {
     expect(recreated.id).not.toBe(target.id);
   });
 
+  it.each([
+    { login: 'SZPK', patch: { isActive: 0, deletedAt: '2026-07-10T10:22:43.491Z' } },
+    { login: 'WOAA', patch: { isActive: 0, deletedAt: null } },
+  ])('hard deletes exact legacy management record $login through HTTP', async ({ login, patch }) => {
+    const context = await setup('admin');
+    closeServer = context.close;
+    const target = context.auth.createUser({ login, password: 'oldpass', role: 'operator', createdBy: 'ADM' });
+    context.db.updateUserIncludingDeleted(target.id, patch);
+
+    const listResponse = await fetch(`${context.baseUrl}/api/users`, { headers: { cookie: context.cookie } });
+    const listPayload = await listResponse.json() as { users: Array<{ id: string; login: string }> };
+    expect(listPayload.users).toContainEqual(expect.objectContaining({ id: target.id, login }));
+    expect(context.auth.getUserForManagement(target.id)).toMatchObject({ id: target.id, login });
+
+    const deleteResponse = await fetch(`${context.baseUrl}/api/users/${target.id}`, { method: 'DELETE', headers: { cookie: context.cookie } });
+    const deletePayload = await deleteResponse.json() as { ok: boolean; details?: { userDeleteChanges?: number; existsAfterDelete?: boolean } };
+    expect(deleteResponse.status).toBe(200);
+    expect(deletePayload).toMatchObject({ ok: true, details: { userDeleteChanges: 1, existsAfterDelete: false } });
+    expect(context.db.findByIdIncludingDeleted(target.id)).toBeNull();
+
+    const recreated = context.auth.createUser({ login, password: 'newpass', role: 'line_leader', createdBy: 'ADM' });
+    expect(recreated.id).not.toBe(target.id);
+  });
+
   it.each(['line_leader', 'operator'] as const)('denies hard delete for %s through HTTP', async (role) => {
     const context = await setup(role);
     closeServer = context.close;

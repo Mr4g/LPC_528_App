@@ -205,12 +205,12 @@ export class AuthService {
     const existing = this.db.findByCardUidHash(hash);
     if (existing && existing.id !== id) throw new CardAssignmentError('Ta karta jest już przypisana do innego użytkownika.', 'CARD_ALREADY_ASSIGNED');
     const now = new Date().toISOString();
-    const user = this.db.updateUser(id, { cardUidHash: hash, cardUidLast4: cardUidLast4(normalized), cardAssignedAt: now, updatedAt: now });
+    const user = this.db.updateUserIncludingDeleted(id, { cardUidHash: hash, cardUidLast4: cardUidLast4(normalized), cardAssignedAt: now, updatedAt: now });
     return user ? this.toPublicUser(user) : null;
   }
 
   removeCard(id: string): PublicUser | null {
-    const user = this.db.updateUser(id, { cardUidHash: null, cardUidLast4: null, cardAssignedAt: null, updatedAt: new Date().toISOString() });
+    const user = this.db.updateUserIncludingDeleted(id, { cardUidHash: null, cardUidLast4: null, cardAssignedAt: null, updatedAt: new Date().toISOString() });
     return user ? this.toPublicUser(user) : null;
   }
 
@@ -260,6 +260,11 @@ export class AuthService {
     return user ? this.toPublicUser(user) : null;
   }
 
+  getUserForManagement(id: string): PublicUser | null {
+    const normalizedId = String(id).trim();
+    return this.listUsers().find((user) => user.id === normalizedId) ?? null;
+  }
+
   findUserByLogin(login: string): UserRecord | null {
     return this.db.findByLogin(normalizeOperatorLogin(login));
   }
@@ -267,7 +272,7 @@ export class AuthService {
   setRole(id: string, role: UserRole): PublicUser | null {
     this.assertValidRole(role);
     const updatedAt = new Date().toISOString();
-    const user = this.db.updateUser(id, { role, updatedAt });
+    const user = this.db.updateUserIncludingDeleted(id, { role, updatedAt });
     return user ? this.toPublicUser(user) : null;
   }
 
@@ -279,7 +284,7 @@ export class AuthService {
     this.assertValidPassword(password);
     const passwordHash = hashPassword(password);
     const updatedAt = new Date().toISOString();
-    const user = this.db.updateUser(id, { passwordHash, updatedAt });
+    const user = this.db.updateUserIncludingDeleted(id, { passwordHash, updatedAt });
     return user ? this.toPublicUser(user) : null;
   }
 

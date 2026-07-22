@@ -1,9 +1,59 @@
 import { describe, expect, it } from 'vitest';
 import { createDatabase } from '../db/database';
 import { AuthService } from './authService';
+import type { LpcResult } from '../../shared/types';
 
 function service() {
   return new AuthService(createDatabase(':memory:'), 'test-secret-with-at-least-16-chars');
+}
+
+function resultForOperator(login: string): LpcResult {
+  return {
+    source: 'test',
+    receivedAt: '2026-07-21T13:00:00.000Z',
+    messageId: 'msg-1',
+    messageType: 'R',
+    channel: null,
+    port: null,
+    program: null,
+    programText: 'P1',
+    linkInfo: null,
+    result: 'ACCEPT',
+    value: 'ACCEPT',
+    testerTime: null,
+    testerDate: null,
+    uniqueId: 'UID-1',
+    totalAbs: null,
+    programEvaluation: null,
+    spcFlag: null,
+    barcode: 'BARCODE1',
+    barcodeFromResult: null,
+    testType: null,
+    testEvaluation: null,
+    leakType: null,
+    leakValue: null,
+    leakUnit: null,
+    resultDetailsRaw: null,
+    measurements: {},
+    RL: null,
+    RL_unit: null,
+    Pt: null,
+    Pt_unit: null,
+    EDC: null,
+    EDC_unit: null,
+    PL: null,
+    PL_unit: null,
+    LLR: null,
+    LLR_unit: null,
+    HLR: null,
+    HLR_unit: null,
+    FPR: null,
+    FPR_unit: null,
+    raw: 'raw',
+    normalized: 'normalized',
+    operatorLogin: login,
+    operatorRole: 'operator',
+  };
 }
 
 describe('AuthService', () => {
@@ -25,13 +75,14 @@ describe('AuthService', () => {
 
 
 
-  it('creates default admin when there is no active admin', () => {
-    const auth = service();
+  it('repairs default admin when existing admin has legacy inactive flags', () => {
+    const db = createDatabase(':memory:');
+    const auth = new AuthService(db, 'test-secret-with-at-least-16-chars');
     const admin = auth.createUser({ login: 'ADM', password: 'oldpass', role: 'admin', createdBy: null });
-    auth.setActive(admin.id, false);
+    db.updateUserIncludingDeleted(admin.id, { isActive: 0, deletedAt: '2026-07-14T13:28:19.103Z' });
     const seed = auth.seedDefaultAdmin('ADM', 'admin123');
-    expect(seed.action).toBe('repaired');
-    expect(auth.login('adm', 'admin123')).toMatchObject({ login: 'ADM', role: 'admin' });
+    expect(seed.action).toBe('none');
+    expect(auth.login('adm', 'oldpass')).toMatchObject({ login: 'ADM', role: 'admin' });
   });
 
   it('resets default admin password in development helper', () => {
@@ -42,48 +93,34 @@ describe('AuthService', () => {
     expect(auth.login('ADM', 'admin123')).toMatchObject({ login: 'ADM', role: 'admin' });
   });
 
-  it('logs in valid user and rejects bad password or inactive user', () => {
-    const auth = service();
+  it('logs in valid user and ignores legacy inactive/deleted flags', () => {
+    const db = createDatabase(':memory:');
+    const auth = new AuthService(db, 'test-secret-with-at-least-16-chars');
     const user = auth.createUser({ login: 'abc', password: 'test123', role: 'operator', createdBy: null });
     expect(auth.login('ABC', 'test123')).toMatchObject({ login: 'ABC', role: 'operator' });
     expect(auth.login('ABC', 'bad-password')).toBeNull();
-    auth.setActive(user.id, false);
-    expect(auth.login('ABC', 'test123')).toBeNull();
+    db.updateUserIncludingDeleted(user.id, { isActive: 0, deletedAt: '2026-07-14T13:28:19.103Z' });
+    expect(auth.login('ABC', 'test123')).toMatchObject({ login: 'ABC', role: 'operator' });
   });
 
-  it('keeps deactivated users visible so managers can edit or remove them', () => {
-    const auth = service();
+  it('returns legacy inactive and soft-deleted records in the administrative list', () => {
+    const db = createDatabase(':memory:');
+    const auth = new AuthService(db, 'test-secret-with-at-least-16-chars');
     const user = auth.createUser({ login: 'WSAD', password: 'test123', role: 'operator', createdBy: null });
 
-    auth.setActive(user.id, false);
+    db.updateUserIncludingDeleted(user.id, { isActive: 0, deletedAt: '2026-07-14T13:28:19.103Z' });
 
-    expect(auth.listUsers()).toContainEqual(expect.objectContaining({ id: user.id, login: 'WSAD', isActive: false }));
+    expect(auth.listUsers()).toContainEqual(expect.objectContaining({ id: user.id, login: 'WSAD', isActive: false, deletedAt: '2026-07-14T13:28:19.103Z' }));
   });
 
-  it('reactivates a soft-deleted user when the same login is created again', () => {
-    const auth = service();
-    const user = auth.createUser({ login: 'OPR', password: 'oldpass', role: 'operator', createdBy: null });
-    auth.softDeleteUser(user.id);
-
-    const recreated = auth.createUser({ login: 'opr', password: 'newpass', role: 'line_leader', createdBy: 'ADM' });
-
-    expect(recreated).toMatchObject({ id: user.id, login: 'OPR', role: 'line_leader', isActive: true, deletedAt: null });
-    expect(auth.login('OPR', 'oldpass')).toBeNull();
-    expect(auth.login('OPR', 'newpass')).toMatchObject({ id: user.id, role: 'line_leader' });
-    expect(auth.listUsers().filter((item) => item.login === 'OPR')).toHaveLength(1);
-  });
-
-  it('reactivates hidden users whose stored login casing or whitespace differs', () => {
+  it('requires hard delete before creating the same normalized login again', () => {
     const db = createDatabase(':memory:');
     const auth = new AuthService(db, 'test-secret-with-at-least-16-chars');
     const user = auth.createUser({ login: 'WSAD', password: 'oldpass', role: 'operator', createdBy: null });
     db.updateUser(user.id, { login: ' wsad ' });
-    auth.softDeleteUser(user.id);
+    db.updateUserIncludingDeleted(user.id, { isActive: 0, deletedAt: '2026-07-14T13:28:19.103Z' });
 
-    const recreated = auth.createUser({ login: 'WSAD', password: 'newpass', role: 'line_leader', createdBy: 'ADM' });
-
-    expect(recreated).toMatchObject({ id: user.id, login: 'WSAD', role: 'line_leader', isActive: true, deletedAt: null });
-    expect(auth.login('WSAD', 'newpass')).toMatchObject({ id: user.id, role: 'line_leader' });
+    expect(() => auth.createUser({ login: 'WSAD', password: 'newpass', role: 'line_leader', createdBy: 'ADM' })).toThrow('Użytkownik z takim loginem już istnieje.');
   });
 
   it('rejects creating a second active user with a readable duplicate-login message', () => {
@@ -93,33 +130,36 @@ describe('AuthService', () => {
     expect(() => auth.createUser({ login: 'opr', password: 'test123', role: 'operator', createdBy: null })).toThrow('Użytkownik z takim loginem już istnieje.');
   });
 
-  it('soft deletes users, keeps them manageable, and blocks login/card lookup', () => {
-    const auth = service();
-    const user = auth.createUser({ login: 'OPR', password: 'test123', role: 'operator', createdBy: null });
-
-    const deleted = auth.softDeleteUser(user.id);
-
-    expect(deleted).toMatchObject({ id: user.id, isActive: false });
-    expect(deleted?.deletedAt).toEqual(expect.any(String));
-    expect(auth.listUsers()).toContainEqual(expect.objectContaining({ id: user.id, login: 'OPR', isActive: false, deletedAt: expect.any(String) }));
-    expect(auth.getUserById(user.id)).toMatchObject({ id: user.id, deletedAt: expect.any(String) });
-    expect(auth.login('OPR', 'test123')).toBeNull();
-
-    const restored = auth.setActive(user.id, true);
-    expect(restored).toMatchObject({ id: user.id, isActive: true, deletedAt: null });
-    expect(auth.login('OPR', 'test123')).toMatchObject({ id: user.id });
-  });
-
-  it('hard deletes users so the same login can be created from scratch', () => {
-    const auth = service();
+  it('hard deletes users so the same login and card can be created from scratch', () => {
+    const db = createDatabase(':memory:');
+    const auth = new AuthService(db, 'test-secret-with-at-least-16-chars');
     const user = auth.createUser({ login: 'WSAD', password: 'oldpass', role: 'operator', createdBy: null });
-    auth.softDeleteUser(user.id);
+    auth.assignCard(user.id, '05389148');
+    db.updateUserIncludingDeleted(user.id, { isActive: 0, deletedAt: '2026-07-14T13:28:19.103Z' });
 
     expect(auth.hardDeleteUser(user.id)).toBe(true);
     expect(auth.listUsers().some((item) => item.id === user.id)).toBe(false);
+    expect(auth.findUserByLogin('WSAD')).toBeNull();
 
     const recreated = auth.createUser({ login: 'WSAD', password: 'newpass', role: 'line_leader', createdBy: 'ADM' });
+    const withCard = auth.assignCard(recreated.id, '05389148');
     expect(recreated).toMatchObject({ login: 'WSAD', role: 'line_leader', isActive: true, deletedAt: null });
     expect(recreated.id).not.toBe(user.id);
+    expect(withCard?.cardUidLast4).toBe('9148');
+  });
+
+  it('hard delete removes user sessions but preserves historical test results', () => {
+    const db = createDatabase(':memory:');
+    const auth = new AuthService(db, 'test-secret-with-at-least-16-chars');
+    const user = auth.createUser({ login: 'WSAD', password: 'oldpass', role: 'operator', createdBy: null });
+    db.upsertTestSession({ id: 'session-1', status: 'completed', barcode: 'BARCODE1', programNumber: 1, programText: 'P1', operatorUserId: user.id, operatorLogin: 'WSAD', startedAt: '2026-07-21T13:00:00.000Z', completedAt: '2026-07-21T13:01:00.000Z', firstLpcDataAt: null, lastLpcDataAt: null, lastStreamAt: null, finalResultAt: null, timeoutAt: null, message: null });
+    db.insertTestResult(resultForOperator('WSAD'), 'session-1');
+
+    expect(auth.hardDeleteUser(user.id)).toBe(true);
+
+    expect(db.getLatestTestSession()).toBeNull();
+    const results = db.listTestResults({ operatorLogin: 'WSAD' });
+    expect(results.total).toBe(1);
+    expect(results.results[0]).toMatchObject({ operatorLogin: 'WSAD', barcode: 'BARCODE1' });
   });
 });

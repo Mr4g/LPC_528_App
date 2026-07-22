@@ -599,10 +599,9 @@ function assignableRoleOptions(actor: AuthUser, target: PublicUser): UserRole[] 
   return [];
 }
 
-function canDeleteUserInUi(actor: AuthUser, target: PublicUser, activeAdminCount: number): boolean {
+function canDeleteUserInUi(actor: AuthUser, target: PublicUser, adminCount: number): boolean {
   if (actor.id === target.id) return false;
-  if (actor.role === 'admin') return !(target.role === 'admin' && target.isActive && activeAdminCount <= 1);
-  if (actor.role === 'line_leader') return target.role === 'operator';
+  if (actor.role === 'admin') return !(target.role === 'admin' && adminCount <= 1);
   return false;
 }
 
@@ -613,6 +612,9 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
   const [role, setRole] = useState<UserRole>('operator');
   const [cardUid, setCardUid] = useState('');
   const [message, setMessage] = useState<string | null>(null);
+  const [openActionsId, setOpenActionsId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PublicUser | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   async function loadUsers() {
     const payload = await fetchJson<{ ok: true; users: PublicUser[] }>('/api/users');
@@ -653,25 +655,19 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
     }
   }
 
-  async function deleteUser(id: string) {
-    if (!window.confirm('Usunąć użytkownika?')) return;
-    const response = await fetch(`/api/users/${id}`, { method: 'DELETE', credentials: 'include' });
-    const payload = (await response.json()) as { ok: boolean; message?: string };
-    setMessage(response.ok ? 'Użytkownik został usunięty.' : payload.message ?? 'Brak uprawnień do tej operacji.');
-    await loadUsers();
-  }
-
-  async function permanentlyDeleteUser(id: string) {
-    if (!window.confirm('Trwale usunąć użytkownika z bazy? Tej operacji nie można cofnąć.')) return;
-    const response = await fetch(`/api/users/${id}/permanent`, { method: 'DELETE', credentials: 'include' });
-    const payload = (await response.json()) as { ok: boolean; deletedUserId?: string; message?: string };
-    setMessage(response.ok ? 'Użytkownik został trwale usunięty.' : payload.message ?? 'Nie udało się trwale usunąć użytkownika.');
-    if (response.ok) setUsers((current) => current.filter((user) => user.id !== (payload.deletedUserId ?? id)));
-    else await loadUsers();
-  }
-
-  async function userAction(id: string, action: 'enable' | 'disable') {
-    await fetch(`/api/users/${id}/${action}`, { method: 'PATCH', credentials: 'include' });
+  async function permanentlyDeleteUser() {
+    if (!deleteTarget) return;
+    const response = await fetch(`/api/users/${deleteTarget.id}`, { method: 'DELETE', credentials: 'include' });
+    const payload = (await response.json()) as { ok: boolean; deletedUserId?: string; login?: string; message?: string };
+    if (!response.ok) {
+      setDeleteError(payload.message ?? 'Nie udało się całkowicie usunąć użytkownika.');
+      return;
+    }
+    const deletedLogin = payload.login ?? deleteTarget.login;
+    setDeleteTarget(null);
+    setDeleteError(null);
+    setOpenActionsId(null);
+    setMessage(`Użytkownik ${deletedLogin} został całkowicie usunięty.`);
     await loadUsers();
   }
 
@@ -729,6 +725,12 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
     await loadUsers();
   }
 
+  function openDeleteModal(user: PublicUser): void {
+    setOpenActionsId(null);
+    setDeleteError(null);
+    setDeleteTarget(user);
+  }
+
   return (
     <main className="users-shell">
       <header className="users-header">
@@ -753,40 +755,58 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
       {message && <p className="login-error">{message}</p>}
       <section className="users-table-wrap">
         <table>
-          <thead><tr><th>Login</th><th>Rola</th><th>Status</th><th>Karta</th><th>Utworzono</th><th>Ostatnie logowanie</th><th>Akcje</th></tr></thead>
+          <thead><tr><th>Login</th><th>Rola</th><th>Karta</th><th>Utworzono</th><th>Ostatnie logowanie</th><th>Akcje</th></tr></thead>
           <tbody>
             {users.map((item) => {
-              const activeAdminCount = users.filter((user) => user.role === 'admin' && user.isActive).length;
-              const deleteAllowed = canDeleteUserInUi(props.user, item, activeAdminCount);
+              const adminCount = users.filter((user) => user.role === 'admin').length;
+              const deleteAllowed = canDeleteUserInUi(props.user, item, adminCount);
               const roleOptions = assignableRoleOptions(props.user, item);
+              const isLegacyDeleted = !item.isActive || Boolean(item.deletedAt);
+              const canEditLegacy = !isLegacyDeleted;
               return (
               <tr key={item.id}>
-                <td>{item.login}</td>
+                <td>{item.login}{isLegacyDeleted && <span className="legacy-user-badge">Stary usunięty rekord</span>}</td>
                 <td>{userRoleLabel(item.role)}</td>
-                <td>{item.deletedAt ? 'usunięty' : item.isActive ? 'aktywny' : 'nieaktywny'}</td>
                 <td>{item.cardMask ?? '-'}</td>
                 <td>{formatDateTime(item.createdAt)}</td>
                 <td>{formatDateTime(item.lastLoginAt)}</td>
-                <td>
-                  <button type="button" onClick={() => void resetPassword(item.id)}>Resetuj hasło</button>
-                  <button type="button" onClick={() => void changeCard(item.id)}>Zmień kartę</button>
-                  <button type="button" onClick={() => void changeRole(item)} disabled={roleOptions.length === 0}>Zmień uprawnienia</button>
-                  {item.cardMask && <button type="button" onClick={() => void removeCard(item.id)}>Usuń kartę</button>}
-                  <button type="button" onClick={() => void userAction(item.id, item.isActive ? 'disable' : 'enable')}>{item.isActive ? 'Dezaktywuj' : 'Aktywuj'}</button>
-                  {deleteAllowed ? (
-                    <button type="button" onClick={() => void deleteUser(item.id)}>Usuń</button>
-                  ) : (
-                    <button type="button" disabled title={props.user.id === item.id ? 'Nie możesz usunąć własnego konta.' : 'Brak uprawnień'}>Usuń</button>
-                  )}
-                  {props.user.role === 'admin' && item.deletedAt && props.user.id !== item.id && (
-                    <button type="button" onClick={() => void permanentlyDeleteUser(item.id)}>Usuń trwale</button>
-                  )}
+                <td className="actions-cell">
+                  <div className="row-actions-menu">
+                    <button type="button" className="row-actions-trigger" aria-haspopup="menu" aria-expanded={openActionsId === item.id} onClick={() => setOpenActionsId(openActionsId === item.id ? null : item.id)}>⋮</button>
+                    {openActionsId === item.id && (
+                      <div className="row-actions-popover" role="menu">
+                        {canEditLegacy ? (
+                          <>
+                            <button type="button" role="menuitem" onClick={() => { setOpenActionsId(null); void changeRole(item); }} disabled={roleOptions.length === 0}>Zmień uprawnienia</button>
+                            <button type="button" role="menuitem" onClick={() => { setOpenActionsId(null); void changeCard(item.id); }}>Zmień kartę</button>
+                            <button type="button" role="menuitem" onClick={() => { setOpenActionsId(null); void resetPassword(item.id); }}>Zmień hasło</button>
+                            {item.cardMask && <button type="button" role="menuitem" onClick={() => { setOpenActionsId(null); void removeCard(item.id); }}>Usuń kartę</button>}
+                            <span className="row-actions-separator" />
+                          </>
+                        ) : null}
+                        <button type="button" role="menuitem" className="danger" onClick={() => openDeleteModal(item)} disabled={!deleteAllowed}>Usuń całkowicie</button>
+                      </div>
+                    )}
+                  </div>
                 </td>
               </tr>
             );})}
           </tbody>
         </table>
       </section>
+      {deleteTarget && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="deleteUserTitle">
+            <h2 id="deleteUserTitle">Usunąć użytkownika {deleteTarget.login}?</h2>
+            <p>Użytkownik zostanie całkowicie usunięty z bazy. Tej operacji nie można cofnąć. Po usunięciu będzie można ponownie utworzyć konto z takim samym loginem.</p>
+            {deleteError && <p className="login-error">{deleteError}</p>}
+            <div className="confirm-modal-actions">
+              <button type="button" onClick={() => { setDeleteTarget(null); setDeleteError(null); }}>Anuluj</button>
+              <button type="button" className="danger" onClick={() => void permanentlyDeleteUser()}>Usuń całkowicie</button>
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

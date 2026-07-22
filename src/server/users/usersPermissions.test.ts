@@ -20,28 +20,28 @@ describe('users permissions', () => {
     expect(canCreateUser('operator', 'admin')).toBe(false);
   });
 
-  it('admin can delete operator, line_leader and another admin when it is not the last active admin', () => {
-    expect(canDeleteUser('admin', 'operator', 'admin-1', 'op-1', { activeAdminCount: 2 })).toEqual({ ok: true });
-    expect(canDeleteUser('admin', 'line_leader', 'admin-1', 'll-1', { activeAdminCount: 2 })).toEqual({ ok: true });
-    expect(canDeleteUser('admin', 'admin', 'admin-1', 'admin-2', { targetIsActive: true, activeAdminCount: 2 })).toEqual({ ok: true });
+  it('admin can hard delete operator, line_leader and another admin when it is not the last admin', () => {
+    expect(canDeleteUser('admin', 'operator', 'admin-1', 'op-1', { adminCount: 2 })).toEqual({ ok: true });
+    expect(canDeleteUser('admin', 'line_leader', 'admin-1', 'll-1', { adminCount: 2 })).toEqual({ ok: true });
+    expect(canDeleteUser('admin', 'admin', 'admin-1', 'admin-2', { adminCount: 2 })).toEqual({ ok: true });
   });
 
   it('admin cannot delete self', () => {
-    expect(canDeleteUser('admin', 'admin', 'admin-1', 'admin-1', { targetIsActive: true, activeAdminCount: 2 })).toMatchObject({ ok: false, code: 'CANNOT_DELETE_SELF' });
+    expect(canDeleteUser('admin', 'admin', 'admin-1', 'admin-1', { adminCount: 2 })).toMatchObject({ ok: false, code: 'CANNOT_DELETE_SELF' });
   });
 
-  it('admin cannot delete last active admin', () => {
-    expect(canDeleteUser('admin', 'admin', 'admin-1', 'admin-2', { targetIsActive: true, activeAdminCount: 1 })).toMatchObject({ ok: false, code: 'CANNOT_DELETE_LAST_ADMIN' });
+  it('admin cannot delete last admin', () => {
+    expect(canDeleteUser('admin', 'admin', 'admin-1', 'admin-2', { adminCount: 1 })).toMatchObject({ ok: false, code: 'CANNOT_DELETE_LAST_ADMIN' });
   });
 
-  it('line_leader can delete operator only', () => {
-    expect(canDeleteUser('line_leader', 'operator', 'll-1', 'op-1', { activeAdminCount: 1 })).toEqual({ ok: true });
-    expect(canDeleteUser('line_leader', 'line_leader', 'll-1', 'll-2', { activeAdminCount: 1 })).toMatchObject({ ok: false, code: 'INSUFFICIENT_ROLE' });
-    expect(canDeleteUser('line_leader', 'admin', 'll-1', 'admin-1', { activeAdminCount: 1 })).toMatchObject({ ok: false, code: 'INSUFFICIENT_ROLE' });
+  it('line_leader cannot hard delete users', () => {
+    expect(canDeleteUser('line_leader', 'operator', 'll-1', 'op-1', { adminCount: 1 })).toMatchObject({ ok: false, code: 'INSUFFICIENT_ROLE' });
+    expect(canDeleteUser('line_leader', 'line_leader', 'll-1', 'll-2', { adminCount: 1 })).toMatchObject({ ok: false, code: 'INSUFFICIENT_ROLE' });
+    expect(canDeleteUser('line_leader', 'admin', 'll-1', 'admin-1', { adminCount: 1 })).toMatchObject({ ok: false, code: 'INSUFFICIENT_ROLE' });
   });
 
   it('operator cannot delete users', () => {
-    expect(canDeleteUser('operator', 'operator', 'op-1', 'op-2', { activeAdminCount: 1 })).toMatchObject({ ok: false, code: 'INSUFFICIENT_ROLE' });
+    expect(canDeleteUser('operator', 'operator', 'op-1', 'op-2', { adminCount: 1 })).toMatchObject({ ok: false, code: 'INSUFFICIENT_ROLE' });
   });
 });
 

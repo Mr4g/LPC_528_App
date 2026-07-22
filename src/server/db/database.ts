@@ -44,6 +44,13 @@ export interface StoredTestSession {
   message: string | null;
 }
 
+export interface HardDeleteUserResult {
+  deleted: boolean;
+  sessionsDeleted: number;
+  llControlCreatedDetached: number;
+  llControlResolvedDetached: number;
+}
+
 function boolToInt(value: boolean | number): number {
   return typeof value === 'number' ? value : value ? 1 : 0;
 }
@@ -240,20 +247,20 @@ export class AppDatabase {
     const row = this.db.prepare(sql).get() as { count?: number } | undefined;
     return Number(row?.count ?? 0);
   }
-  countUsers(): number { return this.count('SELECT COUNT(*) AS count FROM users WHERE deleted_at IS NULL'); }
-  countActiveUsers(): number { return this.count('SELECT COUNT(*) AS count FROM users WHERE isActive = 1 AND deleted_at IS NULL'); }
+  countUsers(): number { return this.count('SELECT COUNT(*) AS count FROM users'); }
+  countActiveUsers(): number { return this.count('SELECT COUNT(*) AS count FROM users WHERE isActive = 1'); }
   countAdmins(): number { return this.countAdminUsers(); }
-  countAdminUsers(): number { return this.count("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND deleted_at IS NULL"); }
-  countActiveAdminUsers(): number { return this.count("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND isActive = 1 AND deleted_at IS NULL"); }
+  countAdminUsers(): number { return this.count("SELECT COUNT(*) AS count FROM users WHERE role = 'admin'"); }
+  countActiveAdminUsers(): number { return this.countAdminUsers(); }
   listUsers(): UserRecord[] { return (this.db.prepare('SELECT * FROM users ORDER BY login ASC').all() as Record<string, unknown>[]).map(rowToUser); }
-  findByLogin(login: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE login = ? AND deleted_at IS NULL').get(login) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
+  findByLogin(login: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE login = ?').get(login) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
   findByLoginIncludingDeleted(login: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE login = ?').get(login) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
   findByNormalizedLoginIncludingDeleted(login: string): UserRecord | null {
     const row = this.db.prepare('SELECT * FROM users WHERE UPPER(TRIM(login)) = ? ORDER BY deleted_at IS NULL DESC, isActive DESC, updatedAt DESC LIMIT 1').get(login) as Record<string, unknown> | undefined;
     return row ? rowToUser(row) : null;
   }
-  findById(id: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').get(id) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
-  findByCardUidHash(hash: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE card_uid_hash = ? AND isActive = 1 AND deleted_at IS NULL').get(hash) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
+  findById(id: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
+  findByCardUidHash(hash: string): UserRecord | null { const row = this.db.prepare('SELECT * FROM users WHERE card_uid_hash = ?').get(hash) as Record<string, unknown> | undefined; return row ? rowToUser(row) : null; }
 
   insertUser(user: UserRecord): void {
     this.db.prepare(`INSERT INTO users (id, login, passwordHash, role, isActive, createdAt, updatedAt, lastLoginAt, createdBy, card_uid_hash, card_uid_last4, card_assigned_at, last_test_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -268,9 +275,21 @@ export class AppDatabase {
     return this.updateUserRecord(id, patch, true);
   }
 
-  hardDeleteUser(id: string): boolean {
-    const result = this.db.prepare('DELETE FROM users WHERE id = ?').run(id);
-    return result.changes > 0;
+  hardDeleteUser(id: string): HardDeleteUserResult {
+    this.db.prepare('BEGIN').run();
+    try {
+      const sessionsDeleted = this.db.prepare('DELETE FROM test_sessions WHERE operatorUserId = ?').run(id).changes;
+      const llControlCreatedDetached = this.db.prepare('UPDATE ll_control_flags SET createdByUserId = NULL WHERE createdByUserId = ?').run(id).changes;
+      const llControlResolvedDetached = this.db.prepare('UPDATE ll_control_flags SET resolvedByUserId = NULL WHERE resolvedByUserId = ?').run(id).changes;
+      const deleted = this.db.prepare('DELETE FROM users WHERE id = ?').run(id).changes;
+      const stillExists = this.db.prepare('SELECT id FROM users WHERE id = ?').get(id);
+      if (stillExists) throw new Error('Nie udało się trwale usunąć użytkownika: rekord nadal istnieje w bazie.');
+      this.db.prepare('COMMIT').run();
+      return { deleted: deleted > 0, sessionsDeleted, llControlCreatedDetached, llControlResolvedDetached };
+    } catch (error) {
+      this.db.prepare('ROLLBACK').run();
+      throw error;
+    }
   }
 
   private updateUserRecord(id: string, patch: Partial<UserRecord>, includeDeleted: boolean): UserRecord | null {

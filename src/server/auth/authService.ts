@@ -81,7 +81,6 @@ export class AuthService {
     const existingDefaultUser = this.findUserByLogin(login);
     if (existingDefaultUser) {
       this.setRole(existingDefaultUser.id, 'admin');
-      this.setActive(existingDefaultUser.id, true);
       this.resetPassword(existingDefaultUser.id, password);
       return { action: 'repaired', login, before, after: this.getDbStats() };
     }
@@ -98,7 +97,6 @@ export class AuthService {
       this.db.updateUser(existingDefaultUser.id, {
         passwordHash: hashPassword(password),
         role: 'admin',
-        isActive: 1,
         updatedAt: new Date().toISOString(),
       });
       return { action: 'reset', login, before, after: this.getDbStats() };
@@ -135,28 +133,9 @@ export class AuthService {
     this.assertValidRole(input.role);
 
     const existing = this.db.findByLoginIncludingDeleted(login) ?? this.db.findByNormalizedLoginIncludingDeleted(login);
-    if (existing?.deletedAt === null && existing.isActive) throw new Error('Użytkownik z takim loginem już istnieje.');
+    if (existing) throw new Error('Użytkownik z takim loginem już istnieje. Usuń istniejący rekord całkowicie przed ponownym dodaniem.');
 
     const now = new Date().toISOString();
-    if (existing) {
-      const reactivated = this.db.updateUserIncludingDeleted(existing.id, {
-        passwordHash: hashPassword(input.password),
-        login,
-        role: input.role,
-        isActive: 1,
-        updatedAt: now,
-        lastLoginAt: null,
-        createdBy: input.createdBy,
-        cardUidHash: null,
-        cardUidLast4: null,
-        cardAssignedAt: null,
-        lastTestAt: null,
-        deletedAt: null,
-      });
-      if (!reactivated) throw new Error('Nie udało się dodać użytkownika.');
-      return this.toPublicUser(reactivated);
-    }
-
     const user: UserRecord = {
       id: crypto.randomUUID(),
       login,
@@ -261,7 +240,6 @@ export class AuthService {
 
     const user = this.findUserByLogin(login);
     if (!user) return { ok: false, reason: 'INVALID_CREDENTIALS' };
-    if (!user.isActive) return { ok: false, reason: 'INACTIVE' };
     if (!verifyPassword(password, user.passwordHash)) return { ok: false, reason: 'INVALID_CREDENTIALS' };
 
     const lastLoginAt = new Date().toISOString();
@@ -289,33 +267,19 @@ export class AuthService {
   setRole(id: string, role: UserRole): PublicUser | null {
     this.assertValidRole(role);
     const updatedAt = new Date().toISOString();
-    const user = this.db.updateUserIncludingDeleted(id, { role, updatedAt });
-    return user ? this.toPublicUser(user) : null;
-  }
-
-  setActive(id: string, active: boolean): PublicUser | null {
-    const updatedAt = new Date().toISOString();
-    const patch: Partial<UserRecord> = { isActive: active ? 1 : 0, updatedAt };
-    if (active) patch.deletedAt = null;
-    const user = this.db.updateUserIncludingDeleted(id, patch);
-    return user ? this.toPublicUser(user) : null;
-  }
-
-  softDeleteUser(id: string): PublicUser | null {
-    const deletedAt = new Date().toISOString();
-    const user = this.db.updateUserIncludingDeleted(id, { isActive: 0, deletedAt, updatedAt: deletedAt, cardUidHash: null, cardUidLast4: null, cardAssignedAt: null });
+    const user = this.db.updateUser(id, { role, updatedAt });
     return user ? this.toPublicUser(user) : null;
   }
 
   hardDeleteUser(id: string): boolean {
-    return this.db.hardDeleteUser(id);
+    return this.db.hardDeleteUser(id).deleted;
   }
 
   resetPassword(id: string, password: string): PublicUser | null {
     this.assertValidPassword(password);
     const passwordHash = hashPassword(password);
     const updatedAt = new Date().toISOString();
-    const user = this.db.updateUserIncludingDeleted(id, { passwordHash, updatedAt });
+    const user = this.db.updateUser(id, { passwordHash, updatedAt });
     return user ? this.toPublicUser(user) : null;
   }
 
@@ -338,7 +302,7 @@ export class AuthService {
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as SessionPayload;
     if (payload.exp < Date.now()) return null;
     const user = this.db.findById(payload.id);
-    if (!user || !user.isActive) return null;
+    if (!user) return null;
     if (!options.allowIdleExpired && this.isSessionIdleExpired(user)) return null;
     return { id: user.id, login: user.login, role: user.role };
   }

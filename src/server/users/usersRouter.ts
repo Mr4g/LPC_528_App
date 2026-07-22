@@ -25,16 +25,15 @@ export function canDeleteUser(
   targetRole: UserRole,
   actorId: string,
   targetId: string,
-  options: { targetIsActive?: boolean; activeAdminCount?: number } = {},
+  options: { adminCount?: number } = {},
 ): DeleteUserPermission {
   if (actorId === targetId) return { ok: false, code: 'CANNOT_DELETE_SELF', message: 'Nie możesz usunąć własnego konta.' };
   if (actorRole === 'admin') {
-    if (targetRole === 'admin' && options.targetIsActive !== false && (options.activeAdminCount ?? 0) <= 1) {
+    if (targetRole === 'admin' && (options.adminCount ?? 0) <= 1) {
       return { ok: false, code: 'CANNOT_DELETE_LAST_ADMIN', message: 'Nie można usunąć ostatniego administratora.' };
     }
     return { ok: true };
   }
-  if (actorRole === 'line_leader' && targetRole === 'operator') return { ok: true };
   return { ok: false, code: 'INSUFFICIENT_ROLE', message: 'Brak uprawnień do usunięcia tego użytkownika.' };
 }
 
@@ -86,29 +85,20 @@ export function createUsersRouter(authService: AuthService): Router {
   router.delete('/:id', (req: AuthenticatedRequest, res) => {
     const target = authService.getUserById(String(req.params.id));
     if (!target) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
+    if (req.user?.role !== 'admin') return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Tylko admin może całkowicie usunąć użytkownika.' });
     const permission = canDeleteUser(req.user?.role ?? 'operator', target.role, req.user?.id ?? '', target.id, {
-      targetIsActive: target.isActive,
-      activeAdminCount: authService.countActiveAdmins(),
+      adminCount: authService.countActiveAdmins(),
     });
     if (!permission.ok) return res.status(403).json({ ok: false, code: permission.code, error: permission.code, message: permission.message });
-    const user = authService.softDeleteUser(target.id);
-    if (!user) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
-    console.info(`[USERS] soft deleted userId=${target.id} by=${req.user?.login ?? 'unknown'}`);
-    return res.json({ ok: true, deletedUserId: target.id });
-  });
-
-  router.delete('/:id/permanent', (req: AuthenticatedRequest, res) => {
-    const target = authService.getUserById(String(req.params.id));
-    if (!target) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
-    if (req.user?.role !== 'admin') return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Tylko admin może trwale usunąć użytkownika.' });
-    const permission = canDeleteUser(req.user.role, target.role, req.user.id, target.id, {
-      targetIsActive: target.isActive,
-      activeAdminCount: authService.countActiveAdmins(),
-    });
-    if (!permission.ok) return res.status(403).json({ ok: false, code: permission.code, error: permission.code, message: permission.message });
-    if (!authService.hardDeleteUser(target.id)) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
-    console.info(`[USERS] permanently deleted userId=${target.id} login=${target.login} by=${req.user.login}`);
-    return res.json({ ok: true, deletedUserId: target.id, permanent: true });
+    try {
+      if (!authService.hardDeleteUser(target.id)) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND', message: 'Nie znaleziono użytkownika do usunięcia.' });
+      if (authService.getUserById(target.id)) return res.status(500).json({ ok: false, error: 'DELETE_FAILED', message: 'Nie udało się całkowicie usunąć użytkownika: rekord nadal istnieje w bazie.' });
+      console.info(`[USERS] permanently deleted userId=${target.id} login=${target.login} by=${req.user.login}`);
+      return res.json({ ok: true, deletedUserId: target.id, login: target.login });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Nie udało się całkowicie usunąć użytkownika.';
+      return res.status(500).json({ ok: false, error: 'DELETE_FAILED', message });
+    }
   });
 
   router.patch('/:id', (req: AuthenticatedRequest, res) => {
@@ -157,20 +147,6 @@ export function createUsersRouter(authService: AuthService): Router {
     } catch (error) {
       return res.status(400).json({ ok: false, error: 'RESET_PASSWORD_FAILED', message: error instanceof Error ? error.message : 'Nie udało się zresetować hasła.' });
     }
-  });
-
-  router.patch('/:id/disable', (req: AuthenticatedRequest, res) => {
-    const target = authService.getUserById(String(req.params.id));
-    if (!target) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
-    if (!canManageTarget(req.user?.role ?? 'operator', target.role)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Brak uprawnień.' });
-    return res.json({ ok: true, user: authService.setActive(String(req.params.id), false) });
-  });
-
-  router.patch('/:id/enable', (req: AuthenticatedRequest, res) => {
-    const target = authService.getUserById(String(req.params.id));
-    if (!target) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
-    if (!canManageTarget(req.user?.role ?? 'operator', target.role)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Brak uprawnień.' });
-    return res.json({ ok: true, user: authService.setActive(String(req.params.id), true) });
   });
 
   return router;

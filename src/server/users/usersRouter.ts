@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Router } from 'express';
 import { CardAssignmentError, type AuthService } from '../auth/authService';
 import { requireRole, type AuthenticatedRequest } from '../auth/authMiddleware';
@@ -25,16 +26,15 @@ export function canDeleteUser(
   targetRole: UserRole,
   actorId: string,
   targetId: string,
-  options: { targetIsActive?: boolean; activeAdminCount?: number } = {},
+  options: { adminCount?: number } = {},
 ): DeleteUserPermission {
   if (actorId === targetId) return { ok: false, code: 'CANNOT_DELETE_SELF', message: 'Nie możesz usunąć własnego konta.' };
   if (actorRole === 'admin') {
-    if (targetRole === 'admin' && options.targetIsActive !== false && (options.activeAdminCount ?? 0) <= 1) {
+    if (targetRole === 'admin' && (options.adminCount ?? 0) <= 1) {
       return { ok: false, code: 'CANNOT_DELETE_LAST_ADMIN', message: 'Nie można usunąć ostatniego administratora.' };
     }
     return { ok: true };
   }
-  if (actorRole === 'line_leader' && targetRole === 'operator') return { ok: true };
   return { ok: false, code: 'INSUFFICIENT_ROLE', message: 'Brak uprawnień do usunięcia tego użytkownika.' };
 }
 
@@ -52,10 +52,19 @@ export function canChangeUserRole(actorRole: UserRole, currentTargetRole: UserRo
 
 export function createUsersRouter(authService: AuthService): Router {
   const router = Router();
+  const routerInstanceId = crypto.randomUUID();
   router.use(requireRole(MANAGER_ROLES));
 
   router.get('/', (req: AuthenticatedRequest, res) => {
-    res.json({ ok: true, users: authService.listUsers() });
+    const users = authService.listUsers();
+    const szpk = users.find((user) => user.login === 'SZPK') ?? null;
+    console.info('[USERS GET IDENTITY]', {
+      routerInstanceId,
+      ...authService.getDebugIdentity(),
+      userCount: users.length,
+      szpkInspection: szpk ? authService.inspectUserDatabase(szpk.id) : null,
+    });
+    res.json({ ok: true, users });
   });
 
   router.post('/', (req: AuthenticatedRequest, res) => {
@@ -84,23 +93,53 @@ export function createUsersRouter(authService: AuthService): Router {
 
 
   router.delete('/:id', (req: AuthenticatedRequest, res) => {
-    const target = authService.getUserById(String(req.params.id));
-    if (!target) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
+    const id = String(req.params.id).trim();
+    console.info('[USERS DELETE IDENTITY]', {
+      routerInstanceId,
+      requestedId: id,
+      ...authService.getDebugIdentity(),
+      inspection: authService.inspectUserDatabase(id),
+    });
+    const listTarget = authService.listUsers().find((user) => user.id === id) ?? null;
+    const directTarget = authService.getUserById(id);
+    console.info('[USER MANAGEMENT LOOKUP]', {
+      requestedId: id,
+      requestedIdLength: id.length,
+      listTargetFound: Boolean(listTarget),
+      directTargetFound: Boolean(directTarget),
+      listTargetId: listTarget?.id ?? null,
+      listTargetIdLength: listTarget?.id.length ?? null,
+    });
+    const target = authService.getUserForManagement(id);
+    if (!target) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND_BEFORE_DELETE', message: 'Nie znaleziono użytkownika przed usunięciem.', details: { requestedId: id, existsInUsersList: Boolean(listTarget) } });
+    if (req.user?.role !== 'admin') return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Tylko admin może całkowicie usunąć użytkownika.' });
     const permission = canDeleteUser(req.user?.role ?? 'operator', target.role, req.user?.id ?? '', target.id, {
-      targetIsActive: target.isActive,
-      activeAdminCount: authService.countActiveAdmins(),
+      adminCount: authService.countActiveAdmins(),
     });
     if (!permission.ok) return res.status(403).json({ ok: false, code: permission.code, error: permission.code, message: permission.message });
-    const user = authService.softDeleteUser(target.id);
-    if (!user) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
-    console.info(`[USERS] soft deleted userId=${target.id} by=${req.user?.login ?? 'unknown'}`);
-    return res.json({ ok: true, deletedUserId: target.id });
+    try {
+      const result = authService.hardDeleteUser(target.id);
+      if (!result.existedBeforeDelete) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND_DURING_DELETE', message: 'Nie znaleziono użytkownika podczas usuwania.', details: result });
+      if (!result.deleted) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND_DURING_DELETE', message: 'Nie udało się usunąć istniejącego użytkownika.', details: result });
+      if (result.existsAfterDelete) return res.status(500).json({ ok: false, error: 'USER_STILL_EXISTS_AFTER_DELETE', message: 'Nie udało się całkowicie usunąć użytkownika: rekord nadal istnieje w bazie.', details: result });
+      console.info(`[USERS] permanently deleted userId=${target.id} by=${req.user.login} sessionsDeleted=${result.sessionsDeleted}`);
+      return res.json({ ok: true, deletedUserId: target.id, login: target.login, details: result });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Nie udało się całkowicie usunąć użytkownika.';
+      const sqliteCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code) : '';
+      if (sqliteCode.includes('CONSTRAINT')) {
+        console.error(`[USERS] hard delete constraint failed userId=${target.id}: ${message}`);
+        return res.status(409).json({ ok: false, error: 'DELETE_CONSTRAINT_FAILED', message: 'Nie można usunąć użytkownika, ponieważ istnieją zależne rekordy.', details: message });
+      }
+      console.error(`[USERS] hard delete failed userId=${target.id}: ${message}`);
+      return res.status(500).json({ ok: false, error: 'DELETE_FAILED', message, details: message });
+    }
   });
 
   router.patch('/:id', (req: AuthenticatedRequest, res) => {
     const role = req.body?.role;
     if (!isUserRole(role)) return res.status(400).json({ ok: false, error: 'INVALID_ROLE', message: 'Nieprawidłowa rola.' });
-    const target = authService.getUserById(String(req.params.id));
+    const target = authService.getUserForManagement(String(req.params.id));
     if (!target) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
     if (!canChangeUserRole(req.user?.role ?? 'operator', target.role, role)) {
       return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Brak uprawnień do zmiany tej roli.' });
@@ -111,7 +150,7 @@ export function createUsersRouter(authService: AuthService): Router {
   });
 
   router.post('/:id/card', (req: AuthenticatedRequest, res) => {
-    const target = authService.getUserById(String(req.params.id));
+    const target = authService.getUserForManagement(String(req.params.id));
     if (!target) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
     if (!canManageTarget(req.user?.role ?? 'operator', target.role)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Brak uprawnień.' });
     const cardUid = typeof req.body?.cardUid === 'string' ? req.body.cardUid : '';
@@ -125,7 +164,7 @@ export function createUsersRouter(authService: AuthService): Router {
   });
 
   router.delete('/:id/card', (req: AuthenticatedRequest, res) => {
-    const target = authService.getUserById(String(req.params.id));
+    const target = authService.getUserForManagement(String(req.params.id));
     if (!target) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
     if (!canManageTarget(req.user?.role ?? 'operator', target.role)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Brak uprawnień.' });
     const user = authService.removeCard(String(req.params.id));
@@ -133,7 +172,7 @@ export function createUsersRouter(authService: AuthService): Router {
   });
 
   router.post('/:id/reset-password', (req: AuthenticatedRequest, res) => {
-    const target = authService.getUserById(String(req.params.id));
+    const target = authService.getUserForManagement(String(req.params.id));
     if (!target) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
     if (!canManageTarget(req.user?.role ?? 'operator', target.role)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Brak uprawnień.' });
     const password = typeof req.body?.password === 'string' ? req.body.password : '';
@@ -143,20 +182,6 @@ export function createUsersRouter(authService: AuthService): Router {
     } catch (error) {
       return res.status(400).json({ ok: false, error: 'RESET_PASSWORD_FAILED', message: error instanceof Error ? error.message : 'Nie udało się zresetować hasła.' });
     }
-  });
-
-  router.patch('/:id/disable', (req: AuthenticatedRequest, res) => {
-    const target = authService.getUserById(String(req.params.id));
-    if (!target) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
-    if (!canManageTarget(req.user?.role ?? 'operator', target.role)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Brak uprawnień.' });
-    return res.json({ ok: true, user: authService.setActive(String(req.params.id), false) });
-  });
-
-  router.patch('/:id/enable', (req: AuthenticatedRequest, res) => {
-    const target = authService.getUserById(String(req.params.id));
-    if (!target) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
-    if (!canManageTarget(req.user?.role ?? 'operator', target.role)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Brak uprawnień.' });
-    return res.json({ ok: true, user: authService.setActive(String(req.params.id), true) });
   });
 
   return router;

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
-import type { AppDatabase } from '../db/database';
+import type { AppDatabase, HardDeleteUserResult, UserDatabaseInspection } from '../db/database';
 import { normalizeOperatorLogin, validateOperatorLogin } from './operatorLogin';
 import { cardUidLast4, hashCardUid, hashPrefix, maskCardLast4, normalizeCardUid } from './cardUid';
 import type { AuthUser, PublicUser, UserRecord, UserRole } from './types';
@@ -69,7 +69,20 @@ export class CardAssignmentError extends Error {
 }
 
 export class AuthService {
+  private readonly instanceId = crypto.randomUUID();
+
   constructor(private readonly db: AppDatabase, private readonly sessionSecret: string, private readonly sessionMaxAgeMs = SESSION_MAX_AGE_MS, private readonly cardUidPattern = '^\\d{8}$', private readonly testIdleLogoutMs = 15 * 60 * 1000) {}
+
+  getDebugIdentity() {
+    return {
+      authServiceInstanceId: this.instanceId,
+      database: this.db.getDebugIdentity(),
+    };
+  }
+
+  inspectUserDatabase(id: string): UserDatabaseInspection {
+    return this.db.inspectUser(String(id).trim());
+  }
 
   seedDefaultAdmin(loginInput: string, password: string): DefaultAdminSeedResult {
     const login = normalizeOperatorLogin(loginInput);
@@ -81,7 +94,6 @@ export class AuthService {
     const existingDefaultUser = this.findUserByLogin(login);
     if (existingDefaultUser) {
       this.setRole(existingDefaultUser.id, 'admin');
-      this.setActive(existingDefaultUser.id, true);
       this.resetPassword(existingDefaultUser.id, password);
       return { action: 'repaired', login, before, after: this.getDbStats() };
     }
@@ -98,7 +110,6 @@ export class AuthService {
       this.db.updateUser(existingDefaultUser.id, {
         passwordHash: hashPassword(password),
         role: 'admin',
-        isActive: 1,
         updatedAt: new Date().toISOString(),
       });
       return { action: 'reset', login, before, after: this.getDbStats() };
@@ -134,28 +145,10 @@ export class AuthService {
     this.assertValidPassword(input.password);
     this.assertValidRole(input.role);
 
-    const existing = this.db.findByLoginIncludingDeleted(login);
-    if (existing?.deletedAt === null && existing.isActive) throw new Error('Użytkownik z takim loginem już istnieje.');
+    const existing = this.db.findByLoginIncludingDeleted(login) ?? this.db.findByNormalizedLoginIncludingDeleted(login);
+    if (existing) throw new Error('Użytkownik z takim loginem już istnieje. Usuń istniejący rekord całkowicie przed ponownym dodaniem.');
 
     const now = new Date().toISOString();
-    if (existing) {
-      const reactivated = this.db.updateUserIncludingDeleted(existing.id, {
-        passwordHash: hashPassword(input.password),
-        role: input.role,
-        isActive: 1,
-        updatedAt: now,
-        lastLoginAt: null,
-        createdBy: input.createdBy,
-        cardUidHash: null,
-        cardUidLast4: null,
-        cardAssignedAt: null,
-        lastTestAt: null,
-        deletedAt: null,
-      });
-      if (!reactivated) throw new Error('Nie udało się dodać użytkownika.');
-      return this.toPublicUser(reactivated);
-    }
-
     const user: UserRecord = {
       id: crypto.randomUUID(),
       login,
@@ -225,12 +218,12 @@ export class AuthService {
     const existing = this.db.findByCardUidHash(hash);
     if (existing && existing.id !== id) throw new CardAssignmentError('Ta karta jest już przypisana do innego użytkownika.', 'CARD_ALREADY_ASSIGNED');
     const now = new Date().toISOString();
-    const user = this.db.updateUser(id, { cardUidHash: hash, cardUidLast4: cardUidLast4(normalized), cardAssignedAt: now, updatedAt: now });
+    const user = this.db.updateUserIncludingDeleted(id, { cardUidHash: hash, cardUidLast4: cardUidLast4(normalized), cardAssignedAt: now, updatedAt: now });
     return user ? this.toPublicUser(user) : null;
   }
 
   removeCard(id: string): PublicUser | null {
-    const user = this.db.updateUser(id, { cardUidHash: null, cardUidLast4: null, cardAssignedAt: null, updatedAt: new Date().toISOString() });
+    const user = this.db.updateUserIncludingDeleted(id, { cardUidHash: null, cardUidLast4: null, cardAssignedAt: null, updatedAt: new Date().toISOString() });
     return user ? this.toPublicUser(user) : null;
   }
 
@@ -260,7 +253,6 @@ export class AuthService {
 
     const user = this.findUserByLogin(login);
     if (!user) return { ok: false, reason: 'INVALID_CREDENTIALS' };
-    if (!user.isActive) return { ok: false, reason: 'INACTIVE' };
     if (!verifyPassword(password, user.passwordHash)) return { ok: false, reason: 'INVALID_CREDENTIALS' };
 
     const lastLoginAt = new Date().toISOString();
@@ -277,8 +269,13 @@ export class AuthService {
   }
 
   getUserById(id: string): PublicUser | null {
-    const user = this.db.findById(id);
+    const user = this.db.findByIdIncludingDeleted(id);
     return user ? this.toPublicUser(user) : null;
+  }
+
+  getUserForManagement(id: string): PublicUser | null {
+    const normalizedId = String(id).trim();
+    return this.listUsers().find((user) => user.id === normalizedId) ?? null;
   }
 
   findUserByLogin(login: string): UserRecord | null {
@@ -288,27 +285,19 @@ export class AuthService {
   setRole(id: string, role: UserRole): PublicUser | null {
     this.assertValidRole(role);
     const updatedAt = new Date().toISOString();
-    const user = this.db.updateUser(id, { role, updatedAt });
+    const user = this.db.updateUserIncludingDeleted(id, { role, updatedAt });
     return user ? this.toPublicUser(user) : null;
   }
 
-  setActive(id: string, active: boolean): PublicUser | null {
-    const updatedAt = new Date().toISOString();
-    const user = this.db.updateUser(id, { isActive: active ? 1 : 0, updatedAt });
-    return user ? this.toPublicUser(user) : null;
-  }
-
-  softDeleteUser(id: string): PublicUser | null {
-    const deletedAt = new Date().toISOString();
-    const user = this.db.updateUser(id, { isActive: 0, deletedAt, updatedAt: deletedAt, cardUidHash: null, cardUidLast4: null, cardAssignedAt: null });
-    return user ? this.toPublicUser(user) : null;
+  hardDeleteUser(id: string): HardDeleteUserResult {
+    return this.db.hardDeleteUser(id);
   }
 
   resetPassword(id: string, password: string): PublicUser | null {
     this.assertValidPassword(password);
     const passwordHash = hashPassword(password);
     const updatedAt = new Date().toISOString();
-    const user = this.db.updateUser(id, { passwordHash, updatedAt });
+    const user = this.db.updateUserIncludingDeleted(id, { passwordHash, updatedAt });
     return user ? this.toPublicUser(user) : null;
   }
 
@@ -331,7 +320,7 @@ export class AuthService {
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as SessionPayload;
     if (payload.exp < Date.now()) return null;
     const user = this.db.findById(payload.id);
-    if (!user || !user.isActive) return null;
+    if (!user) return null;
     if (!options.allowIdleExpired && this.isSessionIdleExpired(user)) return null;
     return { id: user.id, login: user.login, role: user.role };
   }

@@ -604,6 +604,148 @@ input:disabled {
   width: 100%;
 }
 
+.actions-cell {
+  position: relative;
+  width: 72px;
+  overflow: visible;
+}
+
+.row-actions-menu {
+  position: relative;
+  display: inline-flex;
+  justify-content: flex-end;
+}
+
+.users-table-wrap .row-actions-trigger {
+  width: 44px;
+  min-width: 44px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.18);
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.users-table-wrap .row-actions-trigger:hover,
+.users-table-wrap .row-actions-trigger:focus-visible {
+  outline: none;
+  background: rgba(59, 130, 246, 0.18);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+}
+
+.row-actions-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  min-width: 210px;
+  padding: 8px;
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 14px;
+  background: #fff;
+  color: #0f172a;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.22);
+}
+
+.users-table-wrap .row-actions-popover button {
+  min-height: 36px;
+  padding: 0 12px;
+  justify-content: flex-start;
+  border-radius: 10px;
+  background: transparent;
+  color: #0f172a;
+  font-size: 0.95rem;
+  text-align: left;
+}
+
+.users-table-wrap .row-actions-popover button:hover {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.users-table-wrap .row-actions-popover button.danger,
+.confirm-modal-actions button.danger {
+  color: #b91c1c;
+}
+
+.users-table-wrap .row-actions-popover button.danger:hover {
+  background: rgba(220, 38, 38, 0.12);
+}
+
+.row-actions-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: rgba(148, 163, 184, 0.35);
+}
+
+.legacy-user-badge {
+  display: inline-flex;
+  margin-left: 10px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.18);
+  color: #f59e0b;
+  font-size: 0.78rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(8, 15, 32, 0.56);
+  backdrop-filter: blur(4px);
+}
+
+.confirm-modal {
+  width: min(560px, 94vw);
+  padding: 28px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 22px;
+  background: #fff;
+  color: #0f172a;
+  box-shadow: 0 26px 90px rgba(15, 23, 42, 0.32);
+}
+
+.confirm-modal h2 {
+  margin: 0 0 12px;
+  font-size: 1.8rem;
+}
+
+.confirm-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.confirm-modal-actions button {
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: #f8fafc;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.confirm-modal-actions button.danger {
+  border-color: rgba(220, 38, 38, 0.35);
+  background: rgba(220, 38, 38, 0.1);
+}
+
 .top-bar-actions {
   min-width: 0;
   display: grid;

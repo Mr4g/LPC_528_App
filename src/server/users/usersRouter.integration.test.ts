@@ -83,6 +83,7 @@ describe('users router hard delete', () => {
     const listPayload = await listResponse.json() as { users: Array<{ id: string; login: string }> };
     expect(listPayload.users).toContainEqual(expect.objectContaining({ id: target.id, login }));
     expect(context.auth.getUserForManagement(target.id)).toMatchObject({ id: target.id, login });
+    expect(context.auth.inspectUserDatabase(target.id).exact).toMatchObject({ id: target.id, login });
 
     const deleteResponse = await fetch(`${context.baseUrl}/api/users/${target.id}`, { method: 'DELETE', headers: { cookie: context.cookie } });
     const deletePayload = await deleteResponse.json() as { ok: boolean; details?: { userDeleteChanges?: number; existsAfterDelete?: boolean } };

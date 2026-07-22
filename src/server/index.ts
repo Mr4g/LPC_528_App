@@ -1,5 +1,6 @@
 import express from 'express';
 import { createServer } from 'node:http';
+import path from 'node:path';
 import { Server } from 'socket.io';
 import { loadConfig } from '../config';
 import { createBackupRouter } from '../backup/routes';
@@ -39,7 +40,8 @@ const config = loadConfig();
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: '*' } });
-const database = createDatabase(config.SQLITE_DB_PATH);
+const resolvedDbPath = config.SQLITE_DB_PATH === ':memory:' ? ':memory:' : path.resolve(config.SQLITE_DB_PATH);
+const database = createDatabase(resolvedDbPath);
 const authCookieMaxAgeMs = config.AUTH_COOKIE_MAX_AGE_HOURS * 60 * 60 * 1000;
 configureAuthCookies({
   name: config.AUTH_COOKIE_NAME,
@@ -51,6 +53,14 @@ const authService = new AuthService(database, config.AUTH_SESSION_SECRET, authCo
 const adminSeed = config.AUTH_RESET_DEFAULT_ADMIN && config.NODE_ENV !== 'production'
   ? authService.resetDefaultAdminFromEnv(config.DEFAULT_ADMIN_LOGIN, config.DEFAULT_ADMIN_PASSWORD)
   : authService.seedDefaultAdmin(config.DEFAULT_ADMIN_LOGIN, config.DEFAULT_ADMIN_PASSWORD);
+const databaseIdentity = database.getDebugIdentity();
+console.info('[DATABASE STARTUP]', {
+  cwd: process.cwd(),
+  configuredPath: process.env.SQLITE_DB_PATH,
+  resolvedPath: resolvedDbPath,
+  databaseInstanceId: databaseIdentity.instanceId,
+  databaseList: databaseIdentity.databases,
+});
 console.info(`[AUTH] DB path: ${adminSeed.after.dbPath}`);
 console.info(`[AUTH] usersCount: ${adminSeed.before.usersCount}`);
 console.info(`[AUTH] activeAdminUsersCount: ${adminSeed.before.activeAdminUsersCount}`);
@@ -176,7 +186,7 @@ app.use((_req, res, next) => {
 app.use(express.json());
 app.use(attachAuth(authService, { isTestLocked: () => testSessionManager.getStatus().locked }));
 app.use('/api/auth', createAuthRouter(authService, {
-  dbPath: config.SQLITE_DB_PATH,
+  dbPath: resolvedDbPath,
   defaultAdminLogin: config.DEFAULT_ADMIN_LOGIN,
   nodeEnv: config.NODE_ENV,
   authDebug: config.AUTH_DEBUG,

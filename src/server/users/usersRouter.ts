@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Router } from 'express';
 import { CardAssignmentError, type AuthService } from '../auth/authService';
 import { requireRole, type AuthenticatedRequest } from '../auth/authMiddleware';
@@ -51,10 +52,19 @@ export function canChangeUserRole(actorRole: UserRole, currentTargetRole: UserRo
 
 export function createUsersRouter(authService: AuthService): Router {
   const router = Router();
+  const routerInstanceId = crypto.randomUUID();
   router.use(requireRole(MANAGER_ROLES));
 
   router.get('/', (req: AuthenticatedRequest, res) => {
-    res.json({ ok: true, users: authService.listUsers() });
+    const users = authService.listUsers();
+    const szpk = users.find((user) => user.login === 'SZPK') ?? null;
+    console.info('[USERS GET IDENTITY]', {
+      routerInstanceId,
+      ...authService.getDebugIdentity(),
+      userCount: users.length,
+      szpkInspection: szpk ? authService.inspectUserDatabase(szpk.id) : null,
+    });
+    res.json({ ok: true, users });
   });
 
   router.post('/', (req: AuthenticatedRequest, res) => {
@@ -84,6 +94,12 @@ export function createUsersRouter(authService: AuthService): Router {
 
   router.delete('/:id', (req: AuthenticatedRequest, res) => {
     const id = String(req.params.id).trim();
+    console.info('[USERS DELETE IDENTITY]', {
+      routerInstanceId,
+      requestedId: id,
+      ...authService.getDebugIdentity(),
+      inspection: authService.inspectUserDatabase(id),
+    });
     const listTarget = authService.listUsers().find((user) => user.id === id) ?? null;
     const directTarget = authService.getUserById(id);
     console.info('[USER MANAGEMENT LOOKUP]', {

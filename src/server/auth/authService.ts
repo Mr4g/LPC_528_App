@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
-import type { AppDatabase, HardDeleteUserResult } from '../db/database';
+import type { AppDatabase, HardDeleteUserResult, UserDatabaseInspection } from '../db/database';
 import { normalizeOperatorLogin, validateOperatorLogin } from './operatorLogin';
 import { cardUidLast4, hashCardUid, hashPrefix, maskCardLast4, normalizeCardUid } from './cardUid';
 import type { AuthUser, PublicUser, UserRecord, UserRole } from './types';
@@ -69,7 +69,20 @@ export class CardAssignmentError extends Error {
 }
 
 export class AuthService {
+  private readonly instanceId = crypto.randomUUID();
+
   constructor(private readonly db: AppDatabase, private readonly sessionSecret: string, private readonly sessionMaxAgeMs = SESSION_MAX_AGE_MS, private readonly cardUidPattern = '^\\d{8}$', private readonly testIdleLogoutMs = 15 * 60 * 1000) {}
+
+  getDebugIdentity() {
+    return {
+      authServiceInstanceId: this.instanceId,
+      database: this.db.getDebugIdentity(),
+    };
+  }
+
+  inspectUserDatabase(id: string): UserDatabaseInspection {
+    return this.db.inspectUser(String(id).trim());
+  }
 
   seedDefaultAdmin(loginInput: string, password: string): DefaultAdminSeedResult {
     const login = normalizeOperatorLogin(loginInput);

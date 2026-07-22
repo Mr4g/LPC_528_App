@@ -44,6 +44,18 @@ export interface StoredTestSession {
   message: string | null;
 }
 
+export interface AppDatabaseDebugIdentity {
+  instanceId: string;
+  dbPath: string;
+  databases: Record<string, unknown>[];
+}
+
+export interface UserDatabaseInspection {
+  exact: Record<string, unknown> | null;
+  allMatchingLogin: Record<string, unknown>[];
+  databaseList: Record<string, unknown>[];
+}
+
 export interface HardDeleteUserResult {
   deleted: boolean;
   userDeleteChanges: number;
@@ -52,6 +64,11 @@ export interface HardDeleteUserResult {
   llControlResolvedDetached: number;
   existedBeforeDelete: boolean;
   existsAfterDelete: boolean;
+  requestedId?: string;
+  requestedIdLength?: number;
+  requestedIdHex?: string;
+  databaseIdentity?: AppDatabaseDebugIdentity;
+  existingBeforeDelete?: Record<string, unknown> | null;
 }
 
 function boolToInt(value: boolean | number): number {
@@ -210,6 +227,7 @@ function rowToResult(row: Record<string, unknown>): LpcResult {
 
 export class AppDatabase {
   private readonly db: BetterSqliteDatabase;
+  private readonly instanceId = crypto.randomUUID();
 
   constructor(private readonly dbPath: string) {
     if (dbPath !== ':memory:') fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -241,6 +259,46 @@ export class AppDatabase {
   }
 
   getPath(): string { return this.dbPath; }
+  getRawDatabaseForDiagnostics(): BetterSqliteDatabase { return this.db; }
+  getDebugIdentity(): AppDatabaseDebugIdentity {
+    return {
+      instanceId: this.instanceId,
+      dbPath: this.dbPath,
+      databases: this.db.prepare('PRAGMA database_list').all() as Record<string, unknown>[],
+    };
+  }
+  inspectUser(id: string): UserDatabaseInspection {
+    const exact = this.db.prepare(`
+      SELECT
+        id,
+        login,
+        isActive,
+        deleted_at,
+        length(id) AS idLength,
+        quote(id) AS quotedId,
+        hex(id) AS hexId
+      FROM users
+      WHERE id = ?
+    `).get(id) as Record<string, unknown> | undefined;
+    const allMatchingLogin = this.db.prepare(`
+      SELECT
+        id,
+        login,
+        isActive,
+        deleted_at,
+        length(id) AS idLength,
+        quote(id) AS quotedId,
+        hex(id) AS hexId
+      FROM users
+      WHERE login IN ('SZPK', 'WSAD', 'WOAA')
+      ORDER BY login ASC
+    `).all() as Record<string, unknown>[];
+    return {
+      exact: exact ?? null,
+      allMatchingLogin,
+      databaseList: this.db.prepare('PRAGMA database_list').all() as Record<string, unknown>[],
+    };
+  }
   dbExists(): boolean { return this.dbPath === ':memory:' || fs.existsSync(this.dbPath); }
   tableExists(tableName: string): boolean {
     const row = this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(tableName) as Record<string, unknown> | undefined;
@@ -279,22 +337,49 @@ export class AppDatabase {
   }
 
   hardDeleteUser(id: string): HardDeleteUserResult {
-    const existingBeforeDelete = this.db.prepare('SELECT id, login, role, isActive, deleted_at FROM users WHERE id = ?').get(id);
+    const requestedId = String(id).trim();
+    const identityBefore = this.getDebugIdentity();
+    const existingBeforeDelete = this.db.prepare(`
+      SELECT
+        id,
+        login,
+        role,
+        isActive,
+        deleted_at,
+        length(id) AS idLength,
+        quote(id) AS quotedId,
+        hex(id) AS hexId
+      FROM users
+      WHERE id = ?
+    `).get(requestedId) as Record<string, unknown> | undefined;
     if (!existingBeforeDelete) {
-      return { deleted: false, userDeleteChanges: 0, sessionsDeleted: 0, llControlCreatedDetached: 0, llControlResolvedDetached: 0, existedBeforeDelete: false, existsAfterDelete: false };
+      return {
+        deleted: false,
+        userDeleteChanges: 0,
+        sessionsDeleted: 0,
+        llControlCreatedDetached: 0,
+        llControlResolvedDetached: 0,
+        existedBeforeDelete: false,
+        existsAfterDelete: false,
+        requestedId,
+        requestedIdLength: requestedId.length,
+        requestedIdHex: Buffer.from(requestedId, 'utf8').toString('hex'),
+        databaseIdentity: identityBefore,
+        existingBeforeDelete: null,
+      };
     }
     this.db.prepare('BEGIN').run();
     try {
-      const sessionsDeleted = this.db.prepare('DELETE FROM test_sessions WHERE operatorUserId = ?').run(id).changes;
-      const llControlCreatedDetached = this.db.prepare('UPDATE ll_control_flags SET createdByUserId = NULL WHERE createdByUserId = ?').run(id).changes;
-      const llControlResolvedDetached = this.db.prepare('UPDATE ll_control_flags SET resolvedByUserId = NULL WHERE resolvedByUserId = ?').run(id).changes;
-      const userDeleteResult = this.db.prepare('DELETE FROM users WHERE id = ?').run(id);
+      const sessionsDeleted = this.db.prepare('DELETE FROM test_sessions WHERE operatorUserId = ?').run(requestedId).changes;
+      const llControlCreatedDetached = this.db.prepare('UPDATE ll_control_flags SET createdByUserId = NULL WHERE createdByUserId = ?').run(requestedId).changes;
+      const llControlResolvedDetached = this.db.prepare('UPDATE ll_control_flags SET resolvedByUserId = NULL WHERE resolvedByUserId = ?').run(requestedId).changes;
+      const userDeleteResult = this.db.prepare('DELETE FROM users WHERE id = ?').run(requestedId);
       const userDeleteChanges = userDeleteResult.changes;
-      const stillExists = this.db.prepare('SELECT id FROM users WHERE id = ?').get(id);
-      if (userDeleteChanges !== 1) throw new Error(`DELETE FROM users usunął ${userDeleteChanges} rekordów dla istniejącego użytkownika ${id}.`);
+      const stillExists = this.db.prepare('SELECT id FROM users WHERE id = ?').get(requestedId);
+      if (userDeleteChanges !== 1) throw new Error(`DELETE FROM users usunął ${userDeleteChanges} rekordów dla istniejącego użytkownika ${requestedId}.`);
       if (stillExists) throw new Error('Nie udało się trwale usunąć użytkownika: rekord nadal istnieje w bazie.');
       this.db.prepare('COMMIT').run();
-      return { deleted: userDeleteChanges === 1, userDeleteChanges, sessionsDeleted, llControlCreatedDetached, llControlResolvedDetached, existedBeforeDelete: true, existsAfterDelete: Boolean(stillExists) };
+      return { deleted: userDeleteChanges === 1, userDeleteChanges, sessionsDeleted, llControlCreatedDetached, llControlResolvedDetached, existedBeforeDelete: true, existsAfterDelete: Boolean(stillExists), requestedId, requestedIdLength: requestedId.length, requestedIdHex: Buffer.from(requestedId, 'utf8').toString('hex'), databaseIdentity: identityBefore, existingBeforeDelete };
     } catch (error) {
       this.db.prepare('ROLLBACK').run();
       throw error;

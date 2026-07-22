@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
-import type { AppDatabase } from '../db/database';
+import type { AppDatabase, HardDeleteUserResult } from '../db/database';
 import { normalizeOperatorLogin, validateOperatorLogin } from './operatorLogin';
 import { cardUidLast4, hashCardUid, hashPrefix, maskCardLast4, normalizeCardUid } from './cardUid';
 import type { AuthUser, PublicUser, UserRecord, UserRole } from './types';
@@ -271,8 +271,8 @@ export class AuthService {
     return user ? this.toPublicUser(user) : null;
   }
 
-  hardDeleteUser(id: string): boolean {
-    return this.db.hardDeleteUser(id).deleted;
+  hardDeleteUser(id: string): HardDeleteUserResult {
+    return this.db.hardDeleteUser(id);
   }
 
   resetPassword(id: string, password: string): PublicUser | null {

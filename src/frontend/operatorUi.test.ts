@@ -35,6 +35,38 @@ describe('operator top bar and PDF modal layout', () => {
   });
 });
 
+describe('admin users row action menu behavior', () => {
+  const mainSource = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8');
+  const cssSource = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+
+  it('uses a single open user menu state and closes on outside pointer or Escape', () => {
+    expect(mainSource).toContain('const [openUserMenuId, setOpenUserMenuId]');
+    expect(mainSource).toContain('activeMenuRef.current?.contains(target)');
+    expect(mainSource).toContain('activeTriggerRef.current?.contains(target)');
+    expect(mainSource).toContain("if (event.key === 'Escape') setOpenUserMenuId(null)");
+    expect(mainSource).toContain("document.addEventListener('pointerdown', handlePointerDown)");
+    expect(mainSource).toContain("document.removeEventListener('pointerdown', handlePointerDown)");
+  });
+
+  it('switches menus per user, labels the trigger, and closes when actions run', () => {
+    expect(mainSource).toContain('aria-label={`Akcje użytkownika ${item.login}`}');
+    expect(mainSource).toContain('setOpenUserMenuId(openUserMenuId === item.id ? null : item.id)');
+    expect(mainSource).toContain('setOpenUserMenuId(null); void changeRole(item);');
+    expect(mainSource).toContain('setOpenUserMenuId(null); void changeCard(item.id);');
+    expect(mainSource).toContain('setOpenUserMenuId(null); void resetPassword(item.id);');
+  });
+
+  it('gives the row action trigger a larger click target without increasing row height', () => {
+    expect(cssSource).toContain('.users-table-wrap .row-actions-trigger');
+    expect(cssSource).toContain('width: 44px;');
+    expect(cssSource).toContain('min-width: 44px;');
+    expect(cssSource).toContain('height: 36px;');
+    expect(cssSource).toContain('display: inline-flex;');
+    expect(cssSource).toContain('justify-content: center;');
+    expect(cssSource).toContain('.users-table-wrap .row-actions-trigger:focus-visible');
+  });
+});
+
 describe('LL control ergonomic UI layout', () => {
   const mainSource = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8');
   const lastResultPanelSource = readFileSync(new URL('./components/LastResultPanel.tsx', import.meta.url), 'utf8');

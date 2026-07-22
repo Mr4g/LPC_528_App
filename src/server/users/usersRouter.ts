@@ -84,20 +84,28 @@ export function createUsersRouter(authService: AuthService): Router {
 
   router.delete('/:id', (req: AuthenticatedRequest, res) => {
     const target = authService.getUserById(String(req.params.id));
-    if (!target) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND' });
+    if (!target) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND_BEFORE_DELETE', message: 'Nie znaleziono użytkownika przed usunięciem.' });
     if (req.user?.role !== 'admin') return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'Tylko admin może całkowicie usunąć użytkownika.' });
     const permission = canDeleteUser(req.user?.role ?? 'operator', target.role, req.user?.id ?? '', target.id, {
       adminCount: authService.countActiveAdmins(),
     });
     if (!permission.ok) return res.status(403).json({ ok: false, code: permission.code, error: permission.code, message: permission.message });
     try {
-      if (!authService.hardDeleteUser(target.id)) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND', message: 'Nie znaleziono użytkownika do usunięcia.' });
-      if (authService.getUserById(target.id)) return res.status(500).json({ ok: false, error: 'DELETE_FAILED', message: 'Nie udało się całkowicie usunąć użytkownika: rekord nadal istnieje w bazie.' });
-      console.info(`[USERS] permanently deleted userId=${target.id} login=${target.login} by=${req.user.login}`);
-      return res.json({ ok: true, deletedUserId: target.id, login: target.login });
+      const result = authService.hardDeleteUser(target.id);
+      if (!result.existedBeforeDelete) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND_DURING_DELETE', message: 'Nie znaleziono użytkownika podczas usuwania.', details: result });
+      if (!result.deleted) return res.status(404).json({ ok: false, error: 'USER_NOT_FOUND_DURING_DELETE', message: 'Nie udało się usunąć istniejącego użytkownika.', details: result });
+      if (result.existsAfterDelete || authService.getUserById(target.id)) return res.status(500).json({ ok: false, error: 'USER_STILL_EXISTS_AFTER_DELETE', message: 'Nie udało się całkowicie usunąć użytkownika: rekord nadal istnieje w bazie.', details: result });
+      console.info(`[USERS] permanently deleted userId=${target.id} by=${req.user.login} sessionsDeleted=${result.sessionsDeleted}`);
+      return res.json({ ok: true, deletedUserId: target.id, login: target.login, details: result });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Nie udało się całkowicie usunąć użytkownika.';
-      return res.status(500).json({ ok: false, error: 'DELETE_FAILED', message });
+      const sqliteCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code) : '';
+      if (sqliteCode.includes('CONSTRAINT')) {
+        console.error(`[USERS] hard delete constraint failed userId=${target.id}: ${message}`);
+        return res.status(409).json({ ok: false, error: 'DELETE_CONSTRAINT_FAILED', message: 'Nie można usunąć użytkownika, ponieważ istnieją zależne rekordy.', details: message });
+      }
+      console.error(`[USERS] hard delete failed userId=${target.id}: ${message}`);
+      return res.status(500).json({ ok: false, error: 'DELETE_FAILED', message, details: message });
     }
   });
 

@@ -46,9 +46,12 @@ export interface StoredTestSession {
 
 export interface HardDeleteUserResult {
   deleted: boolean;
+  userDeleteChanges: number;
   sessionsDeleted: number;
   llControlCreatedDetached: number;
   llControlResolvedDetached: number;
+  existedBeforeDelete: boolean;
+  existsAfterDelete: boolean;
 }
 
 function boolToInt(value: boolean | number): number {
@@ -276,16 +279,22 @@ export class AppDatabase {
   }
 
   hardDeleteUser(id: string): HardDeleteUserResult {
+    const existingBeforeDelete = this.db.prepare('SELECT id, login, role, isActive, deleted_at FROM users WHERE id = ?').get(id);
+    if (!existingBeforeDelete) {
+      return { deleted: false, userDeleteChanges: 0, sessionsDeleted: 0, llControlCreatedDetached: 0, llControlResolvedDetached: 0, existedBeforeDelete: false, existsAfterDelete: false };
+    }
     this.db.prepare('BEGIN').run();
     try {
       const sessionsDeleted = this.db.prepare('DELETE FROM test_sessions WHERE operatorUserId = ?').run(id).changes;
       const llControlCreatedDetached = this.db.prepare('UPDATE ll_control_flags SET createdByUserId = NULL WHERE createdByUserId = ?').run(id).changes;
       const llControlResolvedDetached = this.db.prepare('UPDATE ll_control_flags SET resolvedByUserId = NULL WHERE resolvedByUserId = ?').run(id).changes;
-      const deleted = this.db.prepare('DELETE FROM users WHERE id = ?').run(id).changes;
+      const userDeleteResult = this.db.prepare('DELETE FROM users WHERE id = ?').run(id);
+      const userDeleteChanges = userDeleteResult.changes;
       const stillExists = this.db.prepare('SELECT id FROM users WHERE id = ?').get(id);
+      if (userDeleteChanges !== 1) throw new Error(`DELETE FROM users usunął ${userDeleteChanges} rekordów dla istniejącego użytkownika ${id}.`);
       if (stillExists) throw new Error('Nie udało się trwale usunąć użytkownika: rekord nadal istnieje w bazie.');
       this.db.prepare('COMMIT').run();
-      return { deleted: deleted > 0, sessionsDeleted, llControlCreatedDetached, llControlResolvedDetached };
+      return { deleted: userDeleteChanges === 1, userDeleteChanges, sessionsDeleted, llControlCreatedDetached, llControlResolvedDetached, existedBeforeDelete: true, existsAfterDelete: Boolean(stillExists) };
     } catch (error) {
       this.db.prepare('ROLLBACK').run();
       throw error;

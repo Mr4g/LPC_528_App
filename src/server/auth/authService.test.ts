@@ -137,7 +137,7 @@ describe('AuthService', () => {
     auth.assignCard(user.id, '05389148');
     db.updateUserIncludingDeleted(user.id, { isActive: 0, deletedAt: '2026-07-14T13:28:19.103Z' });
 
-    expect(auth.hardDeleteUser(user.id)).toBe(true);
+    expect(auth.hardDeleteUser(user.id)).toMatchObject({ deleted: true, userDeleteChanges: 1, existedBeforeDelete: true, existsAfterDelete: false });
     expect(auth.listUsers().some((item) => item.id === user.id)).toBe(false);
     expect(auth.findUserByLogin('WSAD')).toBeNull();
 
@@ -155,7 +155,7 @@ describe('AuthService', () => {
     db.upsertTestSession({ id: 'session-1', status: 'completed', barcode: 'BARCODE1', programNumber: 1, programText: 'P1', operatorUserId: user.id, operatorLogin: 'WSAD', startedAt: '2026-07-21T13:00:00.000Z', completedAt: '2026-07-21T13:01:00.000Z', firstLpcDataAt: null, lastLpcDataAt: null, lastStreamAt: null, finalResultAt: null, timeoutAt: null, message: null });
     db.insertTestResult(resultForOperator('WSAD'), 'session-1');
 
-    expect(auth.hardDeleteUser(user.id)).toBe(true);
+    expect(auth.hardDeleteUser(user.id)).toMatchObject({ deleted: true, userDeleteChanges: 1, sessionsDeleted: 1 });
 
     expect(db.getLatestTestSession()).toBeNull();
     const results = db.listTestResults({ operatorLogin: 'WSAD' });

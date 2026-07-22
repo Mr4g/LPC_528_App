@@ -612,9 +612,11 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
   const [role, setRole] = useState<UserRole>('operator');
   const [cardUid, setCardUid] = useState('');
   const [message, setMessage] = useState<string | null>(null);
-  const [openActionsId, setOpenActionsId] = useState<string | null>(null);
+  const [openUserMenuId, setOpenUserMenuId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PublicUser | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const activeMenuRef = useRef<HTMLDivElement | null>(null);
+  const activeTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   async function loadUsers() {
     const payload = await fetchJson<{ ok: true; users: PublicUser[] }>('/api/users');
@@ -625,6 +627,28 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
     if (props.user.role === 'line_leader') setRole('operator');
     void loadUsers();
   }, [props.user.role]);
+
+  useEffect(() => {
+    if (!openUserMenuId) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (activeMenuRef.current?.contains(target) || activeTriggerRef.current?.contains(target)) return;
+      setOpenUserMenuId(null);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpenUserMenuId(null);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [openUserMenuId]);
 
   async function createUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -658,15 +682,16 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
   async function permanentlyDeleteUser() {
     if (!deleteTarget) return;
     const response = await fetch(`/api/users/${deleteTarget.id}`, { method: 'DELETE', credentials: 'include' });
-    const payload = (await response.json()) as { ok: boolean; deletedUserId?: string; login?: string; message?: string };
+    const payload = (await response.json()) as { ok: boolean; deletedUserId?: string; login?: string; message?: string; details?: unknown };
     if (!response.ok) {
-      setDeleteError(payload.message ?? 'Nie udało się całkowicie usunąć użytkownika.');
+      const details = typeof payload.details === 'string' ? ` ${payload.details}` : payload.details ? ` ${JSON.stringify(payload.details)}` : '';
+      setDeleteError(`${payload.message ?? 'Nie udało się całkowicie usunąć użytkownika.'}${details}`);
       return;
     }
     const deletedLogin = payload.login ?? deleteTarget.login;
     setDeleteTarget(null);
     setDeleteError(null);
-    setOpenActionsId(null);
+    setOpenUserMenuId(null);
     setMessage(`Użytkownik ${deletedLogin} został całkowicie usunięty.`);
     await loadUsers();
   }
@@ -726,7 +751,7 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
   }
 
   function openDeleteModal(user: PublicUser): void {
-    setOpenActionsId(null);
+    setOpenUserMenuId(null);
     setDeleteError(null);
     setDeleteTarget(user);
   }
@@ -772,15 +797,15 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
                 <td>{formatDateTime(item.lastLoginAt)}</td>
                 <td className="actions-cell">
                   <div className="row-actions-menu">
-                    <button type="button" className="row-actions-trigger" aria-haspopup="menu" aria-expanded={openActionsId === item.id} onClick={() => setOpenActionsId(openActionsId === item.id ? null : item.id)}>⋮</button>
-                    {openActionsId === item.id && (
-                      <div className="row-actions-popover" role="menu">
+                    <button type="button" className="row-actions-trigger" aria-label={`Akcje użytkownika ${item.login}`} aria-haspopup="menu" aria-expanded={openUserMenuId === item.id} ref={openUserMenuId === item.id ? activeTriggerRef : null} onClick={() => setOpenUserMenuId(openUserMenuId === item.id ? null : item.id)}>⋮</button>
+                    {openUserMenuId === item.id && (
+                      <div className="row-actions-popover" role="menu" ref={activeMenuRef}>
                         {canEditLegacy ? (
                           <>
-                            <button type="button" role="menuitem" onClick={() => { setOpenActionsId(null); void changeRole(item); }} disabled={roleOptions.length === 0}>Zmień uprawnienia</button>
-                            <button type="button" role="menuitem" onClick={() => { setOpenActionsId(null); void changeCard(item.id); }}>Zmień kartę</button>
-                            <button type="button" role="menuitem" onClick={() => { setOpenActionsId(null); void resetPassword(item.id); }}>Zmień hasło</button>
-                            {item.cardMask && <button type="button" role="menuitem" onClick={() => { setOpenActionsId(null); void removeCard(item.id); }}>Usuń kartę</button>}
+                            <button type="button" role="menuitem" onClick={() => { setOpenUserMenuId(null); void changeRole(item); }} disabled={roleOptions.length === 0}>Zmień uprawnienia</button>
+                            <button type="button" role="menuitem" onClick={() => { setOpenUserMenuId(null); void changeCard(item.id); }}>Zmień kartę</button>
+                            <button type="button" role="menuitem" onClick={() => { setOpenUserMenuId(null); void resetPassword(item.id); }}>Zmień hasło</button>
+                            {item.cardMask && <button type="button" role="menuitem" onClick={() => { setOpenUserMenuId(null); void removeCard(item.id); }}>Usuń kartę</button>}
                             <span className="row-actions-separator" />
                           </>
                         ) : null}
@@ -801,7 +826,7 @@ function UsersPage(props: { user: AuthUser; onBack: () => void }) {
             <p>Użytkownik zostanie całkowicie usunięty z bazy. Tej operacji nie można cofnąć. Po usunięciu będzie można ponownie utworzyć konto z takim samym loginem.</p>
             {deleteError && <p className="login-error">{deleteError}</p>}
             <div className="confirm-modal-actions">
-              <button type="button" onClick={() => { setDeleteTarget(null); setDeleteError(null); }}>Anuluj</button>
+              <button type="button" onClick={() => { setDeleteTarget(null); setDeleteError(null); setOpenUserMenuId(null); }}>Anuluj</button>
               <button type="button" className="danger" onClick={() => void permanentlyDeleteUser()}>Usuń całkowicie</button>
             </div>
           </section>
